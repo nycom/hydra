@@ -126,6 +126,7 @@ sweep has only ever killed the fakes in its `--self-test`, never a real stuck lo
 Workflow({
   scriptPath: "<skill dir>/workflow.js",
   args: {
+    skillDir: "<skill dir>",         // absolute; required when any repo has smoke or any workstream has checks
     cycles: 2,                       // or null = converge; a named count is a floor
     maxCycles: 4,                    // optional hard cap; default cycles+2, or 4 when cycles is null
     tokenBudget: 3000000,            // optional; output tokens this run may spend (budget.spent())
@@ -136,6 +137,7 @@ Workflow({
         base: "feat/x",              // base: 'feat/x' for a stacked feature branch; default main
         files: ["src/auth/", "test/auth/"],   // optional; dir/ or dir/** or exact paths
         reviewModel: "fable",        // optional; default one tier above model
+        checks: ["npm run e2e:login"], // optional; extra commands run under a 540 s cap, red = critical
         brief: "…", gate: "npm run lint && npm run typecheck && npm test && npx playwright test" },
       { id: "ui-login", repo: "~/code/ui", featureBranch: "feat/auth",
         branch: "feat/auth--ui-login", model: "sonnet", brief: "…", gate: "…" }
@@ -145,7 +147,8 @@ Workflow({
         knownRed: ["tests/test_openapi_sync.py::test_sync"],
         hot: ["**/README*", "docs/**", "openapi/**", "src/generated/**", "**/package-lock.json"],
         regen: "npm install && npm run gen:types",
-        smoke: "env -i PATH=$PATH ./scripts/boot-local.sh --h2" }
+        smoke: "env -i PATH=$PATH ./scripts/boot-local.sh --h2",
+        smokeTimeout: 300 }          // optional; seconds, default 540
     ],
     docsRepos: [                     // optional; default = every touched repo; base defaults to the repo's workstream base, else main
       { repo: "~/code/api", featureBranch: "feat/auth" },
@@ -160,16 +163,19 @@ Workflow({
 |---|---|---|
 | `cycles` | `null` | floor on review cycles; `null` = run to convergence |
 | `maxCycles` | `cycles + 2`, or 4 | hard cap on cycles per workstream (must be ≥ `cycles`) |
+| `skillDir` | none | this skill's absolute base directory (the `<skill dir>` printed when the skill loads); the script can't learn its own path, and agents run `node <skillDir>/run-cmd.mjs <seconds> '<command>'` for smoke and checks. Required when any repo has `smoke` or any workstream has `checks` |
 | `stage` | omitted | `"wholeBranch"`: skip implement/cycles/merge; re-run whole-branch review + validator, contract check, docs sync on the current feature-branch tips |
-| `wbRounds` | `2` | whole-branch fix rounds; `0` = review only, findings returned unfixed (stacked whole-stack pass) |
+| `wbRounds` | `2` | whole-branch fix rounds; `0` = review only: findings returned unfixed, and the repo verdict is `fail` while any is critical or major (stacked whole-stack pass) |
 | `tokenBudget` | `null` | output-token cap for this run; the user's "+Nk" turn target also applies. Spend is counted from the script's start, so a `resumeFromRunId` crash recovery starts a fresh `tokenBudget` |
 | `tokenReserve` | `600000` | before each new cycle, each whole-branch fix round, the contract check and docs: if less than this is left, nothing new starts; the item is reported not merged / failed with the reason |
 | `workstreams[].files` | none | allowed paths; overlap within a repo throws; merge rejects edits outside |
+| `workstreams[].checks` | none | extra commands (an e2e login, a contract probe) the author, fixer and both workstream validators run via `run-cmd.mjs` with a 540 s cap, reporting the exit code per command; a red or timed-out check is critical. The `gate` itself never gets a deadline |
 | `workstreams[].reviewModel` | sonnet→`opus`, opus→`fable` | review model; whole-branch review uses the repo's highest |
 | `repos[].knownRed` | `[]` | exact test ids red at the base; any other failure is red |
 | `repos[].hot` | README*, CHANGELOG*, `docs/**`, `graphify-out/**`, lockfiles, `openapi*.{yaml,yml,json}`, `*.sha256` | replaces the default hot list for that repo — add generated-type and contract paths here; `[]` turns the hot-file rule off for repos whose workstreams legitimately edit docs (the `files[]` check still applies) |
 | `repos[].regen` | none | regenerates generated files: run by every agent that runs the gate on a workstream SHA (author, fixer, reviewer, validators; its diffs are never findings or commits), after each merge, and after whole-branch fixes. Set it whenever workstreams can touch dependencies or vendored contracts, or their gates go red on stale generated files |
-| `repos[].smoke` | none | the safe local boot recipe the whole-branch validator runs; none = smoke skipped |
+| `repos[].smoke` | none | the safe local boot recipe the whole-branch validator and each whole-branch recheck run via `run-cmd.mjs` (own process group, hard timeout, leftover processes killed); a failed or timed-out smoke is critical; none = smoke skipped |
+| `repos[].smokeTimeout` | `540` | smoke hard cap in seconds (positive integer) |
 | `docsRepos[].gate` | the repo's workstream gates | gate for a docs-only repo |
 
 `gate` is the repo's **full** gate — every suite it defines including
@@ -204,8 +210,11 @@ The workflow returns:
 - per workstream: `{id, branch, status, sha, validatedSha, cyclesRun, extended,
   findingsFixed, open, sharedEdits, questions, notes, escalations, tests,
   gateTail, merged}` (empty list in `wholeBranch` stage)
-- per repo: `{repo, featureBranch, sha, verdict, sections, tests, fixRounds,
-  open, questions, notes, escalations, docs, finalSha}`; `docs` =
+- per repo: `{repo, featureBranch, sha, verdict, sections, seams, tests, fixRounds,
+  open, questions, notes, escalations, docs, finalSha}`; `seams` = the
+  whole-branch reviewer's seam inventory, one line per place a workstream's
+  changed signature, field, config key, default, enum value or error shape is
+  used by another workstream; `docs` =
   `{sha, files, prBody, ok, tests, notes, verdict, findings}`; a failed docs
   validation fails the repo, because the docs commit is `finalSha`; so does a
   docs agent that died 3 times (plus an escalation)
@@ -286,6 +295,6 @@ Default stays one feature branch per repo; stack slices only on the user's ask.
 
 `tests/` is the regression suite: a mock `agent()` harness that runs the real
 script. After any edit, run every check from `tests/`:
-`for f in check*.mjs; do node $f ../workflow.js; done` (each prints `... ok`).
+`for f in check*.mjs; do node $f ../workflow.js; done` (each prints `... ok`), plus `node run-cmd.test.mjs` after any edit to `run-cmd.mjs`.
 Add a scenario that fails before your change. `tests/fixture-scenarios.md`
 describes the live two-repo fixture eval (2026-10-29) for bigger changes.

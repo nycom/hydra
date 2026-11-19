@@ -22,7 +22,7 @@ const agent = async (p, o) => {
   throw new Error('unmocked ' + L)
 }
 const budget = { total: null, spent: () => 0, remaining: () => Infinity }
-const r = await Run({ cycles: null, repos: [{ repo: '/r/one', regen: 'npm i', smoke: 'npm run boot:local', knownRed: ['t/flaky.spec'] }],
+const r = await Run({ cycles: null, skillDir: '/skill', repos: [{ repo: '/r/one', regen: 'npm i', smoke: 'npm run boot:local', knownRed: ['t/flaky.spec'] }],
   workstreams: [{ id: 'a', repo: '/r/one', featureBranch: 'f', branch: 'f--a', model: 'sonnet', brief: 'b', gate: 'npm test', files: ['src/'] }] }, agent, parallel, () => {}, budget)
 const m = prompts['a merge']
 assert(m.includes(`refs/heads/f--a must equal ${SHA(2)}`) && m.includes(`git merge --no-ff ${SHA(2)}`), 'merge pins validatedSha')
