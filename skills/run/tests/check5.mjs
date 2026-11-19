@@ -94,7 +94,7 @@ await t('2a workstream fix with no commit', async () => {
   })
   assert(p['a fix c1'].includes(`Nothing to change (all answered or declined): no commit, no push, sha = the current origin/f--a head (${SHA(1)} unless an earlier attempt moved it), ok = true.`), 'fixer told')
   assert(/nothing to change/i.test(o['a fix c1'].schema.properties.ok.description), 'ok description allows no push')
-  assert(p['a validate c1'].includes('No delta: skip the delta hunt and judge the answers and declines; still run the gate, TEST_GUARD and the trial merge at this head.'), 'validator told')
+  assert(p['a validate c1'].includes('No delta: skip the delta hunt and judge the answers and declines; still run the gate, the test-integrity check and the trial merge at this head.'), 'validator told')
   const w = r.workstreams[0]
   assert(w.merged && w.validatedSha === SHA(1), JSON.stringify(w)) })
 await t('2b whole-branch fix with no commit', async () => {

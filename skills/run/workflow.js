@@ -376,7 +376,7 @@ Return status, ok, verified sha, tests, gateTail, one answer per finding id, sha
 
       const val = await step(
         `Independently validate the review-fix delta of workstream ${w.id} in ${w.repo}: git fetch, then ${prev}..${fix.sha} on ${w.branch}. Trust nothing the author claims.
-${same(prev, fix.sha) ? 'No delta: skip the delta hunt and judge the answers and declines; still run the gate, TEST_GUARD and the trial merge at this head.\n' : ''}If the fixer merged origin/${w.featureBranch} (an integration fix), skip the merged-in side: judge git diff origin/${w.featureBranch}...${fix.sha}, and don't re-hunt sibling code already validated.
+${same(prev, fix.sha) ? 'No delta: skip the delta hunt and judge the answers and declines; still run the gate, the test-integrity check and the trial merge at this head.\n' : ''}If the fixer merged origin/${w.featureBranch} (an integration fix), skip the merged-in side: judge git diff origin/${w.featureBranch}...${fix.sha}, and don't re-hunt sibling code already validated.
 Findings with the author's claimed resolutions — judge the code first, then read each claim:
 ${JSON.stringify(found.map(f => ({ ...f, claim: fix.answers.find(a => a.id === f.id) || 'no answer' })))}
 
@@ -514,7 +514,7 @@ Return status, ok, verified sha, tests, gateTail, one answer per finding id, que
 
     const re = await step(
       `Re-check whole-branch fix round ${round} on ${r.repo}, feature branch ${r.featureBranch}: git fetch, then the delta ${head}..${fix.sha}. Trust nothing the author claims.
-${same(head, fix.sha) ? 'No delta: skip the delta hunt and judge the answers and declines; still run every suite, TEST_GUARD and hygiene at this head.\n' : ''}Findings with claimed resolutions — judge the code first, then read each claim:
+${same(head, fix.sha) ? 'No delta: skip the delta hunt and judge the answers and declines; still run every suite, the test-integrity check and hygiene at this head.\n' : ''}Findings with claimed resolutions — judge the code first, then read each claim:
 ${JSON.stringify(findings.map(f => ({ ...f, claim: fix.answers.find(a => a.id === f.id) || 'no answer' })))}
 1. ${REFUTE} A claimed test must fail at ${head}, the pre-fix head: run it there in a second worktree at ${r.repo}/.claude/worktrees/wb-recheck${round}-red (same rules: clear a leftover path first, remove it when done; never mktemp), and green at ${fix.sha}. Reverting the fix hunks is the fallback only when that cannot run; state the fallback in evidence. Judge each answer and each declined minor. ${EVIDENCE}
 2. Hunt regressions the fixes introduced. ${TEST_GUARD}
