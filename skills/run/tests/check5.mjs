@@ -1,4 +1,5 @@
-// Review-loop correctness and test-integrity scenarios; each failed on the pre-fix script.
+// Review-loop correctness and test-integrity scenarios; every scenario except the 2c control fails against main
+// (1d-1g guard the gate-finding carry: they pass on main and failed on this suite's first fix).
 import { Run } from './run.mjs'
 import assert from 'node:assert'
 const SHA = n => (n + '').padStart(40, 'a')
@@ -64,6 +65,26 @@ await t('1c unaccounted whole-branch blocker is kept', async () => {
   const x = r.repos[0]
   assert(x.verdict === 'fail' && x.fixRounds === 2 && x.open.some(s => s.includes('issue W-F2')) && !x.open.some(s => s.includes('issue W-F1')), JSON.stringify(x)) })
 
+// row 1 follow-up: script-built gate findings are rebuilt from each gate run, never kept as unaccounted
+const red = { green: false, summary: 'suite x red' }
+const delta = p => p.includes('review-fix delta')
+const gates = xs => xs.filter(s => /gate: suite x red/.test(s)).length
+await t('1d green gate after red clears the gate finding (workstream)', async () => {
+  const { r } = await go({ cycles: null, workstreams: [ws('a')] }, { 'a validate c1': p => delta(p) ? {} : { gate: red } })
+  const w = r.workstreams[0]
+  assert(w.merged && gates(w.open) === 0, JSON.stringify(w)) })
+await t('1e still-red gate yields exactly one gate finding (workstream)', async () => {
+  const { r } = await go({ cycles: 1, maxCycles: 1, workstreams: [ws('a')] }, { 'a validate c1': () => ({ gate: red }) })
+  const w = r.workstreams[0]
+  assert(!w.merged && gates(w.open) === 1, JSON.stringify(w.open)) })
+await t('1f green gate after red clears the gate finding (whole-branch)', async () => {
+  const { r } = await go({ cycles: null, workstreams: [ws('a')] }, { 'one validate': () => ({ gate: red }) })
+  assert(r.repos[0].verdict === 'pass' && r.repos[0].fixRounds === 1, JSON.stringify(r.repos[0])) })
+await t('1g still-red gate yields exactly one gate finding (whole-branch)', async () => {
+  const { r } = await go({ cycles: null, workstreams: [ws('a')] }, { 'one validate': () => ({ gate: red }), 'one recheck r1': () => ({ gate: red }), 'one recheck r2': () => ({ gate: red }) })
+  const x = r.repos[0]
+  assert(x.verdict === 'fail' && gates(x.open) === 1, JSON.stringify(x.open)) })
+
 // row 2: a fix round with nothing to change keeps the head and is still validated
 await t('2a workstream fix with no commit', async () => {
   const { r, p, o } = await go({ cycles: null, workstreams: [ws('a')] }, {
@@ -71,9 +92,9 @@ await t('2a workstream fix with no commit', async () => {
     'a fix c1': () => ({ sha: SHA(1), answers: [{ id: 'c1-F1', action: 'answered', note: 'n' }] }),
     'a validate c1': () => ({ verified: ['c1-F1'] }),
   })
-  assert(p['a fix c1'].includes(`Nothing to change (all answered or declined): no commit, no push, sha = ${SHA(1)}, ok = true.`), 'fixer told')
+  assert(p['a fix c1'].includes(`Nothing to change (all answered or declined): no commit, no push, sha = the current origin/f--a head (${SHA(1)} unless an earlier attempt moved it), ok = true.`), 'fixer told')
   assert(/nothing to change/i.test(o['a fix c1'].schema.properties.ok.description), 'ok description allows no push')
-  assert(p['a validate c1'].includes('No delta: judge the answers and declines only, and run the gate at this head.'), 'validator told')
+  assert(p['a validate c1'].includes('No delta: skip the delta hunt and judge the answers and declines; still run the gate, TEST_GUARD and the trial merge at this head.'), 'validator told')
   const w = r.workstreams[0]
   assert(w.merged && w.validatedSha === SHA(1), JSON.stringify(w)) })
 await t('2b whole-branch fix with no commit', async () => {
@@ -82,7 +103,7 @@ await t('2b whole-branch fix with no commit', async () => {
     'one fix r1': () => ({ sha: SHA(50), answers: [{ id: 'W-F1', action: 'answered', note: 'n' }] }),
     'one recheck r1': () => ({ verified: ['W-F1'] }),
   })
-  assert(p['one fix r1'].includes(`no commit, no push, sha = ${SHA(50)}, ok = true.`), 'wb fixer told')
+  assert(p['one fix r1'].includes(`no commit, no push, sha = the current origin/f head (${SHA(50)} unless an earlier attempt moved it), ok = true.`), 'wb fixer told')
   assert(p['one recheck r1'].includes('No delta:'), 'recheck told')
   assert.equal(r.repos[0].verdict, 'pass') })
 await t('2c a real delta gets no "No delta" line', async () => {
@@ -116,7 +137,7 @@ await t('7 evidence + drop rules + debias', async () => {
     assert(/predate the diff/.test(p[k]) && /linter\/formatter/.test(p[k]) && p[k].includes('A comment added in this diff is a claim to grill') && p[k].includes('`shortcut:`'), `${k}: DROP`)
   }
   for (const k of ['a validate c1', 'one recheck r1']) {
-    assert(/evidence "none"/.test(p[k]) && /demote/.test(p[k]) && /Design, question and overengineering kinds are exempt/.test(p[k]), `${k}: evidence rule`)
+    assert(/evidence "none" and not resolved at this head: reproduce it here/.test(p[k]) && /demote/.test(p[k]) && /Design, question and overengineering kinds are exempt/.test(p[k]), `${k}: evidence rule`)
     assert(/judge the code first/.test(p[k]) && /claims, not evidence/.test(p[k]), `${k}: debias`)
   }
   assert(r.workstreams[0].merged, 'demoted to minor -> merges') })
@@ -152,9 +173,10 @@ await t('3/5/6/8/9 prompt asserts', async () => {
   for (const k of ['a implement', 'a fix c1']) assert(p[k].includes(RO_TESTS), `6: ${k} read-only tests`)
   // 8: red-verify at the pre-fix sha in a worktree under .claude/worktrees/, hunk-revert only as a stated fallback
   for (const [k, pre] of [['a validate c1', SHA(1)], ['one recheck r1', SHA(50)]])
-    assert(p[k].includes(`must fail at ${pre}`) && /\/\.claude\/worktrees\//.test(p[k].split(`must fail at ${pre}`)[1]) && /never mktemp/.test(p[k]) && /fallback/.test(p[k]) && /evidence/.test(p[k]), `8: ${k}`)
+    assert(p[k].includes(`must fail at ${pre}`) && /\/\.claude\/worktrees\//.test(p[k].split(`must fail at ${pre}`)[1]) && /never mktemp/.test(p[k]) && /fallback/.test(p[k]) && /evidence/.test(p[k]) && p[k].includes('-red (same rules: clear a leftover path first, remove it when done'), `8: ${k}`)
   // 9: after an integration fix, skip the merged-in side
-  assert(p['a validate c1'].includes(`git diff origin/f...${SHA(11)}`), '9: merged-in side skipped') })
+  assert(p['a validate c1'].includes(`git diff origin/f...${SHA(11)}`), '9: merged-in side skipped')
+  assert(p['a validate c1'].includes('open (same id for an unresolved finding;'), 'delta validator keeps ids') })
 
 if (fails.length) { console.log('FAILED:\n' + fails.join('\n')); process.exit(1) }
 console.log('tier-1 checks ok')

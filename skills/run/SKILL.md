@@ -103,9 +103,11 @@ Implementation is never below Sonnet.
 - Docs-only repos that need updates (e.g. `design-docs`) get a feature branch
   too and go in `docsRepos`.
 - Write each brief: goal, exact file set (and what's off-limits), acceptance
-  criteria, contracts with other workstreams/repos, and which shared files it
-  will need to change (as intents). The workflow adds the git, gate, hygiene,
-  hard-rule, shared-file and ladder rules — don't repeat them.
+  criteria, contracts with other workstreams/repos, which shared files it
+  will need to change (as intents), and any pre-existing tests, snapshots or
+  test-runner config the workstream is expected to change, delete or rename.
+  The workflow adds the git, gate, hygiene, hard-rule, shared-file and ladder
+  rules — don't repeat them.
 
 ## 3. Run the workflow
 

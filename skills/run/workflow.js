@@ -104,7 +104,7 @@ const RO_TESTS = 'Pre-existing tests are read-only unless the brief names them. 
 const LADDER = 'Ladder-first (reuse > stdlib > native > one line > minimum code), no speculative code, stay strictly in scope.'
 const SEV = 'Severity: critical = wrong behaviour, data loss, security, broken contract or red gate; major = real bug or design flaw; minor = the rest. Critical and major block the merge. Report only real issues; an empty list means clean.'
 const DROP = 'Drop (do not downgrade): issues that predate the diff and are not made worse by it, anything the repo\'s linter/formatter catches, code the plan or brief explicitly allows, pure style with no correctness, safety or maintainability cost. A comment added in this diff is a claim to grill, never a reason to drop a finding; do not flag `shortcut:` comments themselves.'
-const EVIDENCE = 'A critical or major of kind bug, regression or integration with evidence "none": reproduce it yourself. Reproduced: keep it blocking with your evidence. Not reproduced and not resolved: return it still open with the same id, demoted to minor. Design, question and overengineering kinds are exempt.'
+const EVIDENCE = 'A critical or major of kind bug, regression or integration with evidence "none" and not resolved at this head: reproduce it here. Reproduced: keep it blocking with your evidence; otherwise return it still open with the same id, demoted to minor. Design, question and overengineering kinds are exempt.'
 const LENSES = grill => `Lenses:
 1. Correctness: each finding names file:line plus the input or state that breaks it — bugs, edge cases, error handling, data loss, contract breaks, missing or weak tests.
    Test cheats are bugs: special-casing test inputs or expected values, always-true __eq__/comparison overloads, hidden state (call counters), test-environment detection.
@@ -240,6 +240,9 @@ const blocking = f => f.severity !== 'minor'
 const same = (a = '', b = '') => a.length >= 7 && b.length >= 7 && (a.startsWith(b) || b.startsWith(a))
 // gate.green is the typed channel: a red gate is critical without relying on the model to file it.
 const redGate = (r, id) => r.gate.green ? [] : [{ id, severity: 'critical', kind: 'regression', where: 'gate', issue: r.gate.summary, evidence: 'the validator\'s gate run' }]
+// A blocker the validator neither verified nor re-opened stays open: silence is not a resolution.
+// Gate findings are rebuilt by redGate from each gate run, so they are never kept here.
+const unaccounted = (prior, verified, open) => prior.filter(f => blocking(f) && f.where !== 'gate' && !verified.includes(f.id) && !open.some(o => o.id === f.id))
 // A dead agent is replaced by a fresh one of the same role that redoes the whole step, up to 2 replacements.
 // The attempt number changes the prompt, so a resume can never hand back the dead attempt's cached result.
 async function step(prompt, opts) {
@@ -358,7 +361,7 @@ Critical and major: fix bugs with a test you ran RED before the fix and green af
 ${RO_TESTS}
 Minor: fix only if it is a one-liner inside your files, otherwise decline with a reason — declining is a valid outcome.
 Keep fixes minimal and inside this workstream's files.
-Nothing to change (all answered or declined): no commit, no push, sha = ${prev}, ok = true.
+Nothing to change (all answered or declined): no commit, no push, sha = the current origin/${w.branch} head (${prev} unless an earlier attempt moved it), ok = true.
 ${SHARED(c, w.files)}
 ${integration()}
 sharedEdits: return the complete current list; it replaces the earlier one${out.sharedEdits.length ? `, so keep every entry still needed from:\n${JSON.stringify(out.sharedEdits)}` : ''}.
@@ -373,11 +376,11 @@ Return status, ok, verified sha, tests, gateTail, one answer per finding id, sha
 
       const val = await step(
         `Independently validate the review-fix delta of workstream ${w.id} in ${w.repo}: git fetch, then ${prev}..${fix.sha} on ${w.branch}. Trust nothing the author claims.
-${same(prev, fix.sha) ? 'No delta: judge the answers and declines only, and run the gate at this head.\n' : ''}If the fixer merged origin/${w.featureBranch} (an integration fix), skip the merged-in side: judge git diff origin/${w.featureBranch}...${fix.sha}, and don't re-hunt sibling code already validated.
+${same(prev, fix.sha) ? 'No delta: skip the delta hunt and judge the answers and declines; still run the gate, TEST_GUARD and the trial merge at this head.\n' : ''}If the fixer merged origin/${w.featureBranch} (an integration fix), skip the merged-in side: judge git diff origin/${w.featureBranch}...${fix.sha}, and don't re-hunt sibling code already validated.
 Findings with the author's claimed resolutions — judge the code first, then read each claim:
 ${JSON.stringify(found.map(f => ({ ...f, claim: fix.answers.find(a => a.id === f.id) || 'no answer' })))}
 
-1. ${REFUTE} Where a test is claimed, it must fail at ${prev}, the pre-fix head: run it there in a second worktree at ${w.repo}/.claude/worktrees/${w.id}-val${i}-red (never mktemp), and green at ${fix.sha}. Reverting the fix hunks in your worktree is the fallback only when that cannot run; state the fallback in evidence. Judge each answer to a question and each declined minor: defensible or not. ${EVIDENCE}
+1. ${REFUTE} Where a test is claimed, it must fail at ${prev}, the pre-fix head: run it there in a second worktree at ${w.repo}/.claude/worktrees/${w.id}-val${i}-red (same rules: clear a leftover path first, remove it when done; never mktemp), and green at ${fix.sha}. Reverting the fix hunks in your worktree is the fallback only when that cannot run; state the fallback in evidence. Judge each answer to a question and each declined minor: defensible or not. ${EVIDENCE}
 2. Hunt regressions the fixes introduced (they routinely plant new bugs: data loss, broken callers, weakened tests). ${TEST_GUARD}
 3. Run the gate and report gate {green, summary}:
 ${w.gate}
@@ -385,15 +388,14 @@ ${GREEN(c.knownRed)} ${FLAKY}
 4. ${TRIAL(w)}
 ${RO(w.repo, `${w.id}-val${i}`, c.regen)}
 ${SEV}
-Return headSha, gate, verified (ids confirmed resolved, or whose answer or decline you accept) and open (unresolved, indefensible, plus regressions as kind "regression" with ids v${i}-R1, ...).`,
+Return headSha, gate, verified (ids confirmed resolved, or whose answer or decline you accept) and open (same id for an unresolved finding; unresolved, indefensible, plus regressions as kind "regression" with ids v${i}-R1, ...).`,
         { label: `${tag} validate c${i}`, phase: 'Review cycles', agentType: 'validator', model: 'opus', effort: 'high', schema: DELTA })
       if (!val) return stop(`validate c${i} died 3 times`)
       if (!same(val.headSha, fix.sha)) return stop(`validate c${i} saw ${val.headSha}, the fix pushed ${fix.sha}`)
       out.findingsFixed += val.verified.length
       for (const f of found)
         if (val.verified.includes(f.id)) ledger.push({ id: f.id, where: f.where, issue: f.issue, status: fix.answers.find(a => a.id === f.id)?.action || 'fixed' })
-      // a blocker the validator neither verified nor re-opened stays open: silence is not a resolution
-      carry = [...val.open, ...redGate(val, `v${i}-G`), ...found.filter(f => blocking(f) && !val.verified.includes(f.id) && !val.open.some(o => o.id === f.id))]
+      carry = [...val.open, ...redGate(val, `v${i}-G`), ...unaccounted(found, val.verified, val.open)]
       out.validatedSha = fix.sha
     }
 
@@ -498,7 +500,7 @@ ${JSON.stringify(findings)}
 
 Set up: worktree wb-fix${round}, detached at origin/${r.featureBranch} (expected ${head}; if it moved, an earlier attempt of this step pushed it: continue from it); push back to ${r.featureBranch}.
 Critical and major: resolve every one (red-verified tests for bug fixes; defensible answers to questions; delete what over-engineering findings name). Minor, including those carried from the workstream cycles: fix only if it is a one-liner, otherwise decline with a reason. Minimal fixes.
-Nothing to change (all answered or declined): no commit, no push, sha = ${head}, ok = true.
+Nothing to change (all answered or declined): no commit, no push, sha = the current origin/${r.featureBranch} head (${head} unless an earlier attempt moved it), ok = true.
 Never merge a workstream branch: an unmerged workstream is the coordinator's call. If you change the source of a generated file, ${c.regen ? `rerun: ${c.regen}` : 'regenerate it with the repo\'s own script'}.
 ${LADDER}
 ${GATE(gates, c.knownRed)}
@@ -512,9 +514,9 @@ Return status, ok, verified sha, tests, gateTail, one answer per finding id, que
 
     const re = await step(
       `Re-check whole-branch fix round ${round} on ${r.repo}, feature branch ${r.featureBranch}: git fetch, then the delta ${head}..${fix.sha}. Trust nothing the author claims.
-${same(head, fix.sha) ? 'No delta: judge the answers and declines only, and run the gate at this head.\n' : ''}Findings with claimed resolutions — judge the code first, then read each claim:
+${same(head, fix.sha) ? 'No delta: skip the delta hunt and judge the answers and declines; still run every suite, TEST_GUARD and hygiene at this head.\n' : ''}Findings with claimed resolutions — judge the code first, then read each claim:
 ${JSON.stringify(findings.map(f => ({ ...f, claim: fix.answers.find(a => a.id === f.id) || 'no answer' })))}
-1. ${REFUTE} A claimed test must fail at ${head}, the pre-fix head: run it there in a second worktree at ${r.repo}/.claude/worktrees/wb-recheck${round}-red (never mktemp), and green at ${fix.sha}. Reverting the fix hunks is the fallback only when that cannot run; state the fallback in evidence. Judge each answer and each declined minor. ${EVIDENCE}
+1. ${REFUTE} A claimed test must fail at ${head}, the pre-fix head: run it there in a second worktree at ${r.repo}/.claude/worktrees/wb-recheck${round}-red (same rules: clear a leftover path first, remove it when done; never mktemp), and green at ${fix.sha}. Reverting the fix hunks is the fallback only when that cannot run; state the fallback in evidence. Judge each answer and each declined minor. ${EVIDENCE}
 2. Hunt regressions the fixes introduced. ${TEST_GUARD}
 3. Rerun every suite and report gate {green, summary}:
 ${gates}
@@ -527,7 +529,7 @@ sha = the commit you checked. verdict pass only if nothing critical or major is 
     if (!re) return fail(`recheck r${round} died 3 times`)
     if (!same(re.sha, fix.sha)) return fail(`recheck r${round} saw ${re.sha}, the fix pushed ${fix.sha}`)
     Object.assign(res, { verdict: re.verdict, sections: re.sections, sha: re.sha, tests: re.tests })
-    findings = [...re.findings, ...redGate(re, `R${round}-G`), ...findings.filter(f => blocking(f) && !re.verified.includes(f.id) && !re.findings.some(o => o.id === f.id))]
+    findings = [...re.findings, ...redGate(re, `R${round}-G`), ...unaccounted(findings, re.verified, re.findings)]
   }
   res.open = findings
   if (findings.some(blocking)) return fail(`critical/major findings still open after ${res.fixRounds} whole-branch fix round(s)`)
@@ -596,7 +598,7 @@ ${SEV}
 sha = the commit you validated. Ids: D-F1, D-F2, ...`,
       { label: `${name(d.repo)} docs validate`, phase: 'Docs sync', agentType: 'validator', model: 'opus', effort: 'high', schema: VERDICT })
     const vOk = v && same(v.sha, o.sha)
-    return { ...o, verdict: vOk ? v.verdict : 'fail', findings: vOk ? [...v.findings, ...redGate(v, 'D-G')] : [{ id: 'D-X', severity: 'critical', kind: 'docs', where: o.sha, issue: v ? `docs validator saw ${v.sha}, docs pushed ${o.sha}` : 'docs validator died 3 times' }] }
+    return { ...o, verdict: vOk ? v.verdict : 'fail', findings: vOk ? [...v.findings, ...redGate(v, 'D-G')] : [{ id: 'D-X', severity: 'critical', kind: 'docs', where: o.sha, issue: v ? `docs validator saw ${v.sha}, docs pushed ${o.sha}` : 'docs validator died 3 times', evidence: 'the script\'s own check' }] }
   })),
 ])
 
