@@ -51,7 +51,10 @@ Implementation is never below Sonnet.
   them would touch; (2) boundary and coupling; (3) cross-repo contracts and the
   merge order they force (contract owner lands first, re-vendor + digest steps);
   (4) YAGNI — tasks or options nobody asked for; (5) facts read from a
-  sibling checkout instead of `git show origin/main:<path>`. Read-only: no edits,
+  sibling checkout instead of `git show origin/main:<path>`; (6) stacked runs
+  only: every slice has a `Ships:` line, a smoke or the reason it has none,
+  depends on the slice below (else make it a workstream), and keeps the full
+  gate green at its own SHA; no numeric size target. Read-only: no edits,
   no commits, never push the plan. Output: findings with severity and
   plan-section. Fold accepted findings into the plan; unresolvable ones go to
   the user's end-of-run list.
@@ -158,6 +161,7 @@ Workflow({
 | `cycles` | `null` | floor on review cycles; `null` = run to convergence |
 | `maxCycles` | `cycles + 2`, or 4 | hard cap on cycles per workstream (must be ≥ `cycles`) |
 | `stage` | omitted | `"wholeBranch"`: skip implement/cycles/merge; re-run whole-branch review + validator, contract check, docs sync on the current feature-branch tips |
+| `wbRounds` | `2` | whole-branch fix rounds; `0` = review only, findings returned unfixed (stacked whole-stack pass) |
 | `tokenBudget` | `null` | output-token cap for this run; the user's "+Nk" turn target also applies. Spend is counted from the script's start, so a `resumeFromRunId` crash recovery starts a fresh `tokenBudget` |
 | `tokenReserve` | `600000` | before each new cycle, each whole-branch fix round, the contract check and docs: if less than this is left, nothing new starts; the item is reported not merged / failed with the reason |
 | `workstreams[].files` | none | allowed paths; overlap within a repo throws; merge rejects edits outside |
@@ -175,7 +179,7 @@ Repo paths are normalized (trailing slashes stripped).
 **Size:** agents ≈ per workstream (implement + 1 review per cycle + fix and
 validate per cycle with critical/major findings + 1 validator when a clean
 review lands on an unvalidated head + merge) + per repo (2, +2 per whole-branch
-fix round, max 2 rounds) + 1 contract check when 2+ repos + per docs repo (1, +1
+fix round, max `wbRounds` rounds) + 1 contract check when 2+ repos + per docs repo (1, +1
 validator when it pushed). Every dead agent can add up to 2 replacements. One
 workstream with a clean cycle 1 is ~8; two workstreams × 2 cycles is ~20. The
 runtime runs at most min(16, CPUs−2) agents at once and caps a run at 1000
@@ -238,6 +242,45 @@ cap or budget stops, failed merges — each says NOT merged). Then:
 - Open the PR only where the repo's process says PRs; otherwise report PR-ready
   state per repo: branches, SHAs, test results, unresolved questions. PRs stay
   open — a human merges to `main`, especially where merge deploys.
+
+## Stacked mode (only when the user asks)
+
+Default stays one feature branch per repo; stack slices only on the user's ask.
+
+- **A slice is one ordinary run:** `featureBranch` = the slice, `base` = its
+  parent slice (`main` for slice 1). Slices run strictly in sequence: cut slice
+  N+1 from slice N's verified tip only after slice N's run returns. The review
+  range is already three-dot `origin/<parent>...origin/<slice>`; before each
+  slice's review, a fresh `implementer` merges the parent up into it (merge,
+  never rebase).
+- **Briefs:** paste earlier slices' findings (fixed and declined) into every
+  later slice's brief. Each slice PR body carries the stack table:
+  `| # | branch | base | status | merge after #N |`.
+- **Whole-stack pass:** `stage: "wholeBranch"`, `featureBranch` = top slice,
+  `base: "main"`, `wbRounds: 0`. Route each returned finding to the slice that
+  owns its lines, via a fresh `implementer` on that slice; then merge upward
+  bottom-first, each child running
+  `git -c rerere.enabled=true -c rerere.autoupdate=true merge origin/<parent>`;
+  re-run `stage: "wholeBranch"` per touched slice (`base` = its parent).
+- **Merge-settings preflight:** `gh api repos/{owner}/{repo} --jq
+  '{allow_merge_commit, allow_squash_merge, allow_rebase_merge}'`. Merge commits
+  allowed → recommend them; squash-only → warn the user, don't refuse.
+- **Hand-off recipe for the user** (merging stays theirs): merge slice N
+  WITHOUT `--delete-branch` (deleting a base closes the child PR); run
+  `gh pr edit <N+1> --base <N's base>`; delete N's branch only once
+  `gh pr list --base <N's branch>` is empty.
+- **After a squashed parent:** the child merges `origin/main`. Per conflicted
+  file, with `H` = the parent PR's merged head
+  (`gh pr view <N> --json headRefOid -q .headRefOid`): if
+  `git rev-parse origin/main:<file>` equals `git rev-parse <H>:<file>`, take
+  ours (`git checkout --ours <file>`); anything else, a file missing on either
+  side included, is a real conflict → fixer. **First real use is supervised:**
+  the agent stops before pushing, you show the user each auto-resolved file
+  with its diff, and it pushes only on the user's yes.
+- **Refuse** only for GitHub-native stacks or a parent PR with no `headRefOid`.
+- **CI:** slice PRs 2..n target non-`main` bases, so workflow branch filters
+  may run no remote CI on them; say so in each PR body. The per-slice local
+  gate stays mandatory.
 
 ## Changing workflow.js
 
