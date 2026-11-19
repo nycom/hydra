@@ -16,7 +16,7 @@ const agent = async (p, o) => {
   if (L.endsWith(' review')) return { headSha: SHA(3), findings: [{ id: 'W-F1', severity: 'critical', kind: 'bug', where: 'a', issue: 'x' }] }
   if (L.endsWith(' validate') && !L.includes('docs')) return { verdict: 'fail', sections: 's', sha: SHA(3), tests: 't', gate: { green: true, summary: '' }, findings: [] }
   if (L.endsWith('fix r1')) return { ...push, sha: SHA(4), answers: [] }
-  if (L.endsWith('recheck r1')) return { verdict: 'pass', sections: 's', sha: SHA(4), tests: 't', gate: { green: true, summary: '' }, findings: [] }
+  if (L.endsWith('recheck r1')) return { verdict: 'pass', sections: 's', sha: SHA(4), tests: 't', gate: { green: true, summary: '' }, findings: [], verified: ['W-F1'] }
   if (L.endsWith(' docs')) return { baseSha: SHA(4), sha: SHA(5), files: ['README.md'], prBody: false, ok: true, tests: 't', notes: [] }
   if (L.endsWith('docs validate')) return { verdict: 'fail', sections: 's', sha: SHA(5), tests: 't', gate: { green: true, summary: '' }, findings: [{ id: 'D-F1', severity: 'major', kind: 'docs', where: 'README', issue: 'wrong' }] }
   throw new Error('unmocked ' + L)

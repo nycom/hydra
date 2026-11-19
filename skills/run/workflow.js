@@ -89,21 +89,25 @@ const GIT = (repo, wt) => `Git rules (non-negotiable):
 - Push with an explicit refspec (git push origin HEAD:refs/heads/<branch>, never --force) and verify with git ls-remote that the remote SHA equals your HEAD (detached-HEAD trap).
 - Never open PRs, never touch main. Remove your worktree (git worktree remove --force) when done, including on failure.
 ${HARD}`
-const RO = (repo, wt, regen = '') => `No commits, no pushes, no changes to any checkout but your own throwaway worktree at ${repo}/.claude/worktrees/${wt} (git worktree prune first; remove it when done). Edits inside it — reverts, mutations, probes — are expected. Read every file at the SHA under review (git show <sha>:<path> or inside that worktree), never by path in ${repo}: that checkout sits on an unrelated branch.
+const RO = (repo, wt, regen = '') => `No commits, no pushes, no changes to any checkout but your own throwaway worktree at ${repo}/.claude/worktrees/${wt} (git worktree prune first; if that path still exists, git worktree remove --force it; remove it when done). Edits inside it — reverts, mutations, probes — are expected. Read every file at the SHA under review (git show <sha>:<path> or inside that worktree), never by path in ${repo}: that checkout sits on an unrelated branch.
 ${regen ? `${REGEN(regen)}\n` : ''}${HARD}`
 const GREEN = knownRed => `${knownRed.length ? `Green = everything passes except exactly these known-red tests (recorded at the base): ${knownRed.join(', ')}. Any other failure is red; report any known-red that now passes.` : 'Green = every test passes.'} Never invent your own allowed failures.`
 const GATE = (gate, knownRed) => `Full gate, green before every push — every suite the repo defines (unit, typecheck, build, Playwright/e2e where present), not just "test":\n${gate}\n${GREEN(knownRed)}\nRun gates in the foreground or with the harness's background-run. Never write pgrep -f wait loops (they match their own command line and never exit); if a wait is unavoidable, use wait $pid, kill -0 $pid, or a bracketed pattern like pgrep -f "[m]vnw".`
 const FLAKY = 'A failure outside the known-red list: rerun that test alone twice and once at the base SHA. Intermittent, or red on base too -> FLAKY: a minor hygiene finding with the three outcomes. Deterministic on head and green on base -> a regression, and gate.green = false.'
 // One regex for every no-AI-trace check, scoped to commits this run authored, never teammates'.
 const AI_TRACE = 'co-authored-by|generated with|\\bclaude\\b|anthropic|\\.claude/'
-const HYGIENE = range => `Hygiene: the commits git log --author="$(git config user.name)" ${range} lists (messages, trailers, added lines) and any PR body written for this branch must have zero matches for grep -iE '${AI_TRACE}' (real code identifiers such as an API-key env var name are not trace). A hit in a run-authored commit is critical (kind hygiene); if you are the agent pushing, do not push and return ok=false. Commits by other authors: report a hit once as a minor hygiene finding, never rewrite them.`
-const TEST_GUARD = 'Test integrity: list pre-existing test files the range modified (git diff --diff-filter=M --name-only on test paths). A changed input or weakened assertion needs a reason from the brief or spec, else it is a major. For each changed assertion, mutate the production line it guards in your worktree and confirm the test goes red; one that stays green is a regression.'
+const HYGIENE = range => `Hygiene: the commits git log --author="$(git config user.email)" ${range} lists (messages, trailers, added lines) and any PR body written for this branch must have zero matches for grep -iE '${AI_TRACE}' (real code identifiers such as an API-key env var name are not trace). A hit in a run-authored commit is critical (kind hygiene); if you are the agent pushing, do not push and return ok=false. Commits by other authors: report a hit once as a minor hygiene finding, never rewrite them.`
+const TEST_GUARD = 'Test integrity: list pre-existing test files the range modified, deleted or renamed (git diff --diff-filter=MDR --name-only on test paths). A changed input or weakened assertion needs a reason from the brief or spec, else it is a major. Each of these is a critical unless the brief names it: a deleted or renamed pre-existing test; an added skip marker (skip|xfail|\\.only\\(|@Disabled|pytest.mark.skip|it.todo|describe.skip); an edit to test-runner config (jest/vitest/playwright/pytest config, pyproject [tool.pytest], conftest, coverage thresholds); a rewritten snapshot. For each changed assertion, mutate the production line it guards in your worktree and confirm the test goes red; one that stays green is a regression.'
 const TRIAL = w => `Integration: in your worktree, trial-merge origin/${w.featureBranch} into the head (git merge --no-commit --no-ff, never committed or pushed) and run the gate there too. A failure or conflict the merge introduces is a regression of kind "integration" (critical or major by SEV), even when it surfaces in another workstream's files.`
-const REFUTE = 'For each claim, try to REFUTE it; a claim you cannot prove with a command you ran stays open.'
+const REFUTE = 'For each claim, try to REFUTE it; a claim you cannot prove with a command you ran stays open. Comments, docstrings and commit messages are claims, not evidence.'
+const RO_TESTS = 'Pre-existing tests are read-only unless the brief names them. If a test or the gate contradicts the brief, or passing would need special-casing, return status blocked with a question — that is a valid outcome.'
 const LADDER = 'Ladder-first (reuse > stdlib > native > one line > minimum code), no speculative code, stay strictly in scope.'
 const SEV = 'Severity: critical = wrong behaviour, data loss, security, broken contract or red gate; major = real bug or design flaw; minor = the rest. Critical and major block the merge. Report only real issues; an empty list means clean.'
+const DROP = 'Drop (do not downgrade): issues that predate the diff and are not made worse by it, anything the repo\'s linter/formatter catches, code the plan or brief explicitly allows, pure style with no correctness, safety or maintainability cost. A comment added in this diff is a claim to grill, never a reason to drop a finding; do not flag `shortcut:` comments themselves.'
+const EVIDENCE = 'A critical or major of kind bug, regression or integration with evidence "none" and not resolved at this head: reproduce it here. Reproduced: keep it blocking with your evidence; otherwise return it still open with the same id, demoted to minor. Design, question and overengineering kinds are exempt.'
 const LENSES = grill => `Lenses:
 1. Correctness: each finding names file:line plus the input or state that breaks it — bugs, edge cases, error handling, data loss, contract breaks, missing or weak tests.
+   Test cheats are bugs: special-casing test inputs or expected values, always-true __eq__/comparison overloads, hidden state (call counters), test-environment detection.
 ${grill ? '2. Grilling: stress-test each design decision in the diff; raise one as kind "question" only when you can name the concrete failure you fear. The author must answer it defensibly or change it.\n' : ''}${grill ? 3 : 2}. Over-engineering: reinvented stdlib/helpers, speculative abstractions, dead flexibility, options nobody asked for — say what to DELETE (kind "overengineering").`
 const asGlob = f => f.endsWith('/') ? f + '**' : f
 const pathspec = (ps, magic = 'glob') => ps.map(p => `':(${magic})${asGlob(p)}'`).join(' ')
@@ -121,8 +125,9 @@ const FINDING = {
     kind: { enum: ['bug', 'design', 'overengineering', 'question', 'regression', 'integration', 'hygiene', 'docs'] },
     where: { type: 'string', description: 'file:line or area' },
     issue: { type: 'string', description: 'one or two sentences' },
+    evidence: { type: 'string', description: 'test id, command + output, or trace that proves it; "none" if you have none' },
   },
-  required: ['id', 'severity', 'kind', 'where', 'issue'],
+  required: ['id', 'severity', 'kind', 'where', 'issue', 'evidence'],
 }
 const HEAD = { type: 'string', description: 'full SHA of the commit you actually reviewed/validated (git rev-parse after fetch)' }
 const GATE_OUT = {
@@ -164,6 +169,7 @@ const FIXED = {
   type: 'object',
   properties: {
     ...PUSHED.properties,
+    ok: { type: 'boolean', description: 'gate green AND pushed AND ls-remote verified; nothing to change: gate green, no push' },
     answers: {
       type: 'array',
       items: {
@@ -201,6 +207,7 @@ const VERDICT = {
   },
   required: ['verdict', 'sections', 'sha', 'tests', 'gate', 'findings'],
 }
+const RECHECK = { ...VERDICT, properties: { ...VERDICT.properties, verified: { type: 'array', items: { type: 'string' }, description: 'finding ids confirmed resolved, or whose answer or decline you accept' } }, required: [...VERDICT.required, 'verified'] }
 const CONTRACT = {
   type: 'object',
   properties: { verdict: { enum: ['pass', 'fail'] }, sections: { type: 'string', description: 'one short line per section' }, findings: { type: 'array', items: FINDING } },
@@ -232,7 +239,10 @@ const blocking = f => f.severity !== 'minor'
 // inconsistency between agents (a moved tip, a stale read), not one agent lying about both sides.
 const same = (a = '', b = '') => a.length >= 7 && b.length >= 7 && (a.startsWith(b) || b.startsWith(a))
 // gate.green is the typed channel: a red gate is critical without relying on the model to file it.
-const redGate = (r, id) => r.gate.green ? [] : [{ id, severity: 'critical', kind: 'regression', where: 'gate', issue: r.gate.summary }]
+const redGate = (r, id) => r.gate.green ? [] : [{ id, severity: 'critical', kind: 'regression', where: 'gate', issue: r.gate.summary, evidence: 'the validator\'s gate run' }]
+// A blocker the validator neither verified nor re-opened stays open: silence is not a resolution.
+// Gate findings are rebuilt by redGate from each gate run, so they are never kept here.
+const unaccounted = (prior, verified, open) => prior.filter(f => blocking(f) && f.where !== 'gate' && !verified.includes(f.id) && !open.some(o => o.id === f.id))
 // A dead agent is replaced by a fresh one of the same role that redoes the whole step, up to 2 replacements.
 // The attempt number changes the prompt, so a resume can never hand back the dead attempt's cached result.
 async function step(prompt, opts) {
@@ -272,7 +282,7 @@ async function runWorkstream(w) {
       ? `Integration fix: if a critical or major can only be fixed in files owned by workstreams already merged into ${w.featureBranch} — ${owners(done)} — first git merge origin/${w.featureBranch} into your branch, then fix those files too (the one exception to your file list; say so in notes).${pending.length ? ` Never touch files owned by workstreams not merged yet: ${owners(pending)}.` : ''}`
       : `No workstream has merged into ${w.featureBranch} yet; a blocker outside your files is status "blocked" with a question.`
   }
-  const reasons = () => decisions.length ? `\nThe author's recorded decisions — don't grill one whose why is sound:\n${JSON.stringify(decisions)}\n` : ''
+  const reasons = () => decisions.length ? `\nThe author's recorded decisions — form your findings from the diff and brief first, then read these; don't grill one whose why is sound:\n${JSON.stringify(decisions)}\n` : ''
 
   const impl = await step(
     `You are the author of workstream ${w.id} in ${w.repo}.
@@ -282,6 +292,7 @@ Brief:
 ${w.brief}
 
 ${LADDER} Test-first where behaviour changes.
+${RO_TESTS}
 ${SHARED(c, w.files)}
 ${GATE(w.gate, c.knownRed)}
 ${GIT(w.repo, w.id)}
@@ -303,6 +314,7 @@ The brief it implements:
 ${w.brief}
 ${reasons()}
 ${LENSES(i === 1)}
+${DROP}
 ${ledger.length ? `Settled in earlier cycles — do not re-raise unless the code under it changed:\n${JSON.stringify(ledger)}\n` : ''}${carry.length ? `The last validation left these open — re-check each, keep the ones still valid (same id):\n${JSON.stringify(carry)}\n` : ''}${SEV}
 New finding ids: c${i}-F1, c${i}-F2, ...`,
       { label: `${tag} review c${i}`, phase: 'Review cycles', agentType: 'reviewer', model: w.reviewModel, schema: FINDINGS })
@@ -346,8 +358,10 @@ ${JSON.stringify(found)}
 ${decisions.length ? `Your earlier reasoning:\n${JSON.stringify(decisions)}\n` : ''}
 Set up: worktree ${w.id}-fix${i}, detached at origin/${w.branch} (expected ${prev}; if it moved, an earlier attempt of this step pushed it: continue from it); push back to ${w.branch}.
 Critical and major: fix bugs with a test you ran RED before the fix and green after; answer every kind "question" with a defensible reason or a change; delete what the over-engineering findings say to delete.
+${RO_TESTS}
 Minor: fix only if it is a one-liner inside your files, otherwise decline with a reason — declining is a valid outcome.
 Keep fixes minimal and inside this workstream's files.
+Nothing to change (all answered or declined): no commit, no push, sha = the current origin/${w.branch} head (${prev} unless an earlier attempt moved it), ok = true.
 ${SHARED(c, w.files)}
 ${integration()}
 sharedEdits: return the complete current list; it replaces the earlier one${out.sharedEdits.length ? `, so keep every entry still needed from:\n${JSON.stringify(out.sharedEdits)}` : ''}.
@@ -362,10 +376,11 @@ Return status, ok, verified sha, tests, gateTail, one answer per finding id, sha
 
       const val = await step(
         `Independently validate the review-fix delta of workstream ${w.id} in ${w.repo}: git fetch, then ${prev}..${fix.sha} on ${w.branch}. Trust nothing the author claims.
-Findings with the author's claimed resolutions:
+${same(prev, fix.sha) ? 'No delta: skip the delta hunt and judge the answers and declines; still run the gate, the test-integrity check and the trial merge at this head.\n' : ''}If the fixer merged origin/${w.featureBranch} (an integration fix), skip the merged-in side: judge git diff origin/${w.featureBranch}...${fix.sha}, and don't re-hunt sibling code already validated.
+Findings with the author's claimed resolutions — judge the code first, then read each claim:
 ${JSON.stringify(found.map(f => ({ ...f, claim: fix.answers.find(a => a.id === f.id) || 'no answer' })))}
 
-1. ${REFUTE} Where a test is claimed, prove it is red without the fix (revert the fix in your worktree) and green with it. Judge each answer to a question and each declined minor: defensible or not.
+1. ${REFUTE} Where a test is claimed, it must fail at ${prev}, the pre-fix head: run it there in a second worktree at ${w.repo}/.claude/worktrees/${w.id}-val${i}-red (same rules: clear a leftover path first, remove it when done; never mktemp), and green at ${fix.sha}. Reverting the fix hunks in your worktree is the fallback only when that cannot run; state the fallback in evidence. Judge each answer to a question and each declined minor: defensible or not. ${EVIDENCE}
 2. Hunt regressions the fixes introduced (they routinely plant new bugs: data loss, broken callers, weakened tests). ${TEST_GUARD}
 3. Run the gate and report gate {green, summary}:
 ${w.gate}
@@ -373,14 +388,14 @@ ${GREEN(c.knownRed)} ${FLAKY}
 4. ${TRIAL(w)}
 ${RO(w.repo, `${w.id}-val${i}`, c.regen)}
 ${SEV}
-Return headSha, gate, verified (ids confirmed resolved, or whose answer or decline you accept) and open (unresolved, indefensible, plus regressions as kind "regression" with ids v${i}-R1, ...).`,
+Return headSha, gate, verified (ids confirmed resolved, or whose answer or decline you accept) and open (same id for an unresolved finding; unresolved, indefensible, plus regressions as kind "regression" with ids v${i}-R1, ...).`,
         { label: `${tag} validate c${i}`, phase: 'Review cycles', agentType: 'validator', model: 'opus', effort: 'high', schema: DELTA })
       if (!val) return stop(`validate c${i} died 3 times`)
       if (!same(val.headSha, fix.sha)) return stop(`validate c${i} saw ${val.headSha}, the fix pushed ${fix.sha}`)
       out.findingsFixed += val.verified.length
       for (const f of found)
         if (val.verified.includes(f.id)) ledger.push({ id: f.id, where: f.where, issue: f.issue, status: fix.answers.find(a => a.id === f.id)?.action || 'fixed' })
-      carry = [...val.open, ...redGate(val, `v${i}-G`)]
+      carry = [...val.open, ...redGate(val, `v${i}-G`), ...unaccounted(found, val.verified, val.open)]
       out.validatedSha = fix.sha
     }
 
@@ -445,6 +460,7 @@ Briefs:
 ${briefs}
 
 ${LENSES(false)}
+${DROP}
 ${SEV}
 headSha = the origin/${r.featureBranch} commit you reviewed. Ids: W-F1, W-F2, ...`,
       { label: `${n} review`, phase: 'Whole-branch', agentType: 'reviewer', model: top(r.ws.map(w => w.reviewModel)), schema: FINDINGS }),
@@ -471,8 +487,8 @@ sha = the origin/${r.featureBranch} commit you validated. Ids: V-F1, V-F2, ...`,
   if (!rev || !val) return fail(`${!rev ? 'integrated review' : 'whole-branch validator'} died 3 times`)
   if (!same(rev.headSha, val.sha)) return fail(`review saw ${rev.headSha}, validator saw ${val.sha}`)
   Object.assign(res, { sha: val.sha, verdict: val.verdict, sections: val.sections, tests: val.tests })
-  // minors carried from the merged workstreams' cycles ride along (declinable)
-  findings = [...rev.findings, ...val.findings, ...redGate(val, 'V-G'), ...mine.filter(w => w.merged).flatMap(w => w.open)]
+  // minors carried from the merged workstreams' cycles ride along (declinable); ids prefixed so two workstreams' c1-F1 stay apart
+  findings = [...rev.findings, ...val.findings, ...redGate(val, 'V-G'), ...mine.filter(w => w.merged).flatMap(w => w.open.map(f => ({ ...f, id: `${w.id}:${f.id}` })))]
 
   for (let round = 1; round <= WB_ROUNDS && findings.some(blocking); round++) {
     if (short(`${n} whole-branch fix round ${round}`)) return fail(`token budget below the ${RESERVE} reserve before whole-branch fix round ${round}`)
@@ -484,6 +500,7 @@ ${JSON.stringify(findings)}
 
 Set up: worktree wb-fix${round}, detached at origin/${r.featureBranch} (expected ${head}; if it moved, an earlier attempt of this step pushed it: continue from it); push back to ${r.featureBranch}.
 Critical and major: resolve every one (red-verified tests for bug fixes; defensible answers to questions; delete what over-engineering findings name). Minor, including those carried from the workstream cycles: fix only if it is a one-liner, otherwise decline with a reason. Minimal fixes.
+Nothing to change (all answered or declined): no commit, no push, sha = the current origin/${r.featureBranch} head (${head} unless an earlier attempt moved it), ok = true.
 Never merge a workstream branch: an unmerged workstream is the coordinator's call. If you change the source of a generated file, ${c.regen ? `rerun: ${c.regen}` : 'regenerate it with the repo\'s own script'}.
 ${LADDER}
 ${GATE(gates, c.knownRed)}
@@ -497,9 +514,9 @@ Return status, ok, verified sha, tests, gateTail, one answer per finding id, que
 
     const re = await step(
       `Re-check whole-branch fix round ${round} on ${r.repo}, feature branch ${r.featureBranch}: git fetch, then the delta ${head}..${fix.sha}. Trust nothing the author claims.
-Findings with claimed resolutions:
+${same(head, fix.sha) ? 'No delta: skip the delta hunt and judge the answers and declines; still run every suite, the test-integrity check and hygiene at this head.\n' : ''}Findings with claimed resolutions — judge the code first, then read each claim:
 ${JSON.stringify(findings.map(f => ({ ...f, claim: fix.answers.find(a => a.id === f.id) || 'no answer' })))}
-1. ${REFUTE} Red-verify claimed tests; judge each answer and each declined minor.
+1. ${REFUTE} A claimed test must fail at ${head}, the pre-fix head: run it there in a second worktree at ${r.repo}/.claude/worktrees/wb-recheck${round}-red (same rules: clear a leftover path first, remove it when done; never mktemp), and green at ${fix.sha}. Reverting the fix hunks is the fallback only when that cannot run; state the fallback in evidence. Judge each answer and each declined minor. ${EVIDENCE}
 2. Hunt regressions the fixes introduced. ${TEST_GUARD}
 3. Rerun every suite and report gate {green, summary}:
 ${gates}
@@ -507,12 +524,12 @@ ${GREEN(c.knownRed)} ${FLAKY}
 4. ${HYGIENE(`${head}..${fix.sha}`)}
 ${RO(r.repo, `wb-recheck${round}`)}
 ${SEV}
-sha = the commit you checked. verdict pass only if nothing critical or major is open; findings = everything still open (ids R${round}-F1, ...).`,
-      { label: `${n} recheck r${round}`, phase: 'Whole-branch', agentType: 'validator', model: 'opus', effort: 'high', schema: VERDICT })
+sha = the commit you checked. verdict pass only if nothing critical or major is open; verified = finding ids confirmed resolved, or whose answer or decline you accept; findings = everything still open (same id for a carried finding, new ids R${round}-F1, ...).`,
+      { label: `${n} recheck r${round}`, phase: 'Whole-branch', agentType: 'validator', model: 'opus', effort: 'high', schema: RECHECK })
     if (!re) return fail(`recheck r${round} died 3 times`)
     if (!same(re.sha, fix.sha)) return fail(`recheck r${round} saw ${re.sha}, the fix pushed ${fix.sha}`)
     Object.assign(res, { verdict: re.verdict, sections: re.sections, sha: re.sha, tests: re.tests })
-    findings = [...re.findings, ...redGate(re, `R${round}-G`)]
+    findings = [...re.findings, ...redGate(re, `R${round}-G`), ...unaccounted(findings, re.verified, re.findings)]
   }
   res.open = findings
   if (findings.some(blocking)) return fail(`critical/major findings still open after ${res.fixRounds} whole-branch fix round(s)`)
@@ -581,7 +598,7 @@ ${SEV}
 sha = the commit you validated. Ids: D-F1, D-F2, ...`,
       { label: `${name(d.repo)} docs validate`, phase: 'Docs sync', agentType: 'validator', model: 'opus', effort: 'high', schema: VERDICT })
     const vOk = v && same(v.sha, o.sha)
-    return { ...o, verdict: vOk ? v.verdict : 'fail', findings: vOk ? [...v.findings, ...redGate(v, 'D-G')] : [{ id: 'D-X', severity: 'critical', kind: 'docs', where: o.sha, issue: v ? `docs validator saw ${v.sha}, docs pushed ${o.sha}` : 'docs validator died 3 times' }] }
+    return { ...o, verdict: vOk ? v.verdict : 'fail', findings: vOk ? [...v.findings, ...redGate(v, 'D-G')] : [{ id: 'D-X', severity: 'critical', kind: 'docs', where: o.sha, issue: v ? `docs validator saw ${v.sha}, docs pushed ${o.sha}` : 'docs validator died 3 times', evidence: 'the script\'s own check' }] }
   })),
 ])
 

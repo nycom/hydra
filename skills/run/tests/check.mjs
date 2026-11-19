@@ -20,7 +20,7 @@ function mock(sc) {
     if (o.label.endsWith(' review')) return { headSha: SHA(60), findings: sc.wbFind || [] }
     if (o.label.endsWith(' validate') && o.phase === 'Whole-branch') return { verdict: 'pass', sections: 's', sha: SHA(60), tests: 't', gate: { green: true, summary: '' }, findings: [] }
     if (/fix r\d/.test(o.label)) return { ...push, sha: SHA(70), answers: [] }
-    if (/recheck r\d/.test(o.label)) return { verdict: 'pass', sections: 's', sha: SHA(70), tests: 't', gate: { green: true, summary: '' }, findings: [] }
+    if (/recheck r\d/.test(o.label)) return { verdict: 'pass', sections: 's', sha: SHA(70), tests: 't', gate: { green: true, summary: '' }, findings: [], verified: (sc.wbFind || []).map(f => f.id) }
     if (o.label === 'contracts') return { verdict: 'pass', sections: 's', findings: [] }
     if (o.label.endsWith(' docs')) return { baseSha: SHA(60), sha: sc.docsSha || '', files: [], prBody: false, ok: true, tests: 't', notes: [] }
     if (o.label.endsWith('docs validate')) return { verdict: 'pass', sections: 's', sha: sc.docsSha, tests: 't', gate: { green: true, summary: '' }, findings: [] }
