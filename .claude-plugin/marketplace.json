@@ -1,0 +1,8 @@
+{
+  "name": "hydra",
+  "owner": { "name": "nycom", "url": "https://github.com/nycom" },
+  "metadata": { "description": "Hydra: a multi-agent implementation and review workflow for Claude Code." },
+  "plugins": [
+    { "name": "hydra", "source": "./", "description": "Skill /hydra:run: parallel workstreams, review cycles until clean, validated merges.", "category": "skill" }
+  ]
+}

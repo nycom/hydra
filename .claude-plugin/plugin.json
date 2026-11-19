@@ -1,0 +1,8 @@
+{
+  "name": "hydra",
+  "version": "0.1.0",
+  "description": "Multi-repo, multi-agent implementation workflow: parallel workstreams in worktrees off one feature branch, review/fix/validate cycles until no critical or major finding is open, validated merges, whole-branch review, contract check and docs sync.",
+  "author": { "name": "nycom", "url": "https://github.com/nycom" },
+  "license": "MIT",
+  "keywords": ["claude-code", "skill", "workflow", "multi-agent", "code-review", "worktrees"]
+}
