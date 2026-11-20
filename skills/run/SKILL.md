@@ -289,7 +289,7 @@ runtime runs at most min(16, CPUs−2) agents at once and caps a run at 1000
 
 **Progress panel** (when `mcp__savvy-progress__*` exists; skip silently
 otherwise): before the call, `progress` with `title`, `total` = workstreams,
-`phase: "hydra"`, one task per workstream id (`tier`: `careful` for opus,
+`phase: "delegate"` (its enum is plan | design | delegate | review | close), one task per workstream id (`tier`: `careful` for opus,
 `medium` for sonnet). The workflow's own progress tree shows per-agent detail.
 After it returns: `done` = merged workstreams, `phase: "close"`, then
 `finished: true`.
