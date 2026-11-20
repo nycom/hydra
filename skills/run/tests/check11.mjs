@@ -133,7 +133,7 @@ await t('T4a W and V at the same file:line reach the fixer and recheck once, and
   const e = both[0]
   assert(e.where === 'x.py:3' && JSON.stringify(e).includes('"V-F1"'), `both ids listed: ${JSON.stringify(e)}`)
   assert.equal(e.severity, 'critical', 'the merged entry keeps the higher severity')
-  assert.deepEqual(e.also, { id: 'W-F1', severity: 'major', kind: 'bug', issue: 'issue W-F1', evidence: 'test t1 red' }, 'also keeps the absorbed finding whole')
+  assert.deepEqual(e.also, { id: 'W-F1', severity: 'major', kind: 'bug', where: 'x.py:3', issue: 'issue W-F1', evidence: 'test t1 red' }, 'also keeps the absorbed finding whole')
   assert(fs.some(f => f.id === 'V-F4' && !f.also), 'each reviewer entry pairs once: a second V at that line stays its own entry')
   assert.equal(fs.filter(f => f.where === 'y.py:9').length, 2, 'two reviewer findings at one line stay apart')
   assert.equal(fs.filter(f => f.where === 'auth module').length, 2, 'an area with no line never collapses')
@@ -179,6 +179,45 @@ await t('T4d real where strings: a trailing note still collapses; a multi-file w
   const fs = fixFindings(p['one fix r1'])
   assert.deepEqual(fs.map(f => [f.id, f.also?.id ?? null]), [['V-F1', 'W-F1'], ['W-F2', null], ['V-F2', null], ['V-F3', null], ['V-F4', null], ['V-F5', null]], JSON.stringify(fs))
   assert(r.repos[0].verdict === 'pass', JSON.stringify(r.repos[0].escalations)) })
+
+const W1 = F('W-F1', 'major', 'x.py:3'), V1 = F('V-F1', 'major', 'x.py:3 (commit abc)')
+await t('T4e a kept entry demoted to minor still blocks while its absorbed critical is unverified, as in the non-collapsed control', async () => {
+  for (const vWhere of ['x.py:3 (commit abc)', 'x.py:4 (commit abc)']) {
+    const { r } = await go({ cycles: 1, workstreams: [ws('a')] }, {
+      'one review': () => ({ findings: [F('W-F1', 'critical', 'x.py:3', 'none')] }),
+      'one validate': () => ({ findings: [F('V-F1', 'critical', vWhere)] }),
+      'one recheck r1': () => ({ findings: [F('W-F1', 'minor', 'x.py:3', 'none')] }),
+    })
+    const x = r.repos[0]
+    assert(x.verdict === 'fail' && status(x.findings, 'V-F1') === 'open', `${vWhere}: ${JSON.stringify({ verdict: x.verdict, open: x.open })}`)
+  } })
+await t('T4f kept and absorbed both returned open: the absorbed one rides as its own entry, never re-attached', async () => {
+  const { p } = await go({ cycles: 1, workstreams: [ws('a')] }, {
+    'one review': () => ({ findings: [W1] }), 'one validate': () => ({ findings: [V1] }),
+    'one recheck r1': () => ({ verdict: 'fail', findings: [W1, V1] }),
+  })
+  const r2 = fixFindings(p['one fix r2'])
+  assert(r2.length === 2 && r2.every(f => !f.also), JSON.stringify(r2)) })
+await t('T4g re-attach respects the ledger: an absorbed id the recheck verified is not re-attached', async () => {
+  const { r, p } = await go({ cycles: 1, workstreams: [ws('a')] }, {
+    'one review': () => ({ findings: [W1] }), 'one validate': () => ({ findings: [V1] }),
+    'one recheck r1': () => ({ verdict: 'fail', verified: ['V-F1'], findings: [W1] }),
+  })
+  const r2 = fixFindings(p['one fix r2'])
+  assert(r2.length === 1 && r2[0].id === 'W-F1' && !r2[0].also, JSON.stringify(r2))
+  assert.equal(status(r.repos[0].findings, 'V-F1'), 'fixed')
+  assert(!p['one fix r2'].includes(ALSO) && !p['one recheck r2'].includes(ALSO), 'ALSO only when an entry has also') })
+await t('T4h (control for ALSO) a fix round with no collapsed entry gets no also sentence', async () => {
+  const { p } = await go({ cycles: 1, workstreams: [ws('a')] }, { 'one review': () => ({ findings: [W1] }), 'one recheck r1': () => ({ verified: ['W-F1'] }) })
+  assert(!p['one fix r1'].includes(ALSO) && !p['one recheck r1'].includes(ALSO), 'no ALSO') })
+await t('T4i the absorbed id settles with its own answer, else the kept entry\'s', async () => {
+  for (const [answers, want] of [[[{ id: 'W-F1', action: 'fixed', note: 'n' }, { id: 'V-F1', action: 'answered', note: 'n' }], 'answered'], [[{ id: 'W-F1', action: 'declined', note: 'n' }], 'declined']]) {
+    const { r } = await go({ cycles: 1, workstreams: [ws('a')] }, {
+      'one review': () => ({ findings: [W1] }), 'one validate': () => ({ findings: [V1] }),
+      'one fix r1': () => ({ answers }), 'one recheck r1': () => ({ verified: ['W-F1'] }),
+    })
+    assert.equal(status(r.repos[0].findings, 'V-F1'), want, JSON.stringify(answers))
+  } })
 
 if (fails.length) { console.error(fails.join('\n')); process.exit(1) }
 console.log('typed-agent, shared-edit and dedupe checks ok')

@@ -271,7 +271,7 @@ const lock = {}
 const mergedInto = {}
 const owners = ws => ws.map(x => `${x.id}${x.files ? ` (${x.files.join(', ')})` : ' (no files[] declared)'}`).join('; ')
 const serialized = (repo, fn) => (lock[repo] = (lock[repo] || Promise.resolve()).then(fn, fn)) // workstreams of one repo merge one at a time
-const blocking = f => f.severity !== 'minor'
+const blocking = f => f.severity !== 'minor' || (!!f.also && f.also.severity !== 'minor') // an absorbed blocker keeps its entry blocking
 // The result's findings ledger: each id keeps the stage that first raised it, its latest text, and a status
 // (open until a validator verifies the fix, answer or decline; a red gate counts fixed once the next gate is green).
 const STATUS = ['fixed', 'declined', 'answered'] // an escalated finding stays open: it is the user's call
@@ -578,8 +578,8 @@ async function runRepo(r, mine) {
     for (const v of vs) {
       const i = loc(v) ? out.findIndex(f => ws.includes(f) && loc(f) === loc(v)) : -1 // each reviewer entry pairs once
       if (i < 0) { out.push(v); continue }
-      const [keep, { id, severity, kind, issue, evidence }] = rank(v) < rank(out[i]) ? [v, out[i]] : [out[i], v]
-      out[i] = { ...keep, also: alsoOf[keep.id] = { id, severity, kind, issue, evidence } }
+      const [keep, { id, severity, kind, where, issue, evidence }] = rank(v) < rank(out[i]) ? [v, out[i]] : [out[i], v]
+      out[i] = { ...keep, also: alsoOf[keep.id] = { id, severity, kind, where, issue, evidence } }
     }
     return out
   }
@@ -684,8 +684,8 @@ sha = the commit you checked. verdict pass only if nothing critical or major is 
     checked = re.sha
     const action = (...ids) => ids.map(id => fix.answers.find(a => a.id === id)?.action).find(Boolean) || 'fixed'
     for (const id of re.verified) settle(book, id, action(id))
-    // an absorbed finding settles only with its kept entry verified and itself not returned open
-    for (const [id, a] of Object.entries(alsoOf)) if (re.verified.includes(id) && !re.findings.some(f => f.id === a.id)) settle(book, a.id, action(a.id, id))
+    // an absorbed finding settles with its kept entry; if the recheck returned it open, track() below re-opens it
+    for (const [id, a] of Object.entries(alsoOf)) if (re.verified.includes(id)) settle(book, a.id, action(a.id, id))
     settleGate(book, re.gate)
     findings = [...re.findings, ...redGate(re, `R${round}-G`), ...unaccounted(findings, re.verified, re.findings)]
     // a kept entry re-filed without its also gets it back while the absorbed one is open and not its own entry

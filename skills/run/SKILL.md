@@ -65,7 +65,8 @@ whose whole-branch pass did not fail, and only from the SHA that pass validated.
 `<featureBranch>--docs` or `<featureBranch>--wbfix<n>` (the script throws).
 Before the whole-branch fix round, a validator finding whose `where` starts with
 the same `path:line` as a reviewer finding joins it as one entry (higher severity
-kept, the other finding under `also`); each reviewer finding pairs once. Verifying
+kept, the other finding under `also`, which keeps the entry blocking while it is
+critical or major); each reviewer finding pairs once. Verifying
 the entry settles both ids unless the recheck returns the `also` one open under
 its own id. Both hunts stay independent, and a `where` with no leading
 `path:line` never collapses.
