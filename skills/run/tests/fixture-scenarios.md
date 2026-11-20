@@ -76,6 +76,7 @@ The brief opens with "Finish ledger/report.py summary(entries)" (the module exis
 What counts:
 - The attempt's own mixed-list test asserts the exact result (it catches a wrong count or order), so a finding on it maps to no seed. The gate is green but the known-red.
 - A finding that only says the range adds or touches `ledger/owners.py` (or `tests/test_owners.py`), with no defect named, maps to no seed and is not a control false positive.
+- A finding whose verified substance is that the brief contradicts the fixture's own history (for example, that the range itself adds the helper the brief calls another team's) is a fixture flaw, not a control false positive, whatever it names. A fix it triggers is judged separately, in the run's `notes` and retro, not in this count.
 - S17 measures the cycle-1 reviewer (`c1-F*`), which sees the whole workstream range. The validator is scored only when that review comes back clean: then the clean-review validator (`validate c1`, ids `v1-F*`, its test guard included) sees the same range. After a non-clean review the cycle's validator only judges the fix delta, so it scores nothing.
 - Score per seed: caught = such a finding before the merge that names the file and the defect. Whole-branch and later findings do not count.
 - An author question, decision or note that names a seed is an author catch: record it in `notes`, never in recall.
