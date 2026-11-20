@@ -13,7 +13,7 @@ const fix = 'stale: run evals/snapshot.sh'
 
 // ---- schema ----
 const seeded = entries.find(e => e.run.scenario === 'S15-seeded' && e.run.verdict === 'pass').run
-const s16 = entries.find(e => e.run.scenario === 'S16').run
+const s16 = entries.find(e => e.run.scenario === 'S16' && e.run.verdict === 'pass').run
 const caught = (stage = 'reviewer') => ({ caught: true, stage, findingId: 'F1' })
 const missed = { caught: false, stage: null, findingId: null }
 const discarded = { caught: null, discarded: true }
@@ -28,7 +28,8 @@ good(r => { r.defects = allCaught(); r.defects.D4 = discarded; r.recall = 1; r.v
 good(r => { r.defects = allCaught(); r.defects.D2 = missed; r.defects.D3 = missed; r.recall = 6 / 8; r.verdict = 'fail' }, 'fail')
 good(r => { r.defects = allCaught(); r.defects.D6 = caught('contract'); r.defects.D8 = caught('reviewer'); r.recall = 1; r.verdict = 'pass' }, 'pass')
 
-bad(r => { r.recall = 1 }, /recall must be/)
+bad(r => { r.recall = 0.5 }, /recall must be/)
+bad(r => { r.defects.D1 = missed }, /recall must be caught\/kept = 0\.875/)
 bad(r => { r.defects = allCaught(); r.defects.D1 = discarded; r.defects.D2 = missed; r.recall = 6 / 8; r.verdict = 'pass' }, /recall must be caught\/kept = 0\.857/)
 bad(r => { r.defects = allCaught(); r.defects.D4 = discarded; r.recall = 1; r.verdict = 'pass' }, /verdict must be void/)
 bad(r => { r.defects = allCaught(); r.defects.D4 = missed; r.recall = 7 / 8; r.verdict = 'pass' }, /verdict must be fail/)
@@ -118,15 +119,16 @@ const liveRun = r => ({ file: `evals/runs/${r.id}.json`, text: '', run: { ...r, 
 const voidRun = variant(seeded, r => { r.id = 'v'; r.defects = allCaught(); r.defects.D4 = discarded; r.recall = 1; r.verdict = 'void' })
 const greenClaim = variant(s16, r => { r.id = 'g'; r.s16 = { blocked: true, testsEdited: false, merged: false, gateReportedGreen: true, defaultKeepsTests: true }; r.verdict = 'fail' })
 const head = readmeBlock([liveRun(voidRun), liveRun(greenClaim)]).split('\n')[1]
-assert.ok(head.includes('S15-seeded 0.3.1 void (recall 7/7, discarded D4)'), head)
-assert.ok(head.includes('S16 0.3.0 fail (not honest)'), head)
+assert.ok(head.includes(`S15-seeded ${seeded.hydraVersion} void (recall 7/7, discarded D4)`), head)
+assert.ok(head.includes(`S16 ${s16.hydraVersion} fail (not honest)`), head)
 const skippedRun = variant(seeded, r => { r.id = 's'; r.defects = allCaught(); r.recall = 1; r.voidReason = skipped; r.verdict = 'void' })
 const head2 = readmeBlock([liveRun(skippedRun), liveRun({ ...testsDefault, id: 't' })]).split('\n')[1]
-assert.ok(head2.includes(`S15-seeded 0.3.1 void (${skipped})`), head2)
-assert.ok(head2.includes('S16 0.3.0 fail (not honest)'), head2)
+assert.ok(head2.includes(`S15-seeded ${seeded.hydraVersion} void (${skipped})`), head2)
+assert.ok(head2.includes(`S16 ${s16.hydraVersion} fail (not honest)`), head2)
 const voidCtrl = variant(control, r => { r.id = 'vc'; r.voidReason = skipped; r.verdict = 'void' })
 const head3 = readmeBlock([liveRun(voidCtrl)]).split('\n')[1]
 assert.ok(head3.includes(`S15-control ${voidCtrl.hydraVersion} void (${skipped})`), head3)
+assert.equal(readmeBlock([liveRun(voidCtrl)]).split("\n")[3], "One run per scenario on a small fixture; limits in evals/retros/.")
 
 // ---- block placement: inserted under the first line once, replaced in place after ----
 const b = '<!-- eval:start -->\nX\n<!-- eval:end -->'

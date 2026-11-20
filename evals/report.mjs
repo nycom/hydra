@@ -159,6 +159,7 @@ export function readmeBlock(entries) {
   }
   return [START,
     `**Latest eval:** ${latestPerScenario(live).map(r => `${r.scenario} ${r.hydraVersion} ${r.verdict} (${short(r)})`).join(' · ')}`, '',
+    'One run per scenario on a small fixture; limits in evals/retros/.', '',
     '![Quality scorecard](evals/png/scorecard.png)',
     '![Recall per planted defect](evals/png/heatmap.png)', '',
     '<details><summary>More charts</summary>', '',
