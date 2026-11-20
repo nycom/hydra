@@ -93,7 +93,7 @@ await t('2a workstream fix with no commit', async () => {
     'a fix c1': () => ({ sha: SHA(1), answers: [{ id: 'c1-F1', action: 'answered', note: 'n' }] }),
     'a validate c1': () => ({ verified: ['c1-F1'] }),
   })
-  assert(p['a fix c1'].includes(`Nothing to change (all answered or declined): no commit, no push, sha = the current origin/f--a head (${SHA(1)} unless an earlier attempt moved it), ok = true.`), 'fixer told')
+  assert(p['a fix c1'].includes(`Nothing to change (all answered, declined or escalated): no commit, no push, sha = the current origin/f--a head (${SHA(1)} unless an earlier attempt moved it), ok = true.`), 'fixer told')
   assert(/nothing to change/i.test(o['a fix c1'].schema.properties.ok.description), 'ok description allows no push')
   assert(p['a validate c1'].includes('No delta: skip the delta hunt and judge the answers and declines; still run the gate, the test-integrity check and the trial merge at this head.'), 'validator told')
   const w = r.workstreams[0]

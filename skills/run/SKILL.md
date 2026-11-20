@@ -50,7 +50,11 @@ delta validation, then it requeues behind the repo's merge lock.
 **Validators, gates and green:** the first validator of each workstream writes
 2–5 black-box acceptance tests from the brief before it reads the diff, runs
 them at the head and never commits them (a brief that says no behaviour change
-gets the same inputs run at base and head, outputs diffed). Every validator runs
+gets the same inputs run at base and head, outputs diffed). That first validator
+also runs the test-integrity guard (`git diff --diff-filter=MDR` on tests) over
+the whole workstream range `origin/<featureBranch>...<head>`, even when it is a
+delta validator after a non-clean review; only the test guard widens, later
+delta validators judge only their delta. Every validator runs
 each new or changed test 3 times in a row. Tests a validator proves flaky
 (intermittent on head and failing at the base too) join a run-wide per-repo
 registry: later gate prompts give them one rerun and no base rerun, and the
@@ -86,6 +90,29 @@ legitimately split a chained gate, add flags or wrap it in the regen recipe,
 and a wrong rejection costs a whole opus validator rerun. Workstream validators
 also return `evidence`, one line per step with the commands run for it,
 copied into `workstreams[].evidence`.
+**Brief conflicts become questions, never fixes:** a real defect is always a
+finding, even in a file or test the brief protects or where its fix would
+reverse a fix verified earlier. A fixer that could only fix it by breaking a
+brief clause or reversing such a fix, or whose finding says the brief
+contradicts the repo, leaves the code, answers it `escalated` (status stays
+`done`, not `blocked`) and returns a question with both options (default: keep
+the current behaviour and tests). The next validator accepts that answer when
+no fix keeps every clause. An accepted escalation never counts in
+`findingsFixed`, and its ledger entry stays `open`. If the fixer returned no
+question, the script writes one from the finding and the fixer's note, so it
+always reaches the user. Only a contradiction between the brief and the repo
+itself (a premise the history disproves, or two clauses that cannot both hold)
+goes straight into a validator's own `questions` (both workstream validators,
+the whole-branch validator, each recheck). The fix validator sees the findings
+verified in earlier cycles. The whole-branch validator and rechecks see the
+fixes verified earlier in the run (`fixed` only, never a gate) and the
+questions already with the user, which they never re-ask.
+The fix validator and each recheck carry the brief and judge every fix against
+its hard clauses: a fix that drops a mandated call, edits or deletes a
+do-not-edit file, or deletes or weakens a test an earlier stage verified as
+guarding a fix stays open as a regression unless the user answered a question
+allowing it. The workstream reviewer is told the
+author's notes and questions are not shown to it, so it never claims what they say.
 **One workstream on an untouched base skips the seam review:** the merge
 reports `preMergeSha` (the feature-branch tip its merge landed on) and
 `baseAtMerge` (`origin/<base>` at that time). When a repo has exactly one
@@ -272,9 +299,10 @@ After it returns: `done` = merged workstreams, `phase: "close"`, then
 The workflow returns:
 
 - top level: `{stage, budget, cycles, maxCycles, questions, workstreams, repos, crossRepo, otherDocs}`;
-  `questions` holds one entry when `crossRepo` has an open critical or major,
-  whatever its verdict says: contracts have no fix loop, so it carries the contract
-  check's recipe (its `sections`, else the findings' issues) and the user decides
+  `questions` collects every question of the run: first one entry when `crossRepo` has an open critical or major,
+  whatever its verdict says (contracts have no fix loop, so it carries the contract
+  check's recipe, its `sections`, else the findings' issues, and the user decides),
+  then each workstream's and each repo's `questions`, with `q` prefixed `<workstream id>: ` or `<repo name>: `
 - `budget`: `{spent, tokenBudget, turnTotal, reserve, stoppedBy}`. `spent` is the
   output tokens this run spent since its own start; `turnTotal` is the user's
   "+Nk" target or `null`; `stoppedBy` lists what the reserve kept from starting
@@ -325,7 +353,10 @@ says NOT merged; unpromoted side branches). Then:
 - Read it; spot-check anything `open`, `extended`, unmerged, a non-`pass`
   verdict, `docs.ok: false`, or a `crossRepo` finding against the code (and the
   docs diffs — docs must describe what shipped, including every review-round
-  fix). Fix-ups go to a fresh `implementer`, never to you. **Every fix-up is then
+  fix). Fix-ups go to a fresh `implementer`, never to you. Before any re-run,
+  write the user's answer to each question into the affected brief: the brief is
+  the only channel by which a validator learns that "the user answered" allows a
+  change. **Every fix-up is then
   validated and docs-synced:** re-run the workflow with `stage: "wholeBranch"`
   (same args, narrowed to the affected repos' workstreams). After an
   unpromoted failure, the fix-up implementer continues from the side branch the
@@ -338,7 +369,7 @@ says NOT merged; unpromoted side branches). Then:
   SHAs and validates nothing. Gate prompts list the run-wide flaky registry, so
   a replay can see a different registry, run those agents live and end in a
   false "not promoted" fail: safe (nothing unvalidated lands), but re-check it.
-- Escalate to the user **only** the `questions`, top-level and per workstream and repo (plus anything else code, spec or
+- Escalate to the user **only** the top-level `questions` (it already holds every workstream and repo question; plus anything else code, spec or
   plan can't resolve) — collected and asked **once**, at the end; the retro's
   ranked list (§5) joins that same ask, after the questions.
 
