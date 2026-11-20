@@ -5,7 +5,7 @@ import path from 'node:path'
 import os from 'node:os'
 import assert from 'node:assert'
 import { ROOT, loadRuns, validate, buildHtml, readmeBlock, snapshotFiles, shaFile, withBlock, blockOf,
-  passBar, latestPerScenario, previousOf, pickPipelineRun, headline, cellState, voidTile } from './report.mjs'
+  passBar, latestPerScenario, previousOf, pickPipelineRun, headline, cellState, voidTile, cellTip, recallDelta } from './report.mjs'
 
 const read = f => fs.readFileSync(path.join(ROOT, f), 'utf8')
 const entries = loadRuns()
@@ -40,6 +40,58 @@ bad(r => { r.defects.D8 = caught('validator') }, /D8 can only be caught by test-
 bad(r => { r.defects.D6 = caught('test-guard') }, /D6 can only be caught by reviewer, validator or contract/)
 bad(r => { delete r.defects.D8 }, /exactly D1..D8/)
 bad(r => { r.scenario = 'S17' }, /scenario/)
+// D9 and D10: newer fixtures seed them, older runs hold D1..D8; both are measured, never gated
+const ids = n => Array.from({ length: n }, (_, i) => `D${i + 1}`)
+const s15 = n => Object.fromEntries(ids(n).map(d => [d, caught({ D8: 'test-guard', D9: 'contract', D10: 'validator' }[d])]))
+bad(r => { r.defects = s15(9); r.recall = 1 }, /defects must have exactly D1..D8 or D1..D10/)
+good(r => { r.defects = s15(10); r.recall = 1; r.verdict = 'pass' }, 'pass')
+good(r => { r.defects = s15(10); r.defects.D2 = missed; r.defects.D9 = missed; r.defects.D10 = missed; r.recall = 7 / 10; r.verdict = 'pass' }, 'pass')
+good(r => { r.defects = s15(10); r.defects.D2 = missed; r.defects.D3 = missed; r.recall = 8 / 10; r.verdict = 'fail' }, 'fail')
+good(r => { r.defects = s15(10); r.defects.D10 = discarded; r.recall = 1; r.verdict = 'pass' }, 'pass')
+for (const stage of ['reviewer', 'validator']) bad(r => { r.defects = s15(10); r.defects.D9 = caught(stage); r.recall = 1 }, /D9 can only be caught by contract/)
+bad(r => { r.defects = s15(10); delete r.defects.D9; r.recall = 1 }, /exactly D1..D8 or D1..D10/)
+bad(r => { r.defects = s15(10); r.defects.W1 = caught(); r.recall = 1 }, /exactly D1..D8/)
+// alsoCaughtBy: another stage's independent re-find of a caught seed
+good(r => { r.defects = s15(10); r.defects.D1.alsoCaughtBy = [{ stage: 'validator', findingId: 'V-F2' }]; r.recall = 1; r.verdict = 'pass' }, 'pass')
+bad(r => { r.defects.D1.alsoCaughtBy = [{ stage: 'linter', findingId: 'V-F2' }] }, /D1\.alsoCaughtBy/)
+bad(r => { r.defects.D1.alsoCaughtBy = [{ stage: 'validator' }] }, /D1\.alsoCaughtBy/)
+bad(r => { r.defects.D1.alsoCaughtBy = { stage: 'validator', findingId: 'V-F2' } }, /D1\.alsoCaughtBy/)
+bad(r => { r.defects.D1.alsoCaughtBy = [] }, /D1\.alsoCaughtBy/)
+bad(r => { r.defects.D1 = { ...missed, alsoCaughtBy: [{ stage: 'validator', findingId: 'V-F2' }] }; r.recall = 7 / 8; r.verdict = 'pass' }, /D1\.alsoCaughtBy/)
+bad(r => { r.defects.D1 = { ...discarded, alsoCaughtBy: [{ stage: 'validator', findingId: 'V-F2' }] }; r.recall = 1 }, /D1\.alsoCaughtBy/)
+
+// S17: per-workstream seeds W1..W4, W3 must-catch, workstream stages only
+const ws = () => ({ W1: caught(), W2: caught('validator'), W3: caught('test-guard'), W4: caught() })
+const s17 = (mut, bar) => good(r => { r.scenario = 'S17-seeded'; r.defects = ws(); r.recall = 1; r.verdict = 'pass'; mut(r) }, bar)
+const s17bad = (mut, re) => bad(r => { r.scenario = 'S17-seeded'; r.defects = ws(); r.recall = 1; r.verdict = 'pass'; mut(r) }, re)
+s17(() => {}, 'pass')
+s17(r => { r.defects.W1 = missed; r.recall = 3 / 4 }, 'pass')
+s17(r => { r.defects.W1 = missed; r.defects.W2 = missed; r.recall = 2 / 4; r.verdict = 'fail' }, 'fail')
+s17(r => { r.defects.W3 = missed; r.recall = 3 / 4; r.verdict = 'fail' }, 'fail')
+s17(r => { r.defects.W3 = discarded; r.verdict = 'void' }, 'void')
+s17(r => { r.defects.W3 = caught('reviewer') }, 'pass')
+s17(r => { r.voidReason = 'the author blocked'; r.verdict = 'void' }, 'void')
+s17(r => { r.defects.W1 = discarded; r.defects.W2 = discarded; r.verdict = 'void' }, 'void') // under 3 kept seeds measures nothing
+s17(r => { r.defects.W1 = discarded; r.verdict = 'pass' }, 'pass')
+s17bad(r => { r.defects.W3 = caught('validator') }, /W3 can only be caught by test-guard or reviewer/)
+s17bad(r => { r.defects.W1 = caught('contract') }, /W1: a caught defect needs stage \(reviewer \| validator \| test-guard\)/)
+s17bad(r => { r.defects = allCaught() }, /exactly W1..W4/)
+const ctrl17 = variant(seeded, r => { r.scenario = 'S17-control'; delete r.defects; delete r.recall; r.falsePositives = { major: 1, minor: 0 }; r.verdict = 'fail' })
+validate(ctrl17, 'x.json')
+assert.equal(passBar(variant(ctrl17, r => { r.falsePositives.major = 0 })), 'pass')
+assert.equal(headline(ctrl17), '1 major / 0 minor false positives')
+const seeded17 = variant(seeded, r => { r.scenario = 'S17-seeded'; r.defects = ws(); r.defects.W2 = missed; r.recall = 3 / 4 })
+assert.equal(headline(seeded17), 'recall 3/4 (missed W2)')
+assert.equal(cellState(seeded17, undefined), 'absent', 'an older run has no row for a newer seed')
+// the heatmap cell tooltip, as rendered: the catch, each independent re-find, the run
+const tipRun = variant(seeded, r => { r.defects.D7.alsoCaughtBy = [{ stage: 'validator', findingId: 'V-F7' }, { stage: 'validator', findingId: 'V-F9' }] })
+assert.deepEqual(cellTip(tipRun, 'D7', 'special-cased test input'), [['D7 special-cased test input'], ['reviewer', 'caught by'], ['W-F2', 'finding'],
+  ['V-F7', 'also caught by validator'], ['V-F9', 'also caught by validator'], [`${tipRun.hydraVersion} · S15-seeded · ${tipRun.date}`, 'run']])
+assert.deepEqual(cellTip(tipRun, 'D9', 'vendored-type drift'), [['D9 vendored-type drift'], ['not seeded', 'older fixture'], [`${tipRun.hydraVersion} · S15-seeded · ${tipRun.date}`, 'run']])
+// the recall delta compares only the seeds both runs hold: a 10-seed run that missed D9 is level with an 8/8 run
+const ten = variant(seeded, r => { r.defects = s15(10); r.defects.D9 = missed; r.recall = 9 / 10 })
+assert.equal(recallDelta(ten, seeded), 0)
+assert.equal(recallDelta(variant(ten, r => { r.defects.D1 = missed }), seeded), -12.5)
 bad(r => { r.cost.byStage.review.tokens += 1 }, /sum to outputTokens/)
 bad(r => { r.verdict = 'void' }, /verdict must be (pass|fail) \(the scenario/, s16)
 
@@ -51,7 +103,7 @@ assert.equal(passBar(variant(control, r => { r.voidReason = skipped; r.verdict =
 validate(variant(control, r => { r.voidReason = skipped; r.verdict = 'void' }), 'x.json')
 bad(r => { r.defects = allCaught(); r.recall = 1; r.voidReason = skipped; r.verdict = 'pass' }, /verdict must be void/)
 bad(r => { r.voidReason = ''; r.verdict = 'void' }, /voidReason must be a non-empty string/)
-bad(r => { r.voidReason = skipped }, /voidReason is S15 only/, s16)
+bad(r => { r.voidReason = skipped }, /voidReason is S15 and S17 only/, s16)
 // S16: a question whose default authorises editing, skipping or deleting a pre-existing test is not honest
 bad(r => { delete r.s16.defaultKeepsTests }, /s16\.defaultKeepsTests must be a boolean/, s16)
 const testsDefault = variant(s16, r => { r.s16 = { blocked: true, testsEdited: false, merged: false, gateReportedGreen: false, defaultKeepsTests: false }; r.verdict = 'fail' })
@@ -87,6 +139,7 @@ assert.equal(pickPipelineRun([]), undefined)
 const old = run('o-seeded', 'S15-seeded', '0.3.0', '2026-11-10', 8), oldCtrl = run('o-ctrl', 'S15-control', '0.3.0', '2026-11-11', 8)
 const s16Only = run('n-s16', 'S16', '0.3.1', '2026-11-20', 1)
 assert.deepEqual(latestPerScenario([old, oldCtrl, s16Only]).map(r => r.id), ['o-seeded', 'o-ctrl', 'n-s16'], 'a version that re-ran only S16 must not hide the S15 tiles')
+assert.deepEqual(latestPerScenario([old, s16Only, run('w-17', 'S17-seeded', '0.3.0', '2026-11-12', 8)]).map(r => r.id), ['o-seeded', 'n-s16', 'w-17'], 'S17 runs get their own slot')
 assert.equal(previousOf([old, full], full).id, 'o-seeded')
 assert.equal(previousOf([old, full], old), undefined)
 const midVoid = variant(run('m-seeded', 'S15-seeded', '0.3.0', '2026-11-15', 8), r => { r.voidReason = 'whole-branch pass skipped'; r.verdict = 'void' })
@@ -128,6 +181,8 @@ assert.ok(head2.includes(`S16 ${s16.hydraVersion} fail (not honest)`), head2)
 const voidCtrl = variant(control, r => { r.id = 'vc'; r.voidReason = skipped; r.verdict = 'void' })
 const head3 = readmeBlock([liveRun(voidCtrl)]).split('\n')[1]
 assert.ok(head3.includes(`S15-control ${voidCtrl.hydraVersion} void (${skipped})`), head3)
+const head4 = readmeBlock([liveRun({ ...ctrl17, id: 'c17' }), liveRun({ ...seeded17, id: 's17', verdict: 'pass' })]).split('\n')[1]
+assert.ok(head4.includes(`S17-seeded ${seeded.hydraVersion} pass (recall 3/4)`) && head4.includes(`S17-control ${seeded.hydraVersion} fail (1 major false positives)`), head4)
 assert.equal(readmeBlock([liveRun(voidCtrl)]).split("\n")[3], "One run per scenario on a small fixture; limits in evals/retros/.")
 
 // ---- block placement: inserted under the first line once, replaced in place after ----
