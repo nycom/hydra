@@ -32,7 +32,7 @@ Opt-in, per run (details and every arg in `skills/run/SKILL.md`):
 - `localOnly: true`: nothing reaches the network. Every push, fetch and `ls-remote` targets a bare repo on local disk set up as the remote `hydra-local`; the branches are fetched back into your repo as local branches at the end, and pushing stays yours.
 - `workstreams[].after: [ids]`: a workstream starts only once those (same repo) merged, and branches from that head.
 - `workstreams[].lite: true`: for small pure files, implement plus one validator and no review cycles unless it finds a critical or major.
-- `workstreams[].humanCheck`: the run pauses after that workstream merges and returns what to check by eye; a re-run with `humanChecks` and `resumeFromRunId` continues, and a reported problem goes back to its author.
+- `workstreams[].humanCheck`: the run pauses after that workstream merges and returns what to check by eye; a re-run with `resumeFromRunId` and `humanChecks` (each answer bound to the sha the user checked) continues, and a reported problem goes back to its author.
 - `repos[].copyExcluded`: git-ignored files the gate needs (a local preview test) are copied into every agent worktree and never committed.
 - `repos[].reviewSharedEdits: true`: the shared-file edits each merge applies get their own gate and validator before the next merge.
 

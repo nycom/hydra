@@ -231,7 +231,7 @@ Workflow({
     tokenBudget: 3000000,            // optional; output tokens this run may spend (budget.spent())
     tokenReserve: 600000,            // optional; default 600000
     localOnly: false,                // optional; true = nothing reaches the network (see Local-only mode)
-    humanChecks: { "api-auth": "ok" }, // only on the re-run after a humanCheck pause
+    humanChecks: { "api-auth": { sha: "<checked sha>", answer: "ok" } }, // only on the re-run after a humanCheck pause
     workstreams: [
       { id: "api-auth", repo: "~/code/api", featureBranch: "feat/auth",
         branch: "feat/auth--api-auth", model: "opus",
@@ -279,9 +279,9 @@ Workflow({
 | `tokenBudget` | `null` | output-token cap for this run; the user's "+Nk" turn target also applies. Spend is counted from the script's start, so a `resumeFromRunId` crash recovery starts a fresh `tokenBudget` |
 | `tokenReserve` | `600000` | before each new cycle, each whole-branch fix round, the contract check and docs: if less than this is left, nothing new starts; the item is reported not merged / failed with the reason |
 | `localOnly` | `false` | every fetch, push and `ls-remote` targets the remote `hydra-local`, a bare repo on local disk you set up (see Local-only mode); agents are told never to touch `origin` or any other remote and to run no `gh`; every hygiene section also checks that no run branch has a remote-tracking ref on any other remote; the docs step skips its PR-body update |
-| `humanChecks` | none | the user's answers on the re-run after a `humanCheck` pause: `{"<workstream id>": "ok" \| "<problem>"}`, or an array of answers, one per check of that workstream, in order. Keys must name a workstream with a `humanCheck` |
+| `humanChecks` | none | the user's answers on the re-run after a `humanCheck` pause: `{"<workstream id>": {sha, answer}}` or an array of those, one per check so far; `sha` = the commit the user checked (7-40 hex), `answer` = `ok` (case and trailing punctuation ignored: `OK.`, `Ok!`) or the problem in words. An answer applies only to a merge with that sha. Keys must name a workstream with a `humanCheck`. The paused result's `humanCheck[].answer` gives the exact value to pass |
 | `workstreams[].after` | none | workstream ids (same repo only; unknown ids, itself and cycles throw) that must merge into the feature branch before this one starts implementing; it branches from the head that carries them. A predecessor that does not merge leaves it NOT started. Workstreams without `after` run in parallel as before |
-| `workstreams[].lite` | `false` | for small pure files: implement, then the clean-review validator alone (acceptance tests, full-range test guard, gate, trial merge); no reviewer ever runs. A critical or major it files gets a fix and a delta validation per cycle, capped by `maxCycles` as usual. Still merged, and covered by the whole-branch pass |
+| `workstreams[].lite` | `false` | for small pure files: implement, then the clean-review validator alone (acceptance tests, full-range test guard, gate, trial merge); no reviewer ever runs. A critical or major it files gets a fix and a delta validation per cycle, capped by `maxCycles` as usual. Still merged, and covered by the whole-branch pass. A lite workstream alone on its untouched base gets no reviewer at all: the integrated review is skipped too, so only validators see it |
 | `workstreams[].humanCheck` | none | instructions for the user's by-eye check. After this workstream merges, every later merge of its repo and the repo's whole-branch pass wait for the answer (see Human checks) |
 | `workstreams[].files` | none | allowed paths; overlap within a repo throws; merge rejects edits outside |
 | `workstreams[].checks` | none | extra commands (an e2e login, a contract probe) the author, fixer and both workstream validators run via `run-cmd.mjs` with a 540 s cap, reporting the exit code per command; a red or timed-out check is critical. The `gate` itself never gets a deadline |
@@ -325,7 +325,9 @@ leave it unfinished until the resumed run returns).
 
 **Local-only mode** (`localOnly: true`, e.g. a public fork whose pushes the
 user approves by hand): nothing reaches the network. Per touched repo
-(docs-only repos included), before the known-red preflight:
+(docs-only repos included), before the known-red preflight, first run the
+no-network check below and stop if it prints anything (a run branch already
+pushed by hand would trip every hygiene section); then
 `B="$(git -C <repo> rev-parse --path-format=absolute --git-common-dir)/hydra-local.git"`,
 `git init --bare -q "$B"`, `git -C <repo> remote add hydra-local "$B"`, then
 push the base and the feature branch into it
@@ -338,8 +340,10 @@ back as local branches without force:
 workstream branch and any side branch the result names (a branch checked out
 in the user's checkout is refused: tell the user to fast-forward it), and
 check `git -C <repo> rev-parse <featureBranch>` equals `finalSha`. Also run the
-hygiene check yourself: `git -C <repo> for-each-ref refs/remotes` lists no run
-branch under any remote but `hydra-local`. Pushing to `origin` stays the
+no-network check yourself: `git -C <repo> for-each-ref --format='%(refname)' 'refs/remotes/*/<featureBranch>' 'refs/remotes/*/<featureBranch>--*'`
+plus each workstream branch, filtered with `grep -v '^refs/remotes/hydra-local/'`,
+prints nothing. It reads remote-tracking refs, so a push by URL (no
+configured remote) leaves none and is invisible to it. Pushing to `origin` stays the
 user's step; remove `hydra-local` (`git remote remove`, then the bare repo)
 only when they are done with it.
 
@@ -350,15 +354,22 @@ whole-branch pass does not run (`verdict: "paused"`), and contracts and docs
 wait for every repo. The result carries `humanCheck: [{id, repo,
 featureBranch, sha, check, round, answer}]`: ask the user to check `sha` (a
 worktree on it; in local-only mode fetch `hydra-local` first) per `check`, then
-re-run with the same args plus `humanChecks: {"<id>": "ok"}` or the problem in
-words, and `resumeFromRunId` = the paused run. Cached agents replay up to the
-check (no prompt before it depends on `humanChecks`) and the run continues
-live from there. A problem becomes a critical (`H<round>-F1`, stage `human`)
-for that workstream's fix path: fix, delta validation, a second merge, and a
-new check (`round` 2, answered as an array in order:
-`{"<id>": ["<problem>", "ok"]}`), with later merges still held. If its fix
-never merges (cap, budget), the held merges and the whole-branch pass stay
-stopped and the escalation says so.
+re-run with the same args plus `humanChecks.<id>` set to the value `answer`
+spells out (`[{sha, answer: "ok" or the problem}]`, earlier answers first) and
+`resumeFromRunId` = the paused run. Between the pause and the resume change
+nothing but `humanChecks`: no hand fixes, no brief edits. Hold the paused
+result's `questions` and ask them with the final return's; never write their
+answers into a brief mid-pause, since that changes the prompts. No prompt before the check
+depends on `humanChecks`, so cached agents usually replay up to it, but
+timing-dependent prompts (the fix prompt's list of merged workstreams, the
+flaky registry) can miss the cache and run live. Each answer is bound to its
+sha, so a live re-run that pushes a new commit never inherits the old answer:
+it just pauses again on the new sha. A problem becomes a critical
+(`H<round>-F1`, stage `human`) for that workstream's fix path: fix, delta
+validation, a second merge (with its own shared-edits check, ids
+`S-<id>-m2-…`), and a new check on the new sha, with later merges still held.
+If its fix never merges (cap, budget, crash), the held merges and the
+whole-branch pass stay stopped and the escalation says so.
 
 ## 4. Final call (coordinator)
 
@@ -419,7 +430,7 @@ says NOT merged; unpromoted side branches). Then:
 - Read it; spot-check anything `open`, `extended`, unmerged, a non-`pass`
   verdict, `docs.ok: false`, or a `crossRepo` finding against the code (and the
   docs diffs — docs must describe what shipped, including every review-round
-  fix). Fix-ups go to a fresh `implementer`, never to you. Before any re-run,
+  fix). Fix-ups go to a fresh `implementer`, never to you (in local-only mode it pushes to `hydra-local` only and never touches `origin`). Before any re-run,
   write the user's answer to each question into the affected brief: the brief is
   the only channel by which a validator learns that "the user answered" allows a
   change. **Every fix-up is then
@@ -434,7 +445,8 @@ says NOT merged; unpromoted side branches). Then:
   replays cached results for identical prompts, so after any hand fix it
   returns the old verdicts on old SHAs and validates nothing. A human-check
   re-run is the one planned use: nothing was changed by hand, and the answer
-  only enters prompts after the check. Never resume after a hand fix; re-run
+  only enters prompts after the check (a cache miss there re-runs live and, if
+  it pushes a new commit, pauses again on the new sha). Never resume after a hand fix; re-run
   `stage: "wholeBranch"` instead. Gate prompts list the run-wide flaky registry, so
   a replay can see a different registry, run those agents live and end in a
   false "not promoted" fail: safe (nothing unvalidated lands), but re-check it.
@@ -449,7 +461,7 @@ says NOT merged; unpromoted side branches). Then:
 - Run `python3 <skill dir>/stale_sweep.py --dry-run`; if it lists
   stuck wait loops or orphaned runners in agent worktrees, run it again without
   `--dry-run`.
-- Open the PR only where the repo's process says PRs; otherwise report PR-ready
+- Open the PR only where the repo's process says PRs, and never in local-only mode (the branches are local; pushing and the PR are the user's); otherwise report PR-ready
   state per repo: branches, SHAs, test results, unresolved questions. PRs stay
   open — a human merges to `main`, especially where merge deploys.
 - **Retrospective (mandatory), one retro per run:** at Finish, success or
