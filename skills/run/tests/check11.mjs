@@ -39,7 +39,7 @@ const ws = (id, extra = {}) => ({ id, repo: '/r/one', featureBranch: 'f', branch
 const go = async (args, sc) => { const m = mock(sc); const r = await Run(args, m.agent, parallel, () => {}, free); return { r, p: m.prompts, o: m.opts, all: m.all } }
 const fails = []
 const t = async (name, fn) => { try { await fn() } catch (e) { fails.push(`${name}: ${e.message.split('\n')[0]}`) } }
-const ALSO = 'An entry with `also` holds a second finding at the same line: resolve and verify both; if the `also` one still holds, return it open under its own id.'
+const ALSO = 'An entry with `also` holds a second finding at overlapping lines: resolve and verify both; if the `also` one still holds, return it open under its own id.'
 const status = (book, id) => book.find(e => e.id === id)?.status
 const after = head => p => JSON.parse(p.split(`${head}\n`)[1].split('\n')[0]) // the JSON line a prompt puts under head
 const fixFindings = after('Findings:')

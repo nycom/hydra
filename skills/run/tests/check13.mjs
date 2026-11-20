@@ -44,7 +44,7 @@ const ws = (id, extra = {}) => ({ id, repo: '/r/one', featureBranch: 'f', branch
 const go = async (args, sc) => { const m = mock(args, sc); const r = await Run(args, m.agent, parallel, () => {}, free); return { r, ...m } }
 const fails = []
 const t = async (name, fn) => { try { await fn() } catch (e) { fails.push(`${name}: ${e.message.split('\n')[0]}`) } }
-const UNRUN_TAIL = 'the previous attempt returned without running the gate; redo the whole step and run every command'
+const UNRUN_TAIL = 'the previous attempt returned without running the gate; redo the whole step, run every command, and report the command you ran in gate.command'
 const fixFindings = p => JSON.parse(p.match(/Findings:\n(.*)\n/)[1])
 const moved = { 'a merge': () => ({ preMergeSha: SHA(41) }) } // the feature branch had moved past its base: the integrated review runs
 
@@ -62,13 +62,15 @@ await t('1b all three attempts unrun: NOT merged, and the escalation names it', 
   assert(!all['a merge'], 'no merge agent')
   const x = r.workstreams[0]
   assert(!x.merged && x.escalations.some(e => /never ran its gate/.test(e) && /NOT merged/.test(e)), JSON.stringify(x.escalations)) })
-await t('1c an empty command is unrun whatever the summary; "n/a", "not run" and "Skipped." summaries are unrun whatever the command', async () => {
-  for (const gate of [{ ...green, command: '' }, { ...green, command: '  ' }, { green: true, summary: '12 passed', flaky: [] }, { ...green, summary: 'n/a' }, { ...green, summary: 'NOT RUN' }, { ...green, summary: '(Skipped.)' }]) {
+await t('1c an empty or sentinel command is unrun whatever the summary; a sentinel-led summary is unrun whatever the command', async () => {
+  for (const gate of [{ ...green, command: '' }, { ...green, command: '  ' }, { green: true, summary: '12 passed', flaky: [] }, { ...green, summary: 'n/a' }, { ...green, summary: 'NOT RUN' }, { ...green, summary: '(Skipped.)' },
+    { ...green, command: 'none', summary: 'Gate not run: the review was clean' }, { ...green, command: 'n/a', summary: 'skipped: clean review' }, { ...green, command: 'not run', summary: 'not run (no time)' },
+    { ...green, summary: 'skipped: clean review' }, { ...green, summary: 'not run (no time)' }, { green: false, summary: 'red', command: '', flaky: [] }]) {
     const { all } = await go({ cycles: 1, workstreams: [ws('a')] }, { 'a validate c1': (p, n) => n === 1 ? { gate } : {} })
     assert.equal(all['a validate c1'].length, 2, JSON.stringify(gate))
   } })
 await t('1d (control) an honest gate runs once; a summary that merely mentions a skip is honest', async () => {
-  for (const gate of [green, { ...green, summary: '12 passed, 1 skipped' }]) {
+  for (const gate of [green, { ...green, summary: '12 passed, 1 skipped' }, { green: true, summary: 'OK (skipped=1)', command: 'python -m unittest discover -s tests', flaky: [] }]) {
     const { r, all } = await go({ cycles: 1, workstreams: [ws('a')] }, { 'a validate c1': () => ({ gate }) })
     assert(all['a validate c1'].length === 1 && r.workstreams[0].merged, JSON.stringify(gate))
   } })
@@ -109,11 +111,14 @@ await t('2a contract fail with an open critical: one top-level question carrying
   assert(Array.isArray(r.questions) && r.questions.length === 1, JSON.stringify(r.questions))
   const q = r.questions[0]
   assert(q.q.includes('re-vendor vendor/alpha-contract.yaml from alpha and refresh its digest') && q.q.includes('X-F1'), q.q)
-  assert(q.options.length >= 2 && q.options.includes(q.default), JSON.stringify(q))
+  assert(q.options.length >= 2 && q.options.includes(q.default) && /re-run stage "wholeBranch" with every repo of the contract/.test(q.default), JSON.stringify(q))
   assert(!Object.keys(all).some(L => /contract.*fix|fix.*contract/.test(L)), 'never auto-fixed') })
 await t('2b with no sections the finding issue is the recipe', async () => {
   const { r } = await go(two, { contracts: () => ({ ...D9, sections: '', findings: [{ ...F('X-F1', 'major'), issue: 'beta reads amount as a string; re-vendor the contract' }] }) })
   assert(r.questions.length === 1 && r.questions[0].q.includes('beta reads amount as a string; re-vendor the contract'), JSON.stringify(r.questions)) })
+await t('2d an open contract blocker asks even when the verdict says pass', async () => {
+  const { r } = await go(two, { contracts: () => ({ ...D9, verdict: 'pass' }) })
+  assert(r.questions.length === 1 && r.questions[0].q.includes('X-F1'), JSON.stringify(r.questions)) })
 await t('2c (control) a pass, a minor-only fail or a dead contract agent asks nothing', async () => {
   for (const c of [{}, { ...D9, findings: [F('X-F2', 'minor')] }, null]) {
     const { r } = await go(two, { contracts: () => c })
@@ -173,6 +178,12 @@ await t('3c DELTA requires an evidence string and both validate prompts ask for 
   assert(s.required.includes('evidence') && s.properties.evidence.type === 'string' && /command/.test(s.properties.evidence.description), JSON.stringify(s.properties.evidence))
   const { prompts: p2 } = await go({ cycles: 1, workstreams: [ws('a')] }, {})
   for (const p of [prompts['a validate c1'], p2['a validate c1']]) assert(/Return headSha, gate, evidence/.test(p), 'prompt names evidence') })
+await t('3c2 each validator\'s evidence reaches workstreams[].evidence, keyed by step', async () => {
+  const { r } = await go({ cycles: 1, workstreams: [ws('a')] }, {
+    'a review c1': () => ({ findings: [F('c1-F1', 'minor')] }),
+    'a validate c1': p => /Independently validate workstream/.test(p) ? { open: [F('v1-F1')], evidence: '1. ran npm test; 2. reverted hunks' } : { verified: ['v1-F1'], evidence: '1. ran the claimed test at both heads' },
+  })
+  assert.deepEqual(r.workstreams[0].evidence, { 'validate c1': '1. ran npm test; 2. reverted hunks', 'validate c1 delta': '1. ran the claimed test at both heads' }) })
 
 // 4. one workstream merged onto an untouched base has no seam: only the whole-branch validator runs
 await t('4a a single workstream merged at the base skips the integrated review; the validator keeps every section', async () => {

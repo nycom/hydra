@@ -49,7 +49,8 @@ What went wrong or slow, one bullet each, with evidence:
   name them when the journal was passed.
 - Extended cycles: `workstreams[].extended`, `workstreams[].cyclesRun` against
   `cycles`; was a critical/major open each time?
-- Escalations and questions: `workstreams[].escalations`, `workstreams[].questions`,
+- Escalations and questions: top-level `questions` (an open cross-repo contract
+  blocker), `workstreams[].escalations`, `workstreams[].questions`,
   `repos[].escalations`, `repos[].questions` (opus-fix survivors, unpromoted side
   branches, SHA mismatches)
 - Budget and reserve stops: `budget.stoppedBy`, `budget.reserve`, `budget.spent`

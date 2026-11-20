@@ -122,7 +122,7 @@ const REFUTE = 'For each claim, try to REFUTE it; a claim you cannot prove with 
 const MERGE_EDITS = (hot, edits) => hot.length ? `Shared-file edits are applied by the merge on the feature-branch tip, never in this range (shared files = ${hot.join(', ')}): a brief criterion on a shared file is met when the author's sharedEdits carry it (${edits.length ? JSON.stringify(edits) : 'none returned'}). Its absence from this range or head is never a finding; only a brief shared edit missing from that list is a finding. ` : ''
 // merge, promote and docs run as the lean implementer type, whose own instructions are written for feature work
 const NOT_FEATURE = "This step is not a feature task: write no tests, skip test-first and the self-review fix pass; change nothing these instructions don't name; follow everything below in order and return the schema."
-const ALSO = fs => fs.some(f => f.also) ? 'An entry with `also` holds a second finding at the same line: resolve and verify both; if the `also` one still holds, return it open under its own id.\n' : ''
+const ALSO = fs => fs.some(f => f.also) ? 'An entry with `also` holds a second finding at overlapping lines: resolve and verify both; if the `also` one still holds, return it open under its own id.\n' : ''
 const RO_TESTS = 'Pre-existing tests are read-only unless the brief names them. If a test or the gate contradicts the brief, or passing would need special-casing, return status blocked with a question — that is a valid outcome. For any question, the default must keep every pre-existing test unchanged and stay within the brief; offer a test edit only as a non-default option.'
 const LADDER = 'Ladder-first (reuse > stdlib > native > one line > minimum code), no speculative code, stay strictly in scope.'
 const SEV = 'Severity: critical = wrong behaviour, data loss, security, broken contract or red gate; major = real bug or design flaw; minor = the rest. Critical and major block the merge. Report only real issues; an empty list means clean.'
@@ -300,7 +300,7 @@ const unaccounted = (prior, verified, open) => prior.filter(f => blocking(f) && 
 // and the script keeps the first full result (sharedEdits, questions, answers) with the repaired sha and both attempts' notes. anySha: the caller never reads the sha.
 // gated: the prompt carries a gate, so a gate with no command or a "skipped" summary never ran: a dead attempt, never kept as bad.
 // The script can't see tool calls; command turns a silent skip into an explicit claim.
-const UNRUN = /^\W*(skip(ped)?|not run|n\/?a)\W*$/i
+const UNRUN = /^\W*(skip(ped)?|not run|none|n\/?a)\b/i // a prefix: "skipped: clean review" never ran; "OK (skipped=1)" did
 const unran = {} // label -> attempts that returned without running the gate, for the caller's escalation
 async function step(prompt, { gated, ...opts }, anySha = false) {
   let bad = null, skipped = false
@@ -308,11 +308,11 @@ async function step(prompt, { gated, ...opts }, anySha = false) {
   for (let n = 1; n <= 3; n++) {
     const tail = bad
       ? `the previous attempt finished and returned the result below, but its sha ${JSON.stringify(bad.sha)} is not a full 40-hex SHA. Do not redo the work: git ls-remote the branch you were told to push to and return the same result with the verified sha.\n${JSON.stringify(bad)}`
-      : skipped ? 'the previous attempt returned without running the gate; redo the whole step and run every command'
+      : skipped ? 'the previous attempt returned without running the gate; redo the whole step, run every command, and report the command you ran in gate.command'
       : 'the previous agent died mid-step. Redo the whole step; first check the remote for anything it already pushed.'
     const r = await agent(n === 1 ? prompt : `${prompt}\n\nAttempt ${n}: ${tail}`, n === 1 ? opts : { ...opts, label: `${opts.label} attempt ${n}` })
     const malformed = !anySha && r?.status === 'done' && r.ok && !/^[0-9a-f]{40}$/.test(r.sha)
-    const unrun = gated && r?.gate && (!r.gate.command?.trim() || UNRUN.test(r.gate.summary))
+    const unrun = gated && r?.gate && (!r.gate.command?.trim() || UNRUN.test(r.gate.command) || UNRUN.test(r.gate.summary))
     if (r && !malformed && !unrun) return bad && r.status === 'done' && r.ok ? { ...bad, sha: r.sha, notes: [...(bad.notes || []), ...(r.notes || [])] } : r
     if (unrun) unran[opts.label]++
     else bad ??= r // the first full result is the one kept and repaired
@@ -347,7 +347,7 @@ Return ok, the remote sha of ${branch} and notes (every step not done and why; e
 async function runWorkstream(w) {
   const tag = w.id
   const c = repoMap[w.repo].conf
-  const out = { id: w.id, branch: w.branch, status: '', sha: '', validatedSha: '', cyclesRun: 0, extended: false, findingsFixed: 0, open: [], sharedEdits: [], questions: [], notes: [], escalations: [], tests: '', gateTail: '', merged: false, preMergeSha: '', baseAtMerge: '', findings: [] }
+  const out = { id: w.id, branch: w.branch, status: '', sha: '', validatedSha: '', cyclesRun: 0, extended: false, findingsFixed: 0, open: [], sharedEdits: [], questions: [], notes: [], escalations: [], tests: '', gateTail: '', merged: false, preMergeSha: '', baseAtMerge: '', evidence: {}, findings: [] }
   const book = out.findings
   const decisions = [] // the author's reasoning, handed to every later reviewer and fixer
   const ledger = [] // settled findings: never re-raised unless the code under them changed
@@ -451,6 +451,7 @@ Return headSha, gate, evidence, verified (empty) and open (ids v${i}-F1, ...).`,
           { label: `${tag} validate c${i}`, phase: 'Review cycles', agentType: 'validator', model: 'opus', effort: 'high', schema: DELTA, gated: true })
         if (!val) return stop(died(`validate c${i}`, `${tag} validate c${i}`))
         if (!same(val.headSha, out.sha)) return stop(`validate c${i} saw ${val.headSha}, the head is ${out.sha}`)
+        out.evidence[`validate c${i}`] = val.evidence
         noteFlaky(w.repo, val)
         const raised = [...val.open, ...redGate(val, `v${i}-G`)]
         track(book, 'validate', raised)
@@ -503,6 +504,7 @@ Return headSha, gate, evidence, verified (ids confirmed resolved, or whose answe
           { label: `${tag} validate c${i}`, phase: 'Review cycles', agentType: 'validator', model: 'opus', effort: 'high', schema: DELTA, gated: true })
         if (!val) return stop(died(`validate c${i}`, `${tag} validate c${i}`))
         if (!same(val.headSha, fix.sha)) return stop(`validate c${i} saw ${val.headSha}, the fix pushed ${fix.sha}`)
+        out.evidence[`validate c${i} delta`] = val.evidence
         noteFlaky(w.repo, val)
         out.findingsFixed += val.verified.length
         for (const f of found)
@@ -816,9 +818,9 @@ const docsOf = repo => {
 }
 const docsOut = d => d && { ...d, findings: d.findings.map(brief) }
 // Contracts have no fix loop: an open cross-repo blocker is the user's call, with the contract check's own recipe.
-const xBlockers = crossRepo?.verdict === 'fail' ? crossRepo.findings.filter(blocking) : []
-const fixUp = 'apply the recipe with a fix-up implementer per repo, then re-run stage "wholeBranch" on those repos'
-const questions = xBlockers.length ? [{ q: `The cross-repo contract check failed with ${xBlockers.map(brief).join('; ')}. Nothing fixes contracts inside the run. The contract check's recipe: ${crossRepo.sections || xBlockers.map(f => f.issue).join(' ')}. How should it be resolved?`, options: [fixUp, 'accept the drift as known debt', 'change the contract or the briefs (say how)'], default: fixUp }] : []
+const xBlockers = (crossRepo?.findings || []).filter(blocking) // a blocker counts whatever the verdict says, as in docs
+const fixUp = 'apply the recipe with a fix-up implementer per repo, then re-run stage "wholeBranch" with every repo of the contract'
+const questions = xBlockers.length ? [{ q: `The cross-repo contract check left these open: ${xBlockers.map(brief).join('; ')}. Nothing fixes contracts inside the run. The contract check's recipe: ${crossRepo.sections || xBlockers.map(f => f.issue).join(' ')}. How should it be resolved?`, options: [fixUp, 'accept the drift as known debt', 'change the contract or the briefs (say how)'], default: fixUp }] : []
 return {
   stage: STAGE,
   budget: { spent: budget.spent() - SPENT0, tokenBudget: A.tokenBudget ?? null, turnTotal: budget.total, reserve: RESERVE, stoppedBy },

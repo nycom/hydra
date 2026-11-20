@@ -75,14 +75,17 @@ never collapses.
 `command`, the exact gate command(s) the agent ran at that head in that step.
 In a step whose prompt carries a gate (both workstream validators, the
 whole-branch validator, each recheck, and the docs validator when the repo has
-a gate), a report with an empty `command`, or a summary that is only "skipped",
-"not run" or "n/a", is retried like a dead agent with "the previous attempt
-returned without running the gate"; three such attempts stop the workstream
+a gate), a report whose `command` is empty, or whose `command` or `summary`
+starts with "skip", "skipped", "not run", "none" or "n/a" (so "skipped: clean
+review" never ran, while "OK (skipped=1)" did), is retried like a dead agent
+with "the previous attempt returned without running the gate … report the
+command you ran in gate.command"; three such attempts stop the workstream
 (NOT merged) or fail the repo, and the escalation says it never ran its gate.
 The script does not check `command` against the configured gate: validators
 legitimately split a chained gate, add flags or wrap it in the regen recipe,
-and a wrong rejection costs a whole opus validator rerun. Delta validators
-also return `evidence`, one line per step with the commands run for it.
+and a wrong rejection costs a whole opus validator rerun. Workstream validators
+also return `evidence`, one line per step with the commands run for it,
+copied into `workstreams[].evidence`.
 **One workstream on an untouched base skips the seam review:** the merge
 reports `preMergeSha` (the feature-branch tip its merge landed on) and
 `baseAtMerge` (`origin/<base>` at that time). When a repo has exactly one
@@ -253,7 +256,7 @@ otherwise and in converge mode, where a review of the fixed head follows) + per 
 rounds, +1 promote when a round pushed) + 1 contract check when 2+ repos + per
 docs repo (1, +1 validator when it pushed, +1 promote when that passed); a repo whose one workstream merged onto its untouched base starts at 1, not 2. Every
 dead agent can add up to 2 replacements; a push step that reports done without a full 40-hex SHA gets a cheap repair call instead (it keeps the result and only re-reads the SHA). One workstream with a clean cycle 1 is
-~9; two workstreams × 2 cycles is ~21. The
+~9 (~8 when it merged onto its untouched base and the integrated review is skipped); two workstreams × 2 cycles is ~21. The
 runtime runs at most min(16, CPUs−2) agents at once and caps a run at 1000
 `agent()` calls (cached replays count).
 
@@ -269,8 +272,8 @@ After it returns: `done` = merged workstreams, `phase: "close"`, then
 The workflow returns:
 
 - top level: `{stage, budget, cycles, maxCycles, questions, workstreams, repos, crossRepo, otherDocs}`;
-  `questions` holds one entry when `crossRepo.verdict` is `fail` with an open
-  critical or major: contracts have no fix loop, so it carries the contract
+  `questions` holds one entry when `crossRepo` has an open critical or major,
+  whatever its verdict says: contracts have no fix loop, so it carries the contract
   check's recipe (its `sections`, else the findings' issues) and the user decides
 - `budget`: `{spent, tokenBudget, turnTotal, reserve, stoppedBy}`. `spent` is the
   output tokens this run spent since its own start; `turnTotal` is the user's
@@ -278,7 +281,9 @@ The workflow returns:
   (e.g. `alpha-cents cycle 3`, `api whole-branch fix round 2`, `contracts`)
 - per workstream: `{id, branch, status, sha, validatedSha, cyclesRun, extended,
   findingsFixed, open, sharedEdits, questions, notes, escalations, tests,
-  gateTail, merged, preMergeSha, baseAtMerge, findings}` (empty list in `wholeBranch` stage)
+  gateTail, merged, preMergeSha, baseAtMerge, evidence, findings}` (empty list in `wholeBranch` stage);
+  `evidence` maps each workstream validator step (`validate c1`, `validate c1 delta`, …) to the
+  commands it says it ran per step
 - per repo: `{repo, featureBranch, sha, verdict, sections, seams, tests, fixRounds,
   open, questions, notes, escalations, findings, docs, finalSha, flaky}`; `sha` and
   `finalSha` are always validated SHAs on the feature branch (unpromoted
