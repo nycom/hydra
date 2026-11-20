@@ -138,6 +138,10 @@ assert.equal(pickPipelineRun([full, blocked]).id, 'a-seeded', 'pipeline must pre
 assert.equal(pickPipelineRun([blocked]).id, 'b-s16', 'pipeline falls back to the newest run')
 assert.equal(pickPipelineRun([run('old', 'S15-control', '0.3.0', '2026-11-01', 8), full]).id, 'a-seeded', 'ties go to the newest run')
 assert.equal(pickPipelineRun([]), undefined)
+const voided = variant(run('z-void', 'S17-seeded', '0.3.5', '2026-11-20', 8), r => { r.verdict = 'void'; r.voidReason = 'x' })
+assert.equal(pickPipelineRun([full, voided]).id, 'a-seeded', 'a void run is never the pipeline picture while a scored run exists')
+assert.equal(pickPipelineRun([voided]).id, 'z-void', 'a void run is the fallback')
+assert.equal(pickPipelineRun([full, run('new', 'S15-control', '0.3.5', '2026-11-20', 8)]).id, 'new', 'ties go to the newest version')
 
 const old = run('o-seeded', 'S15-seeded', '0.3.0', '2026-11-10', 8), oldCtrl = run('o-ctrl', 'S15-control', '0.3.0', '2026-11-11', 8)
 const s16Only = run('n-s16', 'S16', '0.3.1', '2026-11-20', 1)
