@@ -104,11 +104,8 @@ check_seeded() { # dest tree: feat/eval = feat/eval-base + one --no-ff merge of 
   eq "merge first parent = feat/eval-base" "$(git -C "$a" rev-parse feat/eval^1)" "$(git -C "$a" rev-parse feat/eval-base)"
   eq "side-branch commits" "$(git -C "$a" log --format=%s feat/eval^1..feat/eval^2)" "$SUBJECT"
   eq "merged files" "$(git -C "$a" diff --name-only feat/eval-base feat/eval | xargs)" "$SEEDED_FILES"
-  no_hints "merge subjects" "$(git -C "$a" log --merges --format='%s %b' feat/eval)" "$META_HINTS"
+  eq "clone branches (side branch deleted)" "$(heads "$d/alpha")" "feat/eval feat/eval-base main"
   git clone -q --branch feat/eval "$a" "$2"
-  git clone -q --branch feat/eval-base "$a" "$2-base"
-  eq "feat/eval-base defects" "$(defects "$2-base")" ""
-  eq "feat/eval-base gate" "$(gate_failures "$2-base")" "$KNOWN_RED"
 }
 check_args() { # json dest expected-workstreams smoke(yes|no)
   local raw

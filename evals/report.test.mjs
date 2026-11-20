@@ -5,7 +5,7 @@ import path from 'node:path'
 import os from 'node:os'
 import assert from 'node:assert'
 import { ROOT, loadRuns, validate, buildHtml, readmeBlock, snapshotFiles, shaFile, withBlock, blockOf,
-  passBar, latestPerScenario, previousOf, pickPipelineRun } from './report.mjs'
+  passBar, latestPerScenario, previousOf, pickPipelineRun, headline, cellState, voidTile } from './report.mjs'
 
 const read = f => fs.readFileSync(path.join(ROOT, f), 'utf8')
 const entries = loadRuns()
@@ -57,6 +57,20 @@ const testsDefault = variant(s16, r => { r.s16 = { blocked: true, testsEdited: f
 assert.equal(passBar(testsDefault), 'fail')
 bad(r => { r.s16 = { ...testsDefault.s16 }; r.verdict = 'pass' }, /verdict must be fail/, s16)
 
+// ---- a voidReason run renders as void everywhere, never as a measurement ----
+const voidSeeded = variant(seeded, r => { r.defects = allCaught(); r.recall = 1; r.voidReason = skipped; r.verdict = 'void' })
+const voidControl = variant(control, r => { r.voidReason = skipped; r.verdict = 'void' })
+assert.equal(headline(voidSeeded), `void: ${skipped}`)
+assert.equal(headline(voidControl), `void: ${skipped}`)
+assert.deepEqual(voidTile(voidSeeded), { value: '⊘ void', sub: `${voidSeeded.hydraVersion} · ${skipped}` })
+assert.deepEqual(voidTile(voidControl), { value: '⊘ void', sub: `${voidControl.hydraVersion} · ${skipped}` })
+assert.equal(voidTile(seeded), null)
+assert.deepEqual(Object.values(voidSeeded.defects).map(v => cellState(voidSeeded, v)), Array(8).fill('unscored'))
+assert.deepEqual([caught(), missed, discarded].map(v => cellState(seeded, v)), ['caught', 'missed', 'discarded'], 'the discard path is unchanged')
+// S16 says what the question's default does
+assert.ok(headline(s16).includes('default keeps tests'), headline(s16))
+assert.ok(headline(testsDefault).includes('default edits tests'), headline(testsDefault))
+
 // ---- run picking ----
 const run = (id, scenario, hydraVersion, date, stagesRun) => variant(seeded, r => {
   Object.assign(r, { id, scenario, hydraVersion, date })
@@ -74,6 +88,9 @@ const s16Only = run('n-s16', 'S16', '0.3.1', '2026-11-20', 1)
 assert.deepEqual(latestPerScenario([old, oldCtrl, s16Only]).map(r => r.id), ['o-seeded', 'o-ctrl', 'n-s16'], 'a version that re-ran only S16 must not hide the S15 tiles')
 assert.equal(previousOf([old, full], full).id, 'o-seeded')
 assert.equal(previousOf([old, full], old), undefined)
+const midVoid = variant(run('m-seeded', 'S15-seeded', '0.3.0', '2026-11-15', 8), r => { r.voidReason = 'whole-branch pass skipped'; r.verdict = 'void' })
+assert.equal(previousOf([old, midVoid, full], full).id, 'o-seeded', 'previousOf skips a void run')
+assert.equal(previousOf([midVoid, full], full), undefined, 'a void run is never the comparison')
 
 // ---- README block ----
 assert.equal(readmeBlock(entries.map(e => ({ ...e, run: { ...e.run, demo: true } }))),
