@@ -3,7 +3,7 @@
 Sources: every Workflow result JSON of the run (in order), the run args and the
 verified feature-branch SHAs. The journal is optional and never a required input:
 `<Transcript dir>/journal.jsonl` holds each agent's label, phase and result (a
-`failed` row is a dead agent, a `started` with neither is unfinished), and
+`failed` row is a dead agent, a `started` with no `result` or `failed` row is unfinished), and
 `node <skill dir>/cost.mjs <Transcript dir>` gives output tokens and agents per
 stage, total wall minutes, and the failed and unfinished agents. Never read the
 transcripts. Without a journal, write "journal not read" under Not checked. Quote evidence as `<result path> = <value>`

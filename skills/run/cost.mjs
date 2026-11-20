@@ -37,7 +37,7 @@ export function cost(dir) {
   }
   const labels = test => started.filter(a => test(a.agentId)).map(a => a.label)
   return {
-    outputTokens, agents: started.length, wallMinutes: last > first ? Math.round((last - first) / 60000) : 0, byStage,
+    outputTokens, agents: started.length, wallMinutes: last > first ? Math.round((last - first) / 6000) / 10 : 0, byStage,
     failed: labels(id => failed.has(id)), unfinished: labels(id => !done.has(id) && !failed.has(id)),
   }
 }
