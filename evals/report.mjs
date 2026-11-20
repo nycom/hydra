@@ -88,7 +88,7 @@ function previousOf(runs, r) {
 // one whole run, never stitched: the newest of those that ran the most stages
 function pickPipelineRun(runs) {
   const ran = r => Object.values(r.cost.byStage).filter(s => s.agents > 0).length
-  return [...runs].sort((a, b) => (a.verdict !== 'void') - (b.verdict !== 'void') || ran(a) - ran(b) || vcmp(a.hydraVersion, b.hydraVersion) || a.cost.agents - b.cost.agents || a.id.localeCompare(b.id)).pop()
+  return [...runs].sort((a, b) => (a.verdict !== 'void') - (b.verdict !== 'void') || ran(a) - ran(b) || vcmp(a.hydraVersion, b.hydraVersion) || a.date.localeCompare(b.date) || a.cost.agents - b.cost.agents || a.id.localeCompare(b.id)).pop()
 }
 export { passBar, latestPerScenario, previousOf, pickPipelineRun, headline, cellState, voidTile, cellTip, recallDelta }
 

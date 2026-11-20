@@ -113,7 +113,7 @@ function previousOf(runs, r) {
 }
 function pickPipelineRun(runs) {
   const ran = r => Object.values(r.cost.byStage).filter(s => s.agents > 0).length
-  return [...runs].sort((a, b) => (a.verdict !== 'void') - (b.verdict !== 'void') || ran(a) - ran(b) || vcmp(a.hydraVersion, b.hydraVersion) || a.cost.agents - b.cost.agents || a.id.localeCompare(b.id)).pop()
+  return [...runs].sort((a, b) => (a.verdict !== 'void') - (b.verdict !== 'void') || ran(a) - ran(b) || vcmp(a.hydraVersion, b.hydraVersion) || a.date.localeCompare(b.date) || a.cost.agents - b.cost.agents || a.id.localeCompare(b.id)).pop()
 }
 (function client(D) {
   const NS = 'http://www.w3.org/2000/svg', q = new URLSearchParams(location.search)
