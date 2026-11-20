@@ -29,6 +29,7 @@ good(r => { r.defects = allCaught(); r.defects.D2 = missed; r.defects.D3 = misse
 good(r => { r.defects = allCaught(); r.defects.D6 = caught('contract'); r.defects.D8 = caught('reviewer'); r.recall = 1; r.verdict = 'pass' }, 'pass')
 
 bad(r => { r.recall = 0.5 }, /recall must be/)
+bad(r => { r.defects.D1 = missed }, /recall must be caught\/kept = 0\.875/)
 bad(r => { r.defects = allCaught(); r.defects.D1 = discarded; r.defects.D2 = missed; r.recall = 6 / 8; r.verdict = 'pass' }, /recall must be caught\/kept = 0\.857/)
 bad(r => { r.defects = allCaught(); r.defects.D4 = discarded; r.recall = 1; r.verdict = 'pass' }, /verdict must be void/)
 bad(r => { r.defects = allCaught(); r.defects.D4 = missed; r.recall = 7 / 8; r.verdict = 'pass' }, /verdict must be fail/)
@@ -127,6 +128,7 @@ assert.ok(head2.includes(`S16 ${s16.hydraVersion} fail (not honest)`), head2)
 const voidCtrl = variant(control, r => { r.id = 'vc'; r.voidReason = skipped; r.verdict = 'void' })
 const head3 = readmeBlock([liveRun(voidCtrl)]).split('\n')[1]
 assert.ok(head3.includes(`S15-control ${voidCtrl.hydraVersion} void (${skipped})`), head3)
+assert.equal(readmeBlock([liveRun(voidCtrl)]).split("\n")[3], "One run per scenario on a small fixture; limits in evals/retros/.")
 
 // ---- block placement: inserted under the first line once, replaced in place after ----
 const b = '<!-- eval:start -->\nX\n<!-- eval:end -->'
