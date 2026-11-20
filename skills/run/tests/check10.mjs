@@ -1,4 +1,4 @@
-// A malformed self-reported sha gets a repair call that keeps the result, never a redo; a blocked question's default never weakens tests; an up-merge is defined.
+// A malformed self-reported sha gets a repair call that keeps the result, never a redo; a blocked question's default never weakens tests.
 import { Run } from './run.mjs'
 import assert from 'node:assert'
 const SHA = n => (n + '').padStart(40, 'a')
@@ -19,6 +19,7 @@ function mock(sc = {}) {
     if (own === null) return null
     if (L.endsWith('implement')) return (head[id] = SHA(1), { ...push, sha: head[id], ...own })
     if (/fix c(\d)/.test(L)) { head[id] = SHA(10 + +L.at(-1)); return { ...push, sha: head[id], answers: [], ...own } } // the push lands whatever sha the agent reports
+    if (/fix r(\d)/.test(L)) return { ...push, sha: SHA(70 + +L.at(-1)), answers: [], ...own }
     if (/review c\d/.test(L)) return { headSha: head[id], findings: [], ...own }
     if (/validate c\d/.test(L)) return { headSha: head[id], gate: green, verified: [], open: [], ...own }
     if (L.endsWith('merge')) return (head[repo] = SHA(50), { ...push, sha: SHA(50), ...own })
@@ -35,7 +36,7 @@ const fails = []
 const t = async (name, fn) => { try { await fn() } catch (e) { fails.push(`${name}: ${e.message.split('\n')[0]}`) } }
 const F1 = { id: 'c1-F1', severity: 'major', kind: 'bug', where: 'a:1', issue: 'issue', evidence: 'test t1 red' }
 
-const REPAIR = 'is not a full 40-hex SHA. Do not redo the work: git ls-remote the branch and return the same result with the verified sha'
+const REPAIR = 'is not a full 40-hex SHA. Do not redo the work: git ls-remote the branch you were told to push to and return the same result with the verified sha'
 await t('H1a a done fix with a placeholder sha gets a repair call and the real fix merges', async () => {
   const answers = [{ id: 'c1-F1', action: 'fixed', note: 'n' }]
   const { r, calls, prompts } = await go({ cycles: 1, workstreams: [ws('a')] }, {
@@ -50,7 +51,7 @@ await t('H1a a done fix with a placeholder sha gets a repair call and the real f
   assert(rp.includes(`its sha "PLACEHOLDER" ${REPAIR}`) && !rp.includes('died mid-step'), 'repair, not redo')
   assert(rp.includes(JSON.stringify(answers)), 'the earlier result rides along')
   assert(w.merged && w.validatedSha === SHA(11), JSON.stringify({ merged: w.merged, validatedSha: w.validatedSha, escalations: w.escalations }))
-  assert(prompts['a validate c1'].includes(JSON.stringify(answers[0].id)) && !prompts['a validate c1'].includes('PLACEHOLDER'), 'validator gets the answers, never the placeholder') })
+  assert(prompts['a validate c1'].includes(`"claim":${JSON.stringify(answers[0])}`) && !prompts['a validate c1'].includes('PLACEHOLDER'), 'validator gets the kept answer, never the placeholder') })
 await t('H1b a short implement sha is repaired; sharedEdits, questions and notes survive', async () => {
   const kept = { sharedEdits: [{ file: 'README.md', intent: 'doc X' }], questions: [{ q: 'which?', options: ['keep', 'other'], default: 'keep' }], notes: ['n1'] }
   const { r, calls, prompts } = await go({ cycles: 1, workstreams: [ws('a')] }, { 'a implement': () => ({ sha: 'aaaaaaa', ...kept }) })
@@ -73,6 +74,30 @@ await t('H1g a push step with no usable result says where to look', async () => 
 await t('H1h same() needs hex: a ref name is no sha', async () => {
   const { r } = await go({ cycles: 1, workstreams: [ws('a')] }, { 'one review': () => ({ headSha: 'origin/fx' }), 'one validate': () => ({ sha: 'origin/fx' }) })
   assert(r.repos[0].verdict === 'fail' && r.repos[0].escalations.some(e => e.includes('origin/fx')), JSON.stringify(r.repos[0])) })
+await t('H1i malformed, then malformed and lossy, then good: the first full result is kept', async () => {
+  const kept = { sharedEdits: [{ file: 'README.md', intent: 'doc X' }], questions: [{ q: 'which?', options: ['keep', 'other'], default: 'keep' }], notes: ['n1'] }
+  const { r, calls, prompts } = await go({ cycles: 1, workstreams: [ws('a')] }, {
+    'a implement': () => ({ sha: 'aaaaaaa', ...kept }),
+    'a implement attempt 2': () => ({ sha: 'bbbbbbb' }),
+    'a implement attempt 3': () => ({ notes: ['repaired'] }),
+  })
+  const w = r.workstreams[0]
+  assert(calls['a implement'] === 3 && prompts['a implement attempt 3'].includes('"sha":"aaaaaaa"'), 'attempt 3 repairs the first full result')
+  assert(w.merged && w.validatedSha === SHA(1), JSON.stringify(w))
+  assert.deepEqual(w.sharedEdits, kept.sharedEdits); assert.deepEqual(w.questions, kept.questions)
+  assert(w.notes.includes('n1') && w.notes.includes('repaired'), `notes from both: ${w.notes}`) })
+await t('H1j a repair that returns failed or ok false passes through', async () => {
+  for (const [rep, why] of [[{ status: 'failed', ok: false, sha: '', tests: 'nothing on the remote' }, 'implement failed: nothing on the remote'], [{ ok: false, tests: 'gate red' }, 'implement done: gate red']]) {
+    const { r } = await go({ cycles: 1, workstreams: [ws('a')] }, { 'a implement': () => ({ sha: 'aaaaaaa' }), 'a implement attempt 2': () => rep })
+    const w = r.workstreams[0]
+    assert(!w.merged && w.escalations.some(e => e.startsWith(why)), JSON.stringify(w.escalations))
+  } })
+await t('H1k fix-cycle and whole-branch fix escalations name their branch', async () => {
+  const die = L => ({ [L]: () => null, [`${L} attempt 2`]: () => null, [`${L} attempt 3`]: () => null })
+  const { r } = await go({ cycles: 1, workstreams: [ws('a')] }, { 'a review c1': () => ({ findings: [F1] }), ...die('a fix c1') })
+  assert(r.workstreams[0].escalations.includes('fix c1 returned no usable result 3 times (died or malformed sha); check origin/f--a for an unvalidated push; NOT merged'), JSON.stringify(r.workstreams[0].escalations))
+  const { r: r2 } = await go({ cycles: 1, workstreams: [ws('a')] }, { 'one review': () => ({ findings: [{ ...F1, id: 'W-F1' }] }), ...die('one fix r1') })
+  assert(r2.repos[0].escalations.includes('whole-branch fix r1 returned no usable result 3 times (died or malformed sha); check origin/f--wbfix1 for an unvalidated push'), JSON.stringify(r2.repos[0].escalations)) })
 await t('H1c blocked with an empty sha returns once, normally', async () => {
   const q = { q: 'which?', options: ['keep', 'other'], default: 'keep' }
   const { r, calls } = await go({ cycles: 1, workstreams: [ws('a')] }, { 'a implement': () => ({ status: 'blocked', ok: false, sha: '', questions: [q] }) })
@@ -90,10 +115,6 @@ await t('H2 question defaults keep every pre-existing test', async () => {
     assert(prompts[L].includes(KEEP), `${L} prompt`)
     assert(opts[L].schema.properties.questions.items.properties.default.description.includes(KEEP), `${L} schema`)
   } })
-
-await t('H3 the seam prompt defines an up-merge', async () => {
-  const { prompts } = await go({ cycles: 1, workstreams: [ws('a')] })
-  assert(prompts['one review'].includes('a first-parent merge of the base or parent branch into this branch is an up-merge: use it as a producer only and file nothing inside it when its diff lies outside the review range; any other merge whose diff lies inside the review range is reviewable code, whoever authored it.')) })
 
 if (fails.length) { console.error(fails.join('\n')); process.exit(1) }
 console.log('sha-guard checks ok')

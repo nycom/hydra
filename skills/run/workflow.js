@@ -287,17 +287,17 @@ const unaccounted = (prior, verified, open) => prior.filter(f => blocking(f) && 
 // A dead agent is replaced by a fresh one of the same role that redoes the whole step, up to 2 replacements.
 // The attempt number changes the prompt, so a resume can never hand back the dead attempt's cached result.
 // A done+ok result without a full 40-hex sha would orphan a correct push: the next attempt only repairs the sha,
-// and the script keeps the earlier result (sharedEdits, questions, answers) with the repaired sha. anySha: the caller never reads the sha.
+// and the script keeps the first full result (sharedEdits, questions, answers) with the repaired sha and both attempts' notes. anySha: the caller never reads the sha.
 async function step(prompt, opts, anySha = false) {
   let bad = null
   for (let n = 1; n <= 3; n++) {
     const tail = bad
-      ? `the previous attempt finished and returned the result below, but its sha ${JSON.stringify(bad.sha)} is not a full 40-hex SHA. Do not redo the work: git ls-remote the branch and return the same result with the verified sha.\n${JSON.stringify(bad)}`
+      ? `the previous attempt finished and returned the result below, but its sha ${JSON.stringify(bad.sha)} is not a full 40-hex SHA. Do not redo the work: git ls-remote the branch you were told to push to and return the same result with the verified sha.\n${JSON.stringify(bad)}`
       : 'the previous agent died mid-step. Redo the whole step; first check the remote for anything it already pushed.'
     const r = await agent(n === 1 ? prompt : `${prompt}\n\nAttempt ${n}: ${tail}`, n === 1 ? opts : { ...opts, label: `${opts.label} attempt ${n}` })
     const malformed = !anySha && r?.status === 'done' && r.ok && !/^[0-9a-f]{40}$/.test(r.sha)
-    if (r && !malformed) return bad && r.status === 'done' && r.ok ? { ...bad, sha: r.sha } : r
-    if (r) bad = r
+    if (r && !malformed) return bad && r.status === 'done' && r.ok ? { ...bad, sha: r.sha, notes: [...(bad.notes || []), ...(r.notes || [])] } : r
+    bad ??= r // the first full result is the one kept and repaired
     log(`${opts.label}: ${r ? `returned a malformed sha ${JSON.stringify(r.sha)}` : 'agent died'} (attempt ${n} of 3)`)
   }
   return null
