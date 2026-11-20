@@ -1,0 +1,6 @@
+# Wire contract for the ledger API. beta vendors a copy in vendor/alpha-contract.yaml.
+total:
+  request:
+    entries: list of {amount: integer, tenths of a cent}
+  response:
+    total_cents: integer

@@ -32,6 +32,8 @@ Seeded conditions:
 
 These cost real tokens. Run them live only on the user's explicit go, never in CI or as part of the checks. Build the fixtures now, run later.
 
+Builder: `tests/fixture/build.sh <dest> [--seed|--control|--impossible]` builds alpha/beta with bare remotes in `<dest>/remotes/`, cuts and pushes `feat/eval--alpha-seeded` for `--seed`/`--control`, and prints the Workflow args; the seeds keep the gate green except the known-red (the tests skip the seeded edges, so review must find them) and only `bash scripts/smoke.sh` goes red, on D6; `tests/fixture/build.test.sh` is its self-check.
+
 **S15 planted defects (review recall).** Seed the 8 defects on the workstream branch, not the base, so they sit inside the review range `origin/feat/eval...<head>` (defects that predate the diff are dropped by the review rules). Before the run, cut `feat/eval--alpha-seeded` from `feat/eval`, commit the seeds as one commit "Seed fixture defects", and push it (`git push origin HEAD:refs/heads/feat/eval--alpha-seeded`). The implement prompt continues from an existing, unmerged `origin/<branch>`, so the author builds on top of the seeds. Workstream `alpha-seeded` gets a brief for unrelated work in other files that never mentions the seeded files, and no `files[]`, so the merge backstop can't be what catches them.
 
 | Seed | File and line shape |
