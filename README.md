@@ -9,13 +9,16 @@ A Claude Code plugin with one skill, `/hydra:run`: a multi-repo, multi-agent imp
 
 One run per scenario on a small fixture; limits in evals/retros/.
 
+![Combined score and KPIs per version](evals/png/summary.png)
 ![Combined score and run scores per eval run](evals/png/progress.png)
-![Quality scorecard](evals/png/scorecard.png)
+![Version scorecard, scenarios by versions](evals/png/scorecard.png)
+![Trends per scenario](evals/png/trends.png)
+![Run vs run, newest version against the one before](evals/png/compare.png)
 ![Recall per planted defect](evals/png/heatmap.png)
 
 <details><summary>More charts</summary>
 
-![Cost per run](evals/png/cost.png)
+![Cost per stage](evals/png/cost.png)
 ![Pipeline with per-stage tokens](evals/png/pipeline.png)
 
 </details>

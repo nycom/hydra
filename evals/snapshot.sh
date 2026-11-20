@@ -13,7 +13,7 @@ trap 'rm -rf "$PROFILE"' EXIT
 URL="file://$PWD/evals/report.html"
 chrome() { "$CHROME" --headless --user-data-dir="$PROFILE" --no-first-run --no-default-browser-check --disable-background-networking --disable-component-update --hide-scrollbars "$@" 2>/dev/null; }
 
-for s in progress heatmap scorecard cost pipeline; do
+for s in $(node -e "import('./evals/report.mjs').then(m => console.log(m.SECTIONS.join(' ')))"); do
   # first pass: the page measures the isolated section and stamps <body data-size="w,h">
   size="$(chrome --window-size=1400,1200 --dump-dom "$URL?section=$s&theme=light&measure=1" | sed -n 's/.*data-size="\([0-9]*,[0-9]*\)".*/\1/p' | head -1)"
   [ -n "$size" ] || { echo "could not measure section $s" >&2; exit 1; }

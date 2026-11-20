@@ -43,6 +43,30 @@ Pass rule, which `verdict` must match:
 - **Combined score:** the mean run score of the newest scored (non-void) run per scenario, newest by version, then date, then id, rounded to an integer, with "n of 5 scenarios" beside it. A scenario with no scored run is left out, not counted as 0. The report header shows it beside the combined score over every version before the newest: as a ▲/▼ change when both cover the same scenarios, else as a neutral reference ("before: 100 over 4 scenarios (through 0.3.5)"). The README block opens with it.
 - **Combined as of run k:** the same mean over runs 1..k in chronological order (date, then version, then id). The progress chart draws it as one flat step per version across that version's columns (the value after its last run, since run order within a version is only id order) and shows the last 16 runs so the columns stay readable; its last point is the combined score, and the table view lists every run.
 
+## Normalized cost
+
+Cost compares across versions only within one scenario (the same fixture, the same work). Per run, from `cost` as recorded:
+
+- **Output tokens per kept seed** and **per caught seed** (seeded runs only): `outputTokens / kept` and `outputTokens / caught`. A void seeded run measured no seeds, so it has neither; a run that caught nothing has no per-catch figure.
+- **Output tokens per agent**, **context tokens per agent**, **minutes per agent**: `outputTokens / agents`, `contextTokens / agents` (only where `contextTokens` was recorded), `wallMinutes / agents`. Controls and S16 use these and the per-run totals.
+
+Tokens round to integers, minutes per agent to two decimals. A mean of a normalized figure (the KPI row, the scorecard's cost row) leaves out void runs and runs that lack the field; a single void run still shows its own cost, never its quality.
+
+## Report layout
+
+Progress first, one PNG per section, in page order:
+
+- **summary:** the combined score (hero) with a sparkline of the combined score as of each version, and a KPI row: seeded recall (caught over kept, pooled over the newest scored seeded run per scenario), major false positives (summed over the newest scored control per scenario), output and context tokens per run (mean over the newest scored run per scenario), and void runs at the newest version (its change only when both versions ran the same number of runs, else a neutral reference). Each KPI is the suite as of a version, with its change against the version before (a different scenario count shows the earlier value as a neutral reference) and a sparkline across versions. Never filtered.
+- **progress:** the per-run progress chart (run score and the combined-score step line, last 16 runs).
+- **scorecard:** scenarios × versions. A cell is the scenario's newest run at that version: `caught/kept` on a seeded run, `0 FP` or `N major FP` on a control, `pass`/`fail` on S16, `void`, or `–` when it did not run. Tint: pass, partial (a seeded pass that missed a kept seed), fail, void (neutral). The last column is the newest run against the newest scored run on an older version (recall points on the seeds both hold, major false positives, or the S16 verdict). Footer: the combined score as of each version, and output tokens per agent as the mean of per-run ratios over that version's scored runs; its change compares only the scenarios both versions scored ("on N shared scenarios").
+- **trends:** one panel per scenario, one column per run: score or recall, major false positives on a control, output and context tokens, agents, wall minutes, tokens per kept and per caught seed (seeded) and per agent. A void run shows ⊘ in quality rows, off the value axis, and a hollow marker on cost rows. The recall change is on the seeds both runs hold. Hover or focus a column for every field of the run.
+- **compare (run vs run):** pick a scenario in the filter row, then Base and Compare (default: its newest version against its newest scored older version, as the scorecard compares; with none, the version before it, void or not, since its cost counts). Tiles show before → after with the change (cost up reads bad, quality up good; a seeded score changes by recall on the shared seeds; a cost change against a void run is tagged "vs void" and not coloured, as in the trend panels), normalized cost below, and per-stage output and context tokens as two grouped-bar charts. With all scenarios selected (and in the PNG) it is one table of every scenario's default pair.
+- **heatmap:** per planted defect, which stage caught it.
+- **cost:** per scenario, output tokens per stage and version on one scale, with agents, totals, per-agent and context.
+- **pipeline:** the pipeline diagram with one run's per-stage tokens.
+
+Colour: one hue per scenario family (S15, S16, S17: the first three categorical slots, the only count that passes the all-pairs palette check), with the marker shape for the kind (circle seeded, diamond control, square S16); status colours only for pass and fail.
+
 ## Refresh
 
 ```
@@ -50,8 +74,8 @@ evals/snapshot.sh          # report.html, png/<section>.png, the README block, r
 node evals/report.test.mjs # fails when any of those is stale against runs/
 ```
 
-`report.sha256` records the runs, `report.html` and the five PNGs, and only `snapshot.sh` writes it. So the test also fails when the html was regenerated, or a PNG re-rendered, without a full snapshot.
+`report.sha256` records the runs, `report.html` and the PNGs, and only `snapshot.sh` writes it. So the test also fails when the html was regenerated, or a PNG re-rendered, without a full snapshot.
 
-While every run is a demo, the README block is a single line. With live runs it shows the combined score, a headline, a one-run caveat, the progress chart, the scorecard and the heatmap, with cost and pipeline folded under "More charts".
+While every run is a demo, the README block is a single line. With live runs it shows the combined score, a headline, a one-run caveat, then the summary, progress, scorecard, trends, run-vs-run and heatmap PNGs, with cost and pipeline folded under "More charts".
 
-`snapshot.sh` needs Google Chrome (override the path with `CHROME=`). `report.html?section=<progress|heatmap|scorecard|cost|pipeline>&theme=light` shows one section alone (`#cost` works too); that is how the PNGs are cut.
+`snapshot.sh` needs Google Chrome (override the path with `CHROME=`). `report.html?section=<summary|progress|scorecard|trends|compare|heatmap|cost|pipeline>&theme=light` shows one section alone (`#cost` works too); that is how the PNGs are cut (the section list is `SECTIONS` in `report.mjs`). `&scenario=S15-seeded`, `&base=0.3.3` and `&compare=0.3.5` preset the filter row.
