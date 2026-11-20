@@ -50,7 +50,7 @@ for (const [i, a] of W.entries())
 
 const CYCLES = A.cycles ?? null
 const CAP = A.maxCycles ?? (CYCLES ?? 2) + 2 // null -> 4; named N -> N+2 (extra cycles only while critical/major findings remain)
-const WB_ROUNDS = A.wbRounds ?? 2 // whole-branch fix -> recheck rounds while critical/major findings remain; 0 = review only
+const WB_ROUNDS = A.wbRounds ?? 2 // whole-branch fix -> recheck rounds while critical/major findings remain; 0 = no fix rounds (findings returned unfixed)
 const STAGE = A.stage || 'full'
 // Shared files no workstream commits: the merge applies each workstream's sharedEdits to them in order, and regenerates the generated ones.
 const HOT = ['**/README*', '**/CHANGELOG*', 'docs/**', 'graphify-out/**', '**/package-lock.json', '**/yarn.lock', '**/pnpm-lock.yaml', '**/poetry.lock', '**/uv.lock', '**/Cargo.lock', '**/go.sum', '**/openapi*.yaml', '**/openapi*.yml', '**/openapi*.json', '**/*.sha256']
@@ -472,7 +472,7 @@ ${RO(r.repo, 'wb-rev')}
 Briefs:
 ${briefs}
 
-Seam inventory first: for each workstream merge commit M (git log --first-parent --merges --format='%H %s' ${range.replace('...', '..')}; the subject names the workstream branch), git diff M^1 M and list what it changed at its edges: signatures, fields, config/env keys, defaults, enum values, error shapes. Grep for their use sites in the other workstreams' diffs. Return each intersection as its own line in seams (producer change -> use site -> compatible or not); an incompatible one is also a finding of kind "integration"; a first-parent merge whose subject is not a workstream branch is an up-merge: use it as a producer only and file nothing inside it.
+Seam inventory first: for each workstream merge commit M (git log --first-parent --merges --format='%H %s' ${range.replace('...', '..')}; the subject names the workstream branch), git diff M^1 M and list what it changed at its edges: signatures, fields, config/env keys, defaults, enum values, error shapes. Grep for their use sites in the other workstreams' diffs. Return each intersection as its own line in seams (producer change -> use site -> compatible or not); an incompatible one is also a finding of kind "integration"; a first-parent merge whose subject is not a workstream branch is an up-merge: use it as a producer only and file nothing inside it when its diff lies outside the review range.
 
 ${LENSES(false)}
 ${DROP}
