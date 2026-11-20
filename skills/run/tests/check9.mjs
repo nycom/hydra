@@ -1,4 +1,4 @@
-// cost.mjs: output tokens, agents, wall time and failed/unfinished agents from a synthetic Workflow transcript dir.
+// cost.mjs: output and context tokens, agents, wall time and failed/unfinished agents from a synthetic Workflow transcript dir.
 import assert from 'node:assert'
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -19,20 +19,24 @@ try {
   writeFileSync(join(dir, 'journal.jsonl'), jl([{ type: 'launched' },
     ...agents.flatMap(([agentId, label, phase]) => [{ type: 'started', key: 'k', agentId, label, phase }, ...(end[agentId] === null ? [] : [{ type: end[agentId] || 'result', key: 'k', agentId, ...(end[agentId] ? {} : { result: {} }) }])])]))
   const at = m => `2026-11-20T10:${String(m).padStart(2, '0')}:00.000Z`
+  // context = input + cache creation + cache read: 1110 at m's final usage (its first is overwritten) + 1 at n = 1111 per agent
+  const ctx = { input_tokens: 10, cache_creation_input_tokens: 100, cache_read_input_tokens: 1000 }
   agents.forEach(([id, , , out], i) => // a streamed message repeats its id: counted once, at its final usage
     writeFileSync(join(dir, `agent-${id}.jsonl`), jl([{ type: 'user', timestamp: at(i + 1), message: { content: 'secret prompt' } },
-      { type: 'assistant', timestamp: at(i + 2), message: { id: `m-${id}`, usage: { output_tokens: 1 } } }, { type: 'assistant', message: { id: `m-${id}`, usage: { output_tokens: out - 1 } } },
-      { type: 'assistant', timestamp: at(i === 5 ? 50 : i + 3), message: { id: `n-${id}`, usage: { output_tokens: 1 } } }])))
+      { type: 'assistant', timestamp: at(i + 2), message: { id: `m-${id}`, usage: { output_tokens: 1, input_tokens: 5000 } } }, { type: 'assistant', message: { id: `m-${id}`, usage: { output_tokens: out - 1, ...ctx } } },
+      { type: 'assistant', timestamp: at(i === 5 ? 50 : i + 3), message: { id: `n-${id}`, usage: { output_tokens: 1, input_tokens: 1 } } }])))
   const c = cost(dir)
   assert.equal(c.agents, 12)
   assert.equal(c.outputTokens, 227)
   assert.equal(c.wallMinutes, 49, 'first to last transcript timestamp')
   assert.deepEqual(Object.keys(c.byStage), ['implement', 'review', 'fix', 'validate', 'merge', 'wholeBranch', 'contracts', 'docs'])
-  assert.deepEqual(c.byStage.review, { tokens: 50, agents: 3 })
-  assert.deepEqual(c.byStage.fix, { tokens: 30, agents: 1 }, '" attempt N" stripped from a Review cycles label')
-  assert.deepEqual(c.byStage.wholeBranch, { tokens: 8, agents: 2 }, 'promote buckets into the stage it served')
-  assert.deepEqual(c.byStage.docs, { tokens: 5, agents: 2 })
+  assert.deepEqual(c.byStage.review, { tokens: 50, agents: 3, contextTokens: 3333 })
+  assert.deepEqual(c.byStage.fix, { tokens: 30, agents: 1, contextTokens: 1111 }, '" attempt N" stripped from a Review cycles label')
+  assert.deepEqual(c.byStage.wholeBranch, { tokens: 8, agents: 2, contextTokens: 2222 }, 'promote buckets into the stage it served')
+  assert.deepEqual(c.byStage.docs, { tokens: 5, agents: 2, contextTokens: 2222 })
   assert.equal(Object.values(c.byStage).reduce((s, x) => s + x.tokens, 0), c.outputTokens, 'stages sum to the total')
+  assert.equal(c.contextTokens, 12 * 1111, 'context tokens: last usage per message id, input + cache creation + cache read')
+  assert.equal(Object.values(c.byStage).reduce((s, x) => s + x.contextTokens, 0), c.contextTokens, 'stage context sums to the total')
   assert.deepEqual(c.failed, ['a review c2'])
   assert.deepEqual(c.unfinished, ['a review c2 attempt 2'])
   const cli = JSON.parse(execFileSync('node', [fileURLToPath(new URL('../cost.mjs', import.meta.url)), dir], { encoding: 'utf8' }))
