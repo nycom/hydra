@@ -63,13 +63,38 @@ repo fails with an escalation naming the side branch. Docs run only on a repo
 whose whole-branch pass did not fail, and only from the SHA that pass validated.
 `finalSha` is always a validated SHA. Workstream branches may not be named
 `<featureBranch>--docs` or `<featureBranch>--wbfix<n>` (the script throws).
-Before the whole-branch fix round, a validator finding whose `where` starts with
-the same `path:line` as a reviewer finding joins it as one entry (higher severity
-kept, the other finding under `also`, which keeps the entry blocking while it is
-critical or major); each reviewer finding pairs once. Verifying
+Before the whole-branch fix round, a validator finding joins a reviewer finding
+as one entry when the first `path:line` or `path:from-to` anywhere in each `where`
+names the same file with overlapping lines (higher severity kept, the other
+finding under `also`, which keeps the entry blocking while it is critical or
+major); each reviewer finding pairs once. Verifying
 the entry settles both ids unless the recheck returns the `also` one open under
-its own id. Both hunts stay independent, and a `where` with no leading
-`path:line` never collapses.
+its own id. Both hunts stay independent, and a `where` with no `path:line`
+never collapses.
+**A gate that never ran is a dead attempt:** every gate report carries
+`command`, the exact gate command(s) the agent ran at that head in that step.
+In a step whose prompt carries a gate (both workstream validators, the
+whole-branch validator, each recheck, and the docs validator when the repo has
+a gate), a report whose `command` is empty, or whose `command` or `summary`
+starts with "skip", "skipped", "not run", "none" or "n/a" (so "skipped: clean
+review" never ran, while "OK (skipped=1)" did), is retried like a dead agent
+with "the previous attempt returned without running the gate … report the
+command you ran in gate.command"; three such attempts stop the workstream
+(NOT merged) or fail the repo, and the escalation says it never ran its gate.
+The script does not check `command` against the configured gate: validators
+legitimately split a chained gate, add flags or wrap it in the regen recipe,
+and a wrong rejection costs a whole opus validator rerun. Workstream validators
+also return `evidence`, one line per step with the commands run for it,
+copied into `workstreams[].evidence`.
+**One workstream on an untouched base skips the seam review:** the merge
+reports `preMergeSha` (the feature-branch tip its merge landed on) and
+`baseAtMerge` (`origin/<base>` at that time). When a repo has exactly one
+merged workstream and those two are the same SHA, there is no second
+workstream to form a seam: the integrated review is skipped (`seams` says so)
+and the whole-branch validator alone runs, with every section (hygiene, tests,
+spec, the test guard, smoke) and any fix rounds. A `wholeBranch` re-run, a
+merge result without both SHAs, or a feature branch that had moved past its
+base always gets the integrated review.
 
 **Global rules the workflow enforces and you must too:** no AI attribution
 anywhere (no Co-Authored-By, no generated-with footers, no Claude mention, no
@@ -229,9 +254,9 @@ review lands on an unvalidated head + merge; a rejected merge that returns to it
 author adds fix + validate + merge, +3 once the named cycle count is reached, +4
 otherwise and in converge mode, where a review of the fixed head follows) + per repo (2, +2 per whole-branch fix round, max `wbRounds`
 rounds, +1 promote when a round pushed) + 1 contract check when 2+ repos + per
-docs repo (1, +1 validator when it pushed, +1 promote when that passed). Every
+docs repo (1, +1 validator when it pushed, +1 promote when that passed); a repo whose one workstream merged onto its untouched base starts at 1, not 2. Every
 dead agent can add up to 2 replacements; a push step that reports done without a full 40-hex SHA gets a cheap repair call instead (it keeps the result and only re-reads the SHA). One workstream with a clean cycle 1 is
-~9; two workstreams × 2 cycles is ~21. The
+~9 (~8 when it merged onto its untouched base and the integrated review is skipped); two workstreams × 2 cycles is ~21. The
 runtime runs at most min(16, CPUs−2) agents at once and caps a run at 1000
 `agent()` calls (cached replays count).
 
@@ -246,18 +271,26 @@ After it returns: `done` = merged workstreams, `phase: "close"`, then
 
 The workflow returns:
 
-- top level: `{stage, budget, cycles, maxCycles, workstreams, repos, crossRepo, otherDocs}`
+- top level: `{stage, budget, cycles, maxCycles, questions, workstreams, repos, crossRepo, otherDocs}`;
+  `questions` holds one entry when `crossRepo` has an open critical or major,
+  whatever its verdict says: contracts have no fix loop, so it carries the contract
+  check's recipe (its `sections`, else the findings' issues) and the user decides
 - `budget`: `{spent, tokenBudget, turnTotal, reserve, stoppedBy}`. `spent` is the
   output tokens this run spent since its own start; `turnTotal` is the user's
   "+Nk" target or `null`; `stoppedBy` lists what the reserve kept from starting
   (e.g. `alpha-cents cycle 3`, `api whole-branch fix round 2`, `contracts`)
 - per workstream: `{id, branch, status, sha, validatedSha, cyclesRun, extended,
   findingsFixed, open, sharedEdits, questions, notes, escalations, tests,
-  gateTail, merged, findings}` (empty list in `wholeBranch` stage)
+  gateTail, merged, preMergeSha, baseAtMerge, evidence, findings}` (empty list in `wholeBranch` stage);
+  `evidence` maps each workstream validator step (`validate c1`, `validate c1 delta`, …) to the
+  commands it says it ran per step
 - per repo: `{repo, featureBranch, sha, verdict, sections, seams, tests, fixRounds,
   open, questions, notes, escalations, findings, docs, finalSha, flaky}`; `sha` and
   `finalSha` are always validated SHAs on the feature branch (unpromoted
   whole-branch fixes or docs stay on their side branch, named in `escalations`);
+  `notes` also lists what a successful promote left undone (e.g. a side-branch
+  delete that was denied; for a docs-only repo, in `otherDocs[].docs.notes`):
+  delete those refs yourself;
   `flaky` = the run-wide flaky registry for that repo; `seams` = the
   whole-branch reviewer's seam inventory, one line per place a workstream's
   changed signature, field, config key, default, enum value or error shape is
@@ -283,7 +316,7 @@ The workflow returns:
 
 `questions` (`{q, options, default}`) are only what the user must decide; `notes`
 are deviations and things not run; `escalations` are what the script itself
-saw go wrong (dead agents after 2 replacements, a push step that "returned no usable result 3 times (died or malformed sha); check origin/<branch> for an unvalidated push", SHA mismatches between agents,
+saw go wrong (dead agents after 2 replacements, a validator that never ran its gate in 3 attempts, a push step that "returned no usable result 3 times (died or malformed sha); check origin/<branch> for an unvalidated push", SHA mismatches between agents,
 cap or budget stops, failed merges, a finding that survived its opus fix — each
 says NOT merged; unpromoted side branches). Then:
 
@@ -305,7 +338,7 @@ says NOT merged; unpromoted side branches). Then:
   SHAs and validates nothing. Gate prompts list the run-wide flaky registry, so
   a replay can see a different registry, run those agents live and end in a
   false "not promoted" fail: safe (nothing unvalidated lands), but re-check it.
-- Escalate to the user **only** the `questions` (plus anything else code, spec or
+- Escalate to the user **only** the `questions`, top-level and per workstream and repo (plus anything else code, spec or
   plan can't resolve) — collected and asked **once**, at the end; the retro's
   ranked list (§5) joins that same ask, after the questions.
 

@@ -7,7 +7,7 @@ const SHA = n => (n + '').padStart(40, 'a')
 const parallel = fs => Promise.all(fs.map(f => f().catch(() => null)))
 const free = { total: null, spent: () => 0, remaining: () => Infinity }
 const push = { status: 'done', ok: true, tests: 't', gateTail: 'exit 0', sharedEdits: [], decisions: [], questions: [], notes: [] }
-const green = { green: true, summary: '', flaky: [] }
+const green = { command: 'npm test', green: true, summary: '', flaky: [] }
 const F = (id, severity = 'major', where = 'x.py:3') => ({ id, severity, kind: 'bug', where, issue: `issue ${id}`, evidence: 'test t1 red' })
 // sc[label](prompt) overrides a step; all[label] keeps every prompt and opts, in call order.
 function mock(sc = {}) {
@@ -87,7 +87,7 @@ await t('17f failed docs validation: no promotion, finalSha stays validated', as
   assert(r.repos[0].verdict === 'fail' && r.repos[0].finalSha === SHA(50), JSON.stringify(r.repos[0]))
 })
 await t('17g docs validator passes with a red gate: no promotion', async () => {
-  const { r, p } = await go({ cycles: null, workstreams: [ws('a')] }, { 'one docs': () => ({ sha: SHA(80) }), 'one docs validate': () => ({ gate: { green: false, summary: 'red', flaky: [] } }) })
+  const { r, p } = await go({ cycles: null, workstreams: [ws('a')] }, { 'one docs': () => ({ sha: SHA(80) }), 'one docs validate': () => ({ gate: { command: 'npm test', green: false, summary: 'red', flaky: [] } }) })
   assert(promotes(p).length === 0 && r.repos[0].verdict === 'fail' && r.repos[0].finalSha === SHA(50), JSON.stringify(r.repos[0]))
 })
 await t('17h failed docs promotion fails the repo', async () => {
@@ -189,7 +189,7 @@ await t('18e (control) an opus author escalates on opus, never fable', async () 
 })
 
 await t('18g (control vs tier-2) red gates with different failures are not one survivor', async () => {
-  const red = x => ({ gate: { green: false, summary: x, flaky: [] } })
+  const red = x => ({ gate: { command: 'npm test', green: false, summary: x, flaky: [] } })
   const { r, o } = await go({ cycles: null, workstreams: [ws('a')] }, { 'a review c1': () => ({ findings: [F('c1-F1')] }), 'a validate c1': () => ({ verified: ['c1-F1'], ...red('A') }), 'a validate c2': () => red('B'), 'a validate c3': () => red('C'), 'a validate c4': () => red('D') })
   assert(['c1', 'c2', 'c3', 'c4'].every(c => o[`a fix ${c}`].model === 'sonnet') && r.workstreams[0].questions.length === 0, JSON.stringify(r.workstreams[0]))
 })
