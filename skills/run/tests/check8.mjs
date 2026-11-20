@@ -19,11 +19,15 @@ has(/success or failure/, 'after success or failure')
 has(/wholeBranch/, 'wholeBranch re-runs included')
 has(/result JSON/, 'briefed with the result JSON')
 has(/threw/, 'crashed Workflow call still gets a retro')
-has(/journal path/, 'journal path passed from the launch result')
+has(/`<Transcript dir>\/journal\.jsonl`/, 'journal path spelled from the launch result')
+has(/`started` with no `result` is a dead agent/, 'journal: dead agents')
+has(/tests\/fixture\/cost\.mjs <Transcript dir>`/, 'cost from the cost script')
+has(/never read the transcripts/, 'transcripts are not read')
 has(/resumeFromRunId/, 'resume recovery gets one retro')
 has(/read-only `general-purpose`[^.]*opus/, 'one read-only general-purpose agent on opus')
 has(/you save/i, 'the coordinator saves the file')
-has(/eval runs[^.]*evals\/retros\/<YYYY-MM-DD>-<scenario>-v<version>\.md/i, 'eval-run output location')
+has(/eval runs[^.]*evals\/retros\/<run id>\.md/i, 'eval-run output location')
+has(/evals\/runs\/<run id>\.json/, 'eval retro shares the run file id')
 has(/plugin cache/, 'hydra repo is a clone, never the plugin cache')
 has(/treat it as real/i, 'unsure means private')
 has(/real runs[^.]*never in/i, 'real-run output location')
@@ -34,11 +38,18 @@ has(/no project, repo, person or host names/i, 'privacy: names')
 has(/no code copied/i, 'privacy: code')
 for (const x of ['local filesystem paths', 'branch names', 'URLs', 'secrets', 'env values']) has(new RegExp(x), `privacy: ${x}`)
 has(/grep the staged diff and the PR text/, 'mechanical privacy gate')
+has(/expanded `\$HOME` value/, 'gate greps the expanded $HOME')
+has(/tests\/fixture-scenarios\.md and skills\/run\/tests\/fixture\/ \(fixture repos, branches, workstream ids\) are public and exempt/, 'fixture names are exempt')
 for (const x of ['repo paths', 'featureBranch', 'workstream ids', '\\$HOME', 'PR titles', 'bodies', 'commit messages']) has(new RegExp(x), `privacy gate covers ${x}`)
 has(/AskUserQuestion/, 'ranked list via AskUserQuestion')
 has(/Nothing is applied without/, 'nothing applied without OK')
+has(/PRs reviewed until clean/, 'approved changes become PRs reviewed until clean')
 has(/skills\/run\/tests\/fixture\/build\.sh/, 'names the fixture builder')
-assert(/retro/i.test(section('## 4. Final call', '## 5. Finish')), '§4 end-of-run ask allows the retro list')
+const final = section('## 4. Final call', '## 5. Finish')
+assert(/retro/i.test(final), '§4 end-of-run ask allows the retro list')
+const OPEN = /`open` in the ledger means no validator accepted it; it may be absent from `open` \(a minor nobody re-raised, or an escalation awaiting the user\)\. Count a carried minor once\./
+assert(OPEN.test(final), '§4 explains ledger open vs open strings')
+assert(/the result key, not the prompt-side ledger/.test(read('workflow.js')), 'crossRepo.ledger is told apart from the prompt-side ledger')
 
 const retro = read('retro.md')
 for (const h of ['Run', 'Process', 'Data', 'Changes, ranked', 'Eval gaps', 'Not checked'])
@@ -46,6 +57,12 @@ for (const h of ['Run', 'Process', 'Data', 'Changes, ranked', 'Eval gaps', 'Not 
 assert(/^\s*\d+\. target: hydra \| evals$/m.test(retro), 'Changes: target')
 for (const f of ['what', 'evidence', 'expected gain', 'cost']) assert(new RegExp(`^\\s+${f}:`, 'm').test(retro), `Changes lacks ${f}:`)
 assert(/generalis/i.test(retro), 'retro.md states the privacy rule')
+assert(/no local paths, branch names, URLs, secrets or env values/.test(flat(retro)), 'retro.md privacy paragraph')
+assert(OPEN.test(flat(retro)), 'retro.md explains ledger open vs open strings')
+assert(/`workstreams\[\]\.status`/.test(retro), 'Outcome includes workstream status')
+assert(/Omit a prompt with nothing to report; a section with nothing at all is the single word none; a null crossRepo or docs is not a finding\./.test(flat(retro)), 'empty-section rule')
+assert(/evals\/runs\/<run id>\.json/.test(retro), 'eval retro points at the run file')
+assert(/review, wb-review -> reviewer[^\n]*test-guard[^\n]*contract -> contract/.test(retro), 'ledger stage -> evals catcher mapping')
 assert(/journal not read/.test(retro) && /never a required input/.test(flat(retro)), 'retro.md: the journal is optional, the result is primary')
 
 // Mock run: 2 repos + a docs-only repo, a review finding fixed in cycle 1, whole-branch findings left open (wbRounds 0).
@@ -96,3 +113,48 @@ for (const path of paths) {
   }
 }
 console.log('retro checks ok')
+
+// Status logic: earlier red gates settle on the next green gate (workstream and repo), a declined minor,
+// a recheck-verified id, and a validator re-raising a review finding keeps its review stage.
+{
+  const gate = green => ({ green, summary: green ? '' : 'red', flaky: [] })
+  const head = p => (p.match(/\.\.\.?([0-9a-f]{40})/) || [])[1]
+  let n = 10
+  const answers = ids => ids.map(([id, action]) => ({ id, action, note: 'n' }))
+  const sc = {
+    'a review c1': () => ({ findings: [F('c1-F1'), { ...F('c1-F2', 'minor'), where: 'b:2' }] }),
+    'a fix c1': () => ({ answers: answers([['c1-F1', 'fixed'], ['c1-F2', 'declined']]) }),
+    'a validate c1': () => ({ gate: gate(false), verified: ['c1-F2'], open: [F('c1-F1')] }),
+    'a validate c2': () => ({ gate: gate(false), verified: ['c1-F1'], open: [] }),
+    'one review': () => ({ findings: [F('W-F1')] }),
+    'one validate': () => ({ verdict: 'fail', gate: gate(false), findings: [] }),
+    'one fix r1': () => ({ answers: answers([['W-F1', 'fixed']]) }),
+    'one recheck r1': () => ({ verdict: 'fail', gate: gate(false), verified: ['W-F1'], findings: [] }),
+  }
+  const agent = async (p, o) => {
+    const L = o.label, x = sc[L]?.() || {}
+    if (L.endsWith('implement')) return { ...push, sha: SHA(1) }
+    if (/review c\d$/.test(L)) return { headSha: head(p), findings: [], ...x }
+    if (/fix c\d$/.test(L) || /fix r\d$/.test(L)) return { ...push, sha: SHA(++n), answers: [], ...x }
+    if (/validate c\d$/.test(L)) return { headSha: head(p), gate: gate(true), verified: [], open: [], ...x }
+    if (L.endsWith('merge')) return { ...push, sha: SHA(3) }
+    if (L === 'one review') return { headSha: SHA(3), seams: 'none', findings: [], ...x }
+    if (L === 'one validate') return { verdict: 'pass', sections: 's', sha: SHA(3), tests: 't', gate: gate(true), findings: [], ...x }
+    if (/recheck r\d$/.test(L)) return { verdict: 'pass', sections: 's', sha: head(p), tests: 't', gate: gate(true), findings: [], verified: [], ...x }
+    if (L.endsWith('promote')) return { ok: true, sha: (p.match(/ to ([0-9a-f]{40})\./) || [])[1], notes: [] }
+    if (L.endsWith(' docs')) return { baseSha: SHA(3), sha: '', files: [], prBody: false, ok: true, tests: 't', notes: [] }
+    throw new Error('unmocked ' + L)
+  }
+  const r = await Run({ cycles: null, workstreams: [ws('a', '/r/one')] }, agent, parallel, () => {}, { total: null, spent: () => 0, remaining: () => Infinity })
+  const w = r.workstreams[0], repo = r.repos[0]
+  assert(w.merged, 'status scenario merges: ' + JSON.stringify(w.escalations))
+  is(entry(w.findings, 'c1-F1'), { stage: 'review', status: 'fixed' }, 're-raised review finding keeps its stage')
+  is(entry(w.findings, 'c1-F2'), { stage: 'review', status: 'declined' }, 'declined minor')
+  is(entry(w.findings, 'v1-G'), { stage: 'validate', status: 'fixed' }, 'first red gate settles on a later green')
+  is(entry(w.findings, 'v2-G'), { stage: 'validate', status: 'fixed' }, 'second red gate')
+  assert.equal(repo.verdict, 'pass', 'repo passes after round 2: ' + JSON.stringify(repo.escalations))
+  is(entry(repo.findings, 'W-F1'), { stage: 'wb-review', status: 'fixed' }, 'recheck-verified id')
+  is(entry(repo.findings, 'V-G'), { stage: 'wb-validate', status: 'fixed' }, 'whole-branch red gate settles on a later green')
+  is(entry(repo.findings, 'R1-G'), { stage: 'recheck', status: 'fixed' }, 'recheck red gate')
+}
+console.log('retro status checks ok')

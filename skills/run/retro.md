@@ -1,36 +1,42 @@
-# Hydra retro: <YYYY-MM-DD> <scenario or topic>
+# Hydra retro: <run id, or date and topic>
 
 Sources: every Workflow result JSON of the run (in order), the run args and the
-verified feature-branch SHAs. The journal path is optional and never a required
-input: read it only to attribute per-agent cost or a dead agent; without it write
+verified feature-branch SHAs. The journal is optional and never a required input:
+`<Transcript dir>/journal.jsonl` holds each agent's label, phase and result (a
+`started` with no `result` is a dead agent), and `node <skill dir>/tests/fixture/cost.mjs <Transcript dir>`
+gives tokens per stage. Never read the transcripts. Without a journal, write
 "journal not read" under Not checked. Quote evidence as `<result path> = <value>`
 (e.g. `workstreams[id=alpha].extended = true`) or a finding id. A claim with no
-evidence goes to Not checked. Write "none" in an empty section; never drop one.
+evidence goes to Not checked. Omit a prompt with nothing to report; a section with
+nothing at all is the single word none; a null crossRepo or docs is not a finding.
 Keep it to about 120 lines.
 
 Privacy: anything bound for the public repo (Changes, Eval gaps, the whole file on
 an eval run) is generalised. No project, repo, person or host names, no local paths,
 branch names, URLs, secrets or env values (`workstreams[].gateTail` and
-`workstreams[].notes` may hold them), no code from private repos; describe the shape.
+`workstreams[].notes` may hold them), no code from private repos; describe the
+shape. Fixture names from tests/fixture-scenarios.md and tests/fixture/ are public.
 
 Finding ids: `c<i>-F<n>` review; `v<i>-F<n>`, `v<i>-R<n>`, `v<i>-G` workstream
 validator; `M-F1` rejected merge; `W-F<n>` whole-branch review; `V-F<n>`, `V-G`
 whole-branch validator; `R<n>-F<m>`, `R<n>-G` recheck; `D-F<n>`, `D-G`, `D-X`, `D-P`
 docs; `X-F<n>` contracts; `<ws id>:<id>` a workstream minor carried to the
 whole-branch pass. Each one's stage and status are in `workstreams[].findings`,
-`repos[].findings`, `otherDocs[].findings` and `crossRepo.ledger`.
+`repos[].findings`, `otherDocs[].findings` and `crossRepo.ledger`. `open` in the
+ledger means no validator accepted it; it may be absent from `open` (a minor nobody
+re-raised, or an escalation awaiting the user). Count a carried minor once.
 
 ## Run
 
 - Date:
 - Hydra version: (`version` in plugin.json)
-- Scenario: (fixture scenario ids, or "real run")
+- Scenario: (fixture scenario ids and `evals/runs/<run id>.json`, or "real run")
 - Calls: first run plus N `stage: "wholeBranch"` re-runs; any call that threw (error text)
 - Args summary: workstream count and models, repo count, cycles, maxCycles,
   wbRounds, tokenBudget, tokenReserve, smoke / checks / quickGate set or not
-- Outcome: `workstreams[].merged` per workstream, `repos[].verdict`,
-  `repos[].finalSha` (verified), `repos[].docs.verdict`, `otherDocs[].docs.verdict`,
-  `crossRepo.verdict`
+- Outcome: `workstreams[].status` and `workstreams[].merged` per workstream,
+  `repos[].verdict`, `repos[].finalSha` (verified), `repos[].docs.verdict`,
+  `otherDocs[].docs.verdict`, `crossRepo.verdict`
 
 ## Process
 
@@ -58,14 +64,15 @@ What went wrong or slow, one bullet each, with evidence:
 
 ## Data
 
-- Evals only: recall per seed (caught / total, the stage that caught each, the
-  misses) and false positives on the control (major-or-above findings that map to
-  no seed and no real flaw). Scenario pass/fail table.
+- Evals: recall, false positives and the pass verdict live in
+  `evals/runs/<run id>.json`; point at it, don't restate its tables. Add only what
+  it lacks: which finding id caught each seed and why a miss slipped through.
+  Ledger stage -> evals catcher: review, wb-review -> reviewer; validate, wb-validate, recheck, docs -> validator; a finding on a deleted, skipped or weakened pre-existing test -> test-guard, whatever its stage; contract -> contract.
 - Findings: counts by severity, kind, stage and status from the findings lists;
   `workstreams[].findingsFixed` is only a count of verified ids.
 - Cost: `budget.spent` of each call and their sum, against `budget.tokenBudget`
-  or `budget.turnTotal`; what `budget.stoppedBy` cut. Per-agent hotspots only if
-  the journal was read.
+  or `budget.turnTotal`; what `budget.stoppedBy` cut. With the journal, the
+  cost.mjs `byStage` and its top 3 stages.
 
 ## Changes, ranked
 

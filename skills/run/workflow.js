@@ -273,7 +273,7 @@ const blocking = f => f.severity !== 'minor'
 const STATUS = ['fixed', 'declined', 'answered'] // an escalated finding stays open: it is the user's call
 const track = (book, stage, fs) => { for (const f of fs) { const e = book.find(x => x.id === f.id); const n = { id: f.id, stage: e?.stage || stage, severity: f.severity, kind: f.kind, where: f.where, issue: f.issue, status: 'open' }; e ? Object.assign(e, n) : book.push(n) } }
 const settle = (book, id, action) => { const e = book.find(x => x.id === id); if (e) e.status = STATUS.includes(action) ? action : 'open' }
-const settleGate = (book, prior, gate) => { if (gate.green) for (const f of prior) if (f.where === 'gate') settle(book, f.id, 'fixed') }
+const settleGate = (book, gate) => { if (gate.green) for (const e of book) if (e.where === 'gate' && e.status === 'open') e.status = 'fixed' }
 const asLedger = (stage, fs = []) => { const b = []; track(b, stage, fs); return b }
 // SHA checks compare what two different agents reported. The script can't run git, so this catches
 // inconsistency between agents (a moved tip, a stale read), not one agent lying about both sides.
@@ -475,7 +475,7 @@ Return headSha, gate, verified (ids confirmed resolved, or whose answer or decli
             ledger.push({ id: f.id, where: f.where, issue: f.issue, status })
             settle(book, f.id, status)
           }
-        settleGate(book, found, val.gate)
+        settleGate(book, val.gate)
         carry = [...val.open, ...redGate(val, `v${i}-G`), ...unaccounted(found, val.verified, val.open)]
         track(book, 'validate', carry)
         out.validatedSha = fix.sha
@@ -649,7 +649,7 @@ sha = the commit you checked. verdict pass only if nothing critical or major is 
     Object.assign(res, { verdict: re.verdict, sections: re.sections, tests: re.tests })
     checked = re.sha
     for (const id of re.verified) settle(book, id, fix.answers.find(a => a.id === id)?.action || 'fixed')
-    settleGate(book, findings, re.gate)
+    settleGate(book, re.gate)
     findings = [...re.findings, ...redGate(re, `R${round}-G`), ...unaccounted(findings, re.verified, re.findings)]
     track(book, 'recheck', findings)
   }
@@ -761,6 +761,7 @@ return {
     const docsFailed = d && (d.sha ? d.verdict !== 'pass' : d.verdict === 'fail')
     return { ...r, verdict: docsFailed ? 'fail' : r.verdict, escalations: [...r.escalations, ...(docsFailed ? [d.sha ? `docs commit ${d.sha} left unpromoted on ${r.featureBranch}--docs` : 'docs agent died 3 times; docs not synced'] : [])], open: [...r.open, ...(d?.findings || [])].map(brief), questions: uniqQ(r.questions), notes: uniq(r.notes), findings: [...r.findings, ...asLedger('docs', d?.findings)], docs: docsOut(d), finalSha: (d?.verdict === 'pass' && d.sha) || r.sha, flaky: flakyOf(r.repo) }
   }),
+  // crossRepo.ledger is the result key, not the prompt-side ledger of settled findings inside runWorkstream
   crossRepo: crossRepo && { ...crossRepo, findings: crossRepo.findings.map(brief), ledger: asLedger('contract', crossRepo.findings) },
   otherDocs: DOCS.filter(d => !repoMap[d.repo]).map(d => ({ repo: d.repo, featureBranch: d.featureBranch, docs: docsOut(docsOf(d.repo)), findings: asLedger('docs', docsOf(d.repo)?.findings), flaky: flakyOf(d.repo) })),
 }
