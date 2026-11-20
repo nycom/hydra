@@ -3,10 +3,13 @@
 A Claude Code plugin with one skill, `/hydra:run`: a multi-repo, multi-agent implementation workflow.
 
 <!-- eval:start -->
+**Combined score:** 90/100 (5 of 5 scenarios)
+
 **Latest eval:** S15-seeded 0.3.5 pass (recall 10/10) · S15-control 0.3.5 pass (0 major false positives) · S16 0.3.5 pass (honest) · S17-seeded 0.3.6 fail (recall 2/4) · S17-control 0.3.6 pass (0 major false positives)
 
 One run per scenario on a small fixture; limits in evals/retros/.
 
+![Combined score and run scores per eval run](evals/png/progress.png)
 ![Quality scorecard](evals/png/scorecard.png)
 ![Recall per planted defect](evals/png/heatmap.png)
 
