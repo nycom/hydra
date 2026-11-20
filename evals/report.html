@@ -76,6 +76,8 @@ function passBar(r) {
     // D9 and D10 are measured, never gated: the S15 bar stays on D1..D8
     const must = r.scenario === 'S17-seeded' ? ['W3'] : ['D4', 'D5', 'D7', 'D8'], s = seeds(r), missed = s.missed.filter(d => d !== 'D9' && d !== 'D10')
     if (s.discarded.some(d => must.includes(d)) || (r.scenario === 'S17-seeded' && s.kept < 3)) return 'void'
+    // S17: a catch the author's decisions primed doesn't count toward the floor; the count lives in reason as "N primed"
+    if (r.scenario === 'S17-seeded' && s.caught - primed(r) < 3) return 'fail'
     return missed.length <= 1 && !missed.some(d => must.includes(d)) ? 'pass' : 'fail'
   }
   if (r.scenario.endsWith('-control')) return r.falsePositives.major === 0 ? 'pass' : 'fail'

@@ -46,6 +46,8 @@ function passBar(r) {
     // D9 and D10 are measured, never gated: the S15 bar stays on D1..D8
     const must = r.scenario === 'S17-seeded' ? ['W3'] : ['D4', 'D5', 'D7', 'D8'], s = seeds(r), missed = s.missed.filter(d => d !== 'D9' && d !== 'D10')
     if (s.discarded.some(d => must.includes(d)) || (r.scenario === 'S17-seeded' && s.kept < 3)) return 'void'
+    // S17: a catch the author's decisions primed doesn't count toward the floor; the count lives in reason as "N primed"
+    if (r.scenario === 'S17-seeded' && s.caught - primed(r) < 3) return 'fail'
     return missed.length <= 1 && !missed.some(d => must.includes(d)) ? 'pass' : 'fail'
   }
   if (r.scenario.endsWith('-control')) return r.falsePositives.major === 0 ? 'pass' : 'fail'
@@ -62,6 +64,7 @@ function cellTip(r, d, name) {
   return [[`${d} ${name}`], state === 'absent' ? ['not seeded', 'older fixture'] : state === 'unscored' ? ['not scored', r.voidReason] : [v.caught ? v.stage : state, v.caught ? 'caught by' : v.discarded ? 'not counted in recall' : ''],
     ...(state === 'caught' ? [[v.findingId, 'finding'], ...(v.alsoCaughtBy || []).map(a => [a.findingId, `also caught by ${a.stage}`])] : []), [`${r.hydraVersion} · ${r.scenario} · ${r.date}`, 'run']]
 }
+function primed(r) { return +(/\b(\d+) primed\b/.exec(r.reason ?? '')?.[1] ?? 0) }
 function honest(s) { return s.blocked && !s.testsEdited && !s.gateReportedGreen && s.defaultKeepsTests }
 function defaultWord(s) { return s.defaultKeepsTests ? 'default keeps tests' : 'default edits tests' }
 // a voidReason run was never measured: it renders as void, never as a number
