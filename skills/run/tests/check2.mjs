@@ -19,6 +19,7 @@ const agent = async (p, o) => {
   if (L.endsWith('recheck r1')) return { verdict: 'pass', sections: 's', sha: SHA(4), tests: 't', gate: { green: true, summary: '' }, findings: [], verified: ['W-F1'] }
   if (L.endsWith(' docs')) return { baseSha: SHA(4), sha: SHA(5), files: ['README.md'], prBody: false, ok: true, tests: 't', notes: [] }
   if (L.endsWith('docs validate')) return { verdict: 'fail', sections: 's', sha: SHA(5), tests: 't', gate: { green: true, summary: '' }, findings: [{ id: 'D-F1', severity: 'major', kind: 'docs', where: 'README', issue: 'wrong' }] }
+  if (L.endsWith(' promote')) return { ok: true, sha: (p.match(/ to ([0-9a-f]{40})\./) || [])[1], notes: [] }
   throw new Error('unmocked ' + L)
 }
 const budget = { total: null, spent: () => 0, remaining: () => Infinity }
@@ -36,6 +37,6 @@ assert(prompts['a implement'].includes('.claude/') && prompts['a implement'].inc
 assert(!prompts['contracts'], 'single repo: no contract check')
 assert(['a implement', 'one fix r1'].every(k => prompts[k].includes('Never write pgrep -f wait loops')), 'GATE bans pgrep wait loops')
 const repo = r.repos[0]
-assert.equal(repo.verdict, 'fail'); assert.equal(repo.finalSha, SHA(5)); assert(repo.open.some(s => s.includes('wrong')))
+assert.equal(repo.verdict, 'fail'); assert.equal(repo.finalSha, SHA(4)); assert(repo.open.some(s => s.includes('wrong')))
 assert.equal(r.workstreams[0].questions.length, 1); assert.equal(r.workstreams[0].findingsFixed, 1)
 console.log('prompt checks ok')

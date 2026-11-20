@@ -30,7 +30,31 @@ when `cycles` is `null`; `maxCycles` overrides it. Minors never drive a cycle:
 fixers may decline them, and leftovers are carried to the whole-branch fix
 round. A converged review of a head no validator has seen yet (typically a clean
 cycle 1) gets one validator pass before it can merge; if that validator finds a
-critical or major, the same cycle goes straight to the fix.
+critical or major, the same cycle goes straight to the fix. A blocker that
+survives two fix rounds (same id, or same `where`) gets its next fix on opus
+with the earlier attempts in the prompt; if it survives that too, it becomes a
+`questions` entry and the workstream stops, NOT merged — never another patch,
+and never fable inside the workflow. A merge the merge agent rejects goes back
+to its author once (if the cap and reserve allow): its notes become an
+`integration` critical, one fix cycle (no re-review of the unchanged head) and a
+delta validation, then it requeues behind the repo's merge lock.
+
+**Validators, gates and green:** the first validator of each workstream writes
+2–5 black-box acceptance tests from the brief before it reads the diff, runs
+them at the head and never commits them (a brief that says no behaviour change
+gets the same inputs run at base and head, outputs diffed). Every validator runs
+each new or changed test 3 times in a row. Tests a validator proves flaky
+(intermittent on head and failing at the base too) join a run-wide per-repo
+registry: later gate prompts give them one rerun and no base rerun, and the
+result lists them. **Promote-on-green:** whole-branch fixes push to
+`<featureBranch>--wbfix<round>` and docs to `<featureBranch>--docs`; a low-effort
+sonnet step fast-forwards the feature branch only after the recheck or docs
+validator passes, and only if it still sits at the expected head. Otherwise the
+side branch stays, the feature branch stays at its last validated SHA, and the
+repo fails with an escalation naming the side branch. Docs run only on a repo
+whose whole-branch pass did not fail, and only from the SHA that pass validated.
+`finalSha` is always a validated SHA. Workstream branches may not be named
+`<featureBranch>--docs` or `<featureBranch>--wbfix<n>` (the script throws).
 
 **Global rules the workflow enforces and you must too:** no AI attribution
 anywhere (no Co-Authored-By, no generated-with footers, no Claude mention, no
@@ -138,6 +162,7 @@ Workflow({
         files: ["src/auth/", "test/auth/"],   // optional; dir/ or dir/** or exact paths
         reviewModel: "fable",        // optional; default one tier above model
         checks: ["npm run e2e:login"], // optional; extra commands run under a 540 s cap, red = critical
+        quickGate: "npm run test:unit", // optional; author/fixer pre-push gate and reviewer probes; validators, merge, whole-branch and docs keep the full gate
         brief: "…", gate: "npm run lint && npm run typecheck && npm test && npx playwright test" },
       { id: "ui-login", repo: "~/code/ui", featureBranch: "feat/auth",
         branch: "feat/auth--ui-login", model: "sonnet", brief: "…", gate: "…" }
@@ -165,11 +190,12 @@ Workflow({
 | `maxCycles` | `cycles + 2`, or 4 | hard cap on cycles per workstream (must be ≥ `cycles`) |
 | `skillDir` | none | this skill's absolute base directory (the `<skill dir>` printed when the skill loads); the script can't learn its own path, and agents run `node <skillDir>/run-cmd.mjs <seconds> '<command>'` for smoke and checks. Required when any repo has `smoke` or any workstream has `checks` |
 | `stage` | omitted | `"wholeBranch"`: skip implement/cycles/merge; re-run whole-branch review + validator, contract check, docs sync on the current feature-branch tips |
-| `wbRounds` | `2` | whole-branch fix rounds; `0` = no fix rounds (findings returned unfixed; the repo verdict is `fail` while any is critical or major); pair with `docsRepos: []` for a review-only pass |
+| `wbRounds` | `2` | whole-branch fix rounds, each pushed to a side branch `<featureBranch>--wbfix<round>` and promoted onto the feature branch only after a passing recheck; `0` = no fix rounds (findings returned unfixed; the repo verdict is `fail` while any is critical or major); pair with `docsRepos: []` for a review-only pass (a failing repo skips docs regardless) |
 | `tokenBudget` | `null` | output-token cap for this run; the user's "+Nk" turn target also applies. Spend is counted from the script's start, so a `resumeFromRunId` crash recovery starts a fresh `tokenBudget` |
 | `tokenReserve` | `600000` | before each new cycle, each whole-branch fix round, the contract check and docs: if less than this is left, nothing new starts; the item is reported not merged / failed with the reason |
 | `workstreams[].files` | none | allowed paths; overlap within a repo throws; merge rejects edits outside |
 | `workstreams[].checks` | none | extra commands (an e2e login, a contract probe) the author, fixer and both workstream validators run via `run-cmd.mjs` with a 540 s cap, reporting the exit code per command; a red or timed-out check is critical. The `gate` itself never gets a deadline |
+| `workstreams[].quickGate` | none | a faster gate the author and fixer run before each push, and reviewers use for probes. The full `gate` stays mandatory for both workstream validators, the merge, whole-branch fix rounds and rechecks, and docs |
 | `workstreams[].reviewModel` | sonnet→`opus`, opus→`fable` | review model; whole-branch review uses the repo's highest |
 | `repos[].knownRed` | `[]` | exact test ids red at the base; any other failure is red |
 | `repos[].hot` | README*, CHANGELOG*, `docs/**`, `graphify-out/**`, lockfiles, `openapi*.{yaml,yml,json}`, `*.sha256` | replaces the default hot list for that repo — add generated-type and contract paths here; `[]` turns the hot-file rule off for repos whose workstreams legitimately edit docs (the `files[]` check still applies) |
@@ -184,10 +210,13 @@ Repo paths are normalized (trailing slashes stripped).
 
 **Size:** agents ≈ per workstream (implement + 1 review per cycle + fix and
 validate per cycle with critical/major findings + 1 validator when a clean
-review lands on an unvalidated head + merge) + per repo (2, +2 per whole-branch
-fix round, max `wbRounds` rounds) + 1 contract check when 2+ repos + per docs repo (1, +1
-validator when it pushed). Every dead agent can add up to 2 replacements. One
-workstream with a clean cycle 1 is ~8; two workstreams × 2 cycles is ~20. The
+review lands on an unvalidated head + merge; a rejected merge that returns to its
+author adds fix + validate + merge, +3 once the named cycle count is reached, +4
+otherwise and in converge mode, where a review of the fixed head follows) + per repo (2, +2 per whole-branch fix round, max `wbRounds`
+rounds, +1 promote when a round pushed) + 1 contract check when 2+ repos + per
+docs repo (1, +1 validator when it pushed, +1 promote when that passed). Every
+dead agent can add up to 2 replacements. One workstream with a clean cycle 1 is
+~9; two workstreams × 2 cycles is ~21. The
 runtime runs at most min(16, CPUs−2) agents at once and caps a run at 1000
 `agent()` calls (cached replays count).
 
@@ -211,20 +240,28 @@ The workflow returns:
   findingsFixed, open, sharedEdits, questions, notes, escalations, tests,
   gateTail, merged}` (empty list in `wholeBranch` stage)
 - per repo: `{repo, featureBranch, sha, verdict, sections, seams, tests, fixRounds,
-  open, questions, notes, escalations, docs, finalSha}`; `seams` = the
+  open, questions, notes, escalations, docs, finalSha, flaky}`; `sha` and
+  `finalSha` are always validated SHAs on the feature branch (unpromoted
+  whole-branch fixes or docs stay on their side branch, named in `escalations`);
+  `flaky` = the run-wide flaky registry for that repo; `seams` = the
   whole-branch reviewer's seam inventory, one line per place a workstream's
   changed signature, field, config key, default, enum value or error shape is
   used by another workstream; `docs` =
-  `{sha, files, prBody, ok, tests, notes, verdict, findings}`; a failed docs
-  validation fails the repo, because the docs commit is `finalSha`; so does a
-  docs agent that died 3 times (plus an escalation)
+  `{sha, files, prBody, ok, tests, notes, verdict, findings}` (`sha` = the
+  docs commit on `<featureBranch>--docs`; it becomes `finalSha` only when
+  validated and promoted); a failed docs validation or promotion fails the
+  repo and names the unpromoted docs commit on `<featureBranch>--docs` in
+  `escalations` and `docs.notes`; so does a docs agent that died 3 times (plus
+  an escalation). Docs are skipped (`docs.notes`: `skipped: …`) when the repo's
+  whole-branch pass failed
 - `crossRepo`: `{verdict, sections, findings}` when 2+ repos, else `null`
-- `otherDocs`: `[{repo, featureBranch, docs}]` for docs-only repos
+- `otherDocs`: `[{repo, featureBranch, docs, flaky}]` for docs-only repos
 
 `questions` (`{q, options, default}`) are only what the user must decide; `notes`
 are deviations and things not run; `escalations` are what the script itself
 saw go wrong (dead agents after 2 replacements, SHA mismatches between agents,
-cap or budget stops, failed merges — each says NOT merged). Then:
+cap or budget stops, failed merges, a finding that survived its opus fix — each
+says NOT merged; unpromoted side branches). Then:
 
 - `git ls-remote` every returned `finalSha` against its feature branch before
   believing it.
@@ -233,11 +270,17 @@ cap or budget stops, failed merges — each says NOT merged). Then:
   docs diffs — docs must describe what shipped, including every review-round
   fix). Fix-ups go to a fresh `implementer`, never to you. **Every fix-up is then
   validated and docs-synced:** re-run the workflow with `stage: "wholeBranch"`
-  (same args, narrowed to the affected repos' workstreams). An unmerged
-  workstream is yours to settle; no agent merges it off-book.
+  (same args, narrowed to the affected repos' workstreams). After an
+  unpromoted failure, the fix-up implementer continues from the side branch the
+  `escalations` name (`<featureBranch>--wbfix<n>` or `<featureBranch>--docs`) and
+  pushes to the feature branch before that re-run; afterwards delete the stale
+  `--wbfix*`/`--docs` refs. An unmerged workstream is yours to settle; no agent
+  merges it off-book.
 - `resumeFromRunId` is **crash recovery only**: it replays cached results for
   identical prompts, so after any hand fix it returns the old verdicts on old
-  SHAs and validates nothing.
+  SHAs and validates nothing. Gate prompts list the run-wide flaky registry, so
+  a replay can see a different registry, run those agents live and end in a
+  false "not promoted" fail: safe (nothing unvalidated lands), but re-check it.
 - Escalate to the user **only** the `questions` (plus anything else code, spec or
   plan can't resolve) — collected and asked **once**, at the end.
 

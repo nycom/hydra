@@ -28,6 +28,7 @@ function mock(sc = {}) {
     if (/fix r(\d)/.test(L)) { const r = { ...push, sha: SHA(70 + +L.at(-1)), answers: [], ...own }; head[repo] = r.sha; return r }
     if (/recheck r\d/.test(L)) return { verdict: 'pass', sections: 's', sha: head[repo], tests: 't', gate: green, findings: [], verified: [], ...own }
     if (L.endsWith(' docs')) return { baseSha: head[repo], sha: '', files: [], prBody: false, ok: true, tests: 't', notes: [] }
+    if (L.endsWith(' promote')) return { ok: true, sha: (p.match(/ to ([0-9a-f]{40})\./) || [])[1], notes: [] }
     throw new Error('unmocked ' + L)
   }
   return { agent, prompts, opts }
@@ -103,7 +104,7 @@ await t('2b whole-branch fix with no commit', async () => {
     'one fix r1': () => ({ sha: SHA(50), answers: [{ id: 'W-F1', action: 'answered', note: 'n' }] }),
     'one recheck r1': () => ({ verified: ['W-F1'] }),
   })
-  assert(p['one fix r1'].includes(`no commit, no push, sha = the current origin/f head (${SHA(50)} unless an earlier attempt moved it), ok = true.`), 'wb fixer told')
+  assert(p['one fix r1'].includes(`no commit, no push, sha = ${SHA(50)} (or the origin/f--wbfix1 head if an earlier attempt pushed it), ok = true.`), 'wb fixer told')
   assert(p['one recheck r1'].includes('No delta:'), 'recheck told')
   assert.equal(r.repos[0].verdict, 'pass') })
 await t('2c a real delta gets no "No delta" line', async () => {

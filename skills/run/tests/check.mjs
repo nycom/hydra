@@ -24,6 +24,7 @@ function mock(sc) {
     if (o.label === 'contracts') return { verdict: 'pass', sections: 's', findings: [] }
     if (o.label.endsWith(' docs')) return { baseSha: SHA(60), sha: sc.docsSha || '', files: [], prBody: false, ok: true, tests: 't', notes: [] }
     if (o.label.endsWith('docs validate')) return { verdict: 'pass', sections: 's', sha: sc.docsSha, tests: 't', gate: { green: true, summary: '' }, findings: [] }
+    if (o.label.endsWith(' promote')) return { ok: true, sha: (prompt.match(/ to ([0-9a-f]{40})\./) || [])[1], notes: [] }
     throw new Error('unmocked ' + o.label)
   }
   return { agent, calls }
