@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Cost of one Workflow run from its Transcript dir: node cost.mjs <Transcript dir>
 // Prints {outputTokens, contextTokens, agents, wallMinutes, byStage, failed, unfinished}: byStage uses the evals
-// run-file stage names; contextTokens sums input + cache creation + cache read tokens over every message (reported,
+// run-file stage names; contextTokens sums input + cache creation + cache read tokens over every API call (reported,
 // not scored); wallMinutes spans the first to the last transcript timestamp; failed = agents with a "failed"
 // journal row, unfinished = started with no result or failed row. Reads only journal.jsonl and the usage and
 // timestamp fields of agent-<agentId>.jsonl, never message content.
