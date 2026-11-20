@@ -1,0 +1,96 @@
+{
+  "id": "demo-2026-11-10-s15-seeded",
+  "demo": true,
+  "date": "2026-11-10",
+  "hydraVersion": "0.3.0",
+  "scenario": "S15-seeded",
+  "verdict": "fail",
+  "reason": "D3 and D7 missed; D7 is a must-catch.",
+  "defects": {
+    "D1": {
+      "caught": true,
+      "stage": "reviewer",
+      "findingId": "alpha-seeded c1 R2"
+    },
+    "D2": {
+      "caught": true,
+      "stage": "reviewer",
+      "findingId": "alpha-seeded c1 R4"
+    },
+    "D3": {
+      "caught": false,
+      "stage": null,
+      "findingId": null
+    },
+    "D4": {
+      "caught": true,
+      "stage": "reviewer",
+      "findingId": "alpha-seeded c1 R1"
+    },
+    "D5": {
+      "caught": true,
+      "stage": "validator",
+      "findingId": "alpha-seeded c1 V2"
+    },
+    "D6": {
+      "caught": true,
+      "stage": "contract",
+      "findingId": "contracts C1"
+    },
+    "D7": {
+      "caught": false,
+      "stage": null,
+      "findingId": null
+    },
+    "D8": {
+      "caught": true,
+      "stage": "test-guard",
+      "findingId": "alpha-seeded c1 V1"
+    }
+  },
+  "recall": 0.75,
+  "falsePositives": {
+    "major": 0,
+    "minor": 2
+  },
+  "cost": {
+    "outputTokens": 1363000,
+    "agents": 31,
+    "wallMinutes": 104,
+    "byStage": {
+      "implement": {
+        "tokens": 212000,
+        "agents": 3
+      },
+      "review": {
+        "tokens": 318000,
+        "agents": 6
+      },
+      "fix": {
+        "tokens": 154000,
+        "agents": 4
+      },
+      "validate": {
+        "tokens": 276000,
+        "agents": 6
+      },
+      "merge": {
+        "tokens": 41000,
+        "agents": 3
+      },
+      "wholeBranch": {
+        "tokens": 233000,
+        "agents": 4
+      },
+      "contracts": {
+        "tokens": 58000,
+        "agents": 1
+      },
+      "docs": {
+        "tokens": 71000,
+        "agents": 4
+      }
+    }
+  },
+  "notes": "DEMO: placeholder numbers to judge the report layout."
+}
