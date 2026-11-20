@@ -215,7 +215,7 @@ author adds fix + validate + merge, +3 once the named cycle count is reached, +4
 otherwise and in converge mode, where a review of the fixed head follows) + per repo (2, +2 per whole-branch fix round, max `wbRounds`
 rounds, +1 promote when a round pushed) + 1 contract check when 2+ repos + per
 docs repo (1, +1 validator when it pushed, +1 promote when that passed). Every
-dead agent can add up to 2 replacements. One workstream with a clean cycle 1 is
+dead agent (or one that reports done without a full 40-hex SHA) can add up to 2 replacements. One workstream with a clean cycle 1 is
 ~9; two workstreams × 2 cycles is ~21. The
 runtime runs at most min(16, CPUs−2) agents at once and caps a run at 1000
 `agent()` calls (cached replays count).

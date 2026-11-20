@@ -119,7 +119,7 @@ const HYGIENE = range => `Hygiene: the commits git log --author="$(git config us
 const TEST_GUARD = 'Test integrity: list pre-existing test files the range modified, deleted or renamed (git diff --diff-filter=MDR --name-only on test paths). A changed input or weakened assertion needs a reason from the brief or spec, else it is a major. Each of these is a critical unless the brief names it: a deleted or renamed pre-existing test; an added skip marker (skip|xfail|\\.only\\(|@Disabled|pytest.mark.skip|it.todo|describe.skip); an edit to test-runner config (jest/vitest/playwright/pytest config, pyproject [tool.pytest], conftest, coverage thresholds); a rewritten snapshot. For each changed assertion, mutate the production line it guards in your worktree and confirm the test goes red; one that stays green is a regression. Each new or changed test must pass 3 consecutive runs at the head (run it alone); a red run is a major (kind bug).'
 const TRIAL = w => `Integration: in your worktree, trial-merge origin/${w.featureBranch} into the head (git merge --no-commit --no-ff, never committed or pushed) and run the gate there too. A failure or conflict the merge introduces is a regression of kind "integration" (critical or major by SEV), even when it surfaces in another workstream's files.`
 const REFUTE = 'For each claim, try to REFUTE it; a claim you cannot prove with a command you ran stays open. Comments, docstrings and commit messages are claims, not evidence.'
-const RO_TESTS = 'Pre-existing tests are read-only unless the brief names them. If a test or the gate contradicts the brief, or passing would need special-casing, return status blocked with a question — that is a valid outcome.'
+const RO_TESTS = 'Pre-existing tests are read-only unless the brief names them. If a test or the gate contradicts the brief, or passing would need special-casing, return status blocked with a question — that is a valid outcome. For any question, the default must keep every pre-existing test unchanged and stay within the brief; offer a test edit only as a non-default option.'
 const LADDER = 'Ladder-first (reuse > stdlib > native > one line > minimum code), no speculative code, stay strictly in scope.'
 const SEV = 'Severity: critical = wrong behaviour, data loss, security, broken contract or red gate; major = real bug or design flaw; minor = the rest. Critical and major block the merge. Report only real issues; an empty list means clean.'
 const DROP = 'Drop (do not downgrade): issues that predate the diff and are not made worse by it, anything the repo\'s linter/formatter catches, code the plan or brief explicitly allows, pure style with no correctness, safety or maintainability cost. A comment added in this diff is a claim to grill, never a reason to drop a finding; do not flag `shortcut:` comments themselves.'
@@ -162,7 +162,7 @@ const FINDINGS = { type: 'object', properties: { headSha: HEAD, findings: { type
 const SEAMS = { ...FINDINGS, properties: { ...FINDINGS.properties, seams: { type: 'string', description: 'one line per seam intersection; "none" if no change crosses a workstream' } }, required: [...FINDINGS.required, 'seams'] }
 const QUESTION = {
   type: 'object',
-  properties: { q: { type: 'string' }, options: { type: 'array', items: { type: 'string' } }, default: { type: 'string' } },
+  properties: { q: { type: 'string' }, options: { type: 'array', items: { type: 'string' } }, default: { type: 'string', description: 'the default must keep every pre-existing test unchanged and stay within the brief; offer a test edit only as a non-default option.' } },
   required: ['q', 'options', 'default'],
 }
 const PUSHED = {
@@ -170,7 +170,7 @@ const PUSHED = {
   properties: {
     status: { enum: ['done', 'blocked', 'needs_context', 'failed'] },
     ok: { type: 'boolean', description: 'gate green AND pushed AND ls-remote verified' },
-    sha: { type: 'string', description: 'remote SHA verified via git ls-remote' },
+    sha: { type: 'string', pattern: '^([0-9a-f]{40})?$', description: 'full 40-hex remote SHA verified via git ls-remote; empty if nothing was pushed' },
     tests: { type: 'string', description: 'one line: suites run and pass/fail counts' },
     gateTail: { type: 'string', description: 'last 8 lines of the gate output including the exit code, verbatim' },
     sharedEdits: {
@@ -277,7 +277,8 @@ const settleGate = (book, gate) => { if (gate.green) for (const e of book) if (e
 const asLedger = (stage, fs = []) => { const b = []; track(b, stage, fs); return b }
 // SHA checks compare what two different agents reported. The script can't run git, so this catches
 // inconsistency between agents (a moved tip, a stale read), not one agent lying about both sides.
-const same = (a = '', b = '') => a.length >= 7 && b.length >= 7 && (a.startsWith(b) || b.startsWith(a))
+const hex = s => /^[0-9a-f]{7,40}$/.test(s)
+const same = (a = '', b = '') => hex(a) && hex(b) && (a.startsWith(b) || b.startsWith(a))
 // gate.green is the typed channel: a red gate is critical without relying on the model to file it.
 const redGate = (r, id) => r.gate.green ? [] : [{ id, severity: 'critical', kind: 'regression', where: 'gate', issue: r.gate.summary, evidence: 'the validator\'s gate run' }]
 // A blocker the validator neither verified nor re-opened stays open: silence is not a resolution.
@@ -289,8 +290,9 @@ async function step(prompt, opts) {
   for (let n = 1; n <= 3; n++) {
     const r = await agent(n === 1 ? prompt : `${prompt}\n\nAttempt ${n}: the previous agent died mid-step. Redo the whole step; first check the remote for anything it already pushed.`,
       n === 1 ? opts : { ...opts, label: `${opts.label} attempt ${n}` })
-    if (r) return r
-    log(`${opts.label}: agent died (attempt ${n} of 3)`)
+    // A done result must carry the full pushed sha; a placeholder or short one would orphan a correct push.
+    if (r && !(r.status === 'done' && !/^[0-9a-f]{40}$/.test(r.sha))) return r
+    log(`${opts.label}: ${r ? `reported done with a malformed sha ${JSON.stringify(r.sha)}` : 'agent died'} (attempt ${n} of 3)`)
   }
   return null
 }
