@@ -147,7 +147,7 @@ await t('R3 wbRounds 0 + docsRepos [] is review only: no docs agent, finalSha = 
 })
 await t('R4 up-merges are producers only', async () => {
   const { p } = await go({ cycles: null, workstreams: [ws('a')] })
-  assert(p['one review'].includes('a first-parent merge whose subject is not a workstream branch is an up-merge: use it as a producer only and file nothing inside it'))
+  assert(p['one review'].includes('a first-parent merge of the base or parent branch into this branch is an up-merge: use it as a producer only and file nothing inside it when its diff lies outside the review range; any other merge whose diff lies inside the review range is reviewable code, whoever authored it.'))
 })
 await t('R8 checks name where exit codes go', async () => {
   const { p } = await go({ cycles: null, skillDir: SKILL, workstreams: [ws('a', { checks: ['true'] })] }, { 'a review c1': () => ({ findings: [F('c1-F1', 'major')] }), 'a validate c1': () => ({ verified: ['c1-F1'] }) })
