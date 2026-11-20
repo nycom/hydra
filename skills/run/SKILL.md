@@ -50,7 +50,11 @@ delta validation, then it requeues behind the repo's merge lock.
 **Validators, gates and green:** the first validator of each workstream writes
 2–5 black-box acceptance tests from the brief before it reads the diff, runs
 them at the head and never commits them (a brief that says no behaviour change
-gets the same inputs run at base and head, outputs diffed). Every validator runs
+gets the same inputs run at base and head, outputs diffed). That first validator
+also runs the test-integrity guard (`git diff --diff-filter=MDR` on tests) over
+the whole workstream range `origin/<featureBranch>...<head>`, even when it is a
+delta validator after a non-clean review; only the test guard widens, later
+delta validators judge only their delta. Every validator runs
 each new or changed test 3 times in a row. Tests a validator proves flaky
 (intermittent on head and failing at the base too) join a run-wide per-repo
 registry: later gate prompts give them one rerun and no base rerun, and the
@@ -86,6 +90,20 @@ legitimately split a chained gate, add flags or wrap it in the regen recipe,
 and a wrong rejection costs a whole opus validator rerun. Workstream validators
 also return `evidence`, one line per step with the commands run for it,
 copied into `workstreams[].evidence`.
+**Brief conflicts become questions, never fixes:** a fixer whose finding can
+only be fixed by breaking another clause of the brief, or whose substance is
+that the brief contradicts the repo, leaves the code, answers it `escalated` and
+returns a question with both options (default: keep the current behaviour and
+tests); the next validator accepts that answer when no fix keeps every clause.
+Validators (both workstream ones, the whole-branch validator, each recheck)
+return such a contradiction, or a finding that would reverse a fix verified
+earlier in the run, in their own `questions`, not as a finding; the whole-branch
+validator and rechecks get the workstream findings verified in the cycles.
+The fix validator and each recheck carry the brief and judge every fix against
+its hard clauses: a fix that drops a mandated call, edits or deletes a
+do-not-edit file, or deletes or weakens a test an earlier stage verified as
+guarding a fix stays open as a regression. The workstream reviewer is told the
+author's notes and questions are not shown to it, so it never claims what they say.
 **One workstream on an untouched base skips the seam review:** the merge
 reports `preMergeSha` (the feature-branch tip its merge landed on) and
 `baseAtMerge` (`origin/<base>` at that time). When a repo has exactly one
@@ -272,9 +290,10 @@ After it returns: `done` = merged workstreams, `phase: "close"`, then
 The workflow returns:
 
 - top level: `{stage, budget, cycles, maxCycles, questions, workstreams, repos, crossRepo, otherDocs}`;
-  `questions` holds one entry when `crossRepo` has an open critical or major,
-  whatever its verdict says: contracts have no fix loop, so it carries the contract
-  check's recipe (its `sections`, else the findings' issues) and the user decides
+  `questions` collects every question of the run: first one entry when `crossRepo` has an open critical or major,
+  whatever its verdict says (contracts have no fix loop, so it carries the contract
+  check's recipe, its `sections`, else the findings' issues, and the user decides),
+  then each workstream's and each repo's `questions`, with `q` prefixed `<workstream id>: ` or `<repo name>: `
 - `budget`: `{spent, tokenBudget, turnTotal, reserve, stoppedBy}`. `spent` is the
   output tokens this run spent since its own start; `turnTotal` is the user's
   "+Nk" target or `null`; `stoppedBy` lists what the reserve kept from starting
@@ -338,7 +357,7 @@ says NOT merged; unpromoted side branches). Then:
   SHAs and validates nothing. Gate prompts list the run-wide flaky registry, so
   a replay can see a different registry, run those agents live and end in a
   false "not promoted" fail: safe (nothing unvalidated lands), but re-check it.
-- Escalate to the user **only** the `questions`, top-level and per workstream and repo (plus anything else code, spec or
+- Escalate to the user **only** the top-level `questions` (it already holds every workstream and repo question; plus anything else code, spec or
   plan can't resolve) — collected and asked **once**, at the end; the retro's
   ranked list (§5) joins that same ask, after the questions.
 
