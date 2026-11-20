@@ -1,4 +1,4 @@
-// A malformed self-reported sha is a dead attempt, not a lost fix; a blocked question's default never weakens tests.
+// A malformed self-reported sha is a dead attempt, not a lost fix; a blocked question's default never weakens tests; an up-merge is defined.
 import { Run } from './run.mjs'
 import assert from 'node:assert'
 const SHA = n => (n + '').padStart(40, 'a')
@@ -66,6 +66,10 @@ await t('H2 question defaults keep every pre-existing test', async () => {
     assert(prompts[L].includes(KEEP), `${L} prompt`)
     assert(opts[L].schema.properties.questions.items.properties.default.description.includes(KEEP), `${L} schema`)
   } })
+
+await t('H3 the seam prompt defines an up-merge', async () => {
+  const { prompts } = await go({ cycles: 1, workstreams: [ws('a')] })
+  assert(prompts['one review'].includes('an up-merge is a merge of the base or parent branch into this branch; any other merge whose diff lies inside the review range is reviewable code, whoever authored it.')) })
 
 if (fails.length) { console.error(fails.join('\n')); process.exit(1) }
 console.log('sha-guard checks ok')
