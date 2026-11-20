@@ -69,7 +69,7 @@ await t('H2 question defaults keep every pre-existing test', async () => {
 
 await t('H3 the seam prompt defines an up-merge', async () => {
   const { prompts } = await go({ cycles: 1, workstreams: [ws('a')] })
-  assert(prompts['one review'].includes('an up-merge is a merge of the base or parent branch into this branch; any other merge whose diff lies inside the review range is reviewable code, whoever authored it.')) })
+  assert(prompts['one review'].includes('a first-parent merge of the base or parent branch into this branch is an up-merge: use it as a producer only and file nothing inside it when its diff lies outside the review range; any other merge whose diff lies inside the review range is reviewable code, whoever authored it.')) })
 
 if (fails.length) { console.error(fails.join('\n')); process.exit(1) }
 console.log('sha-guard checks ok')

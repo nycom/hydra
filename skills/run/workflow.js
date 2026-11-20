@@ -568,7 +568,7 @@ ${RO(r.repo, 'wb-rev')}
 Briefs:
 ${briefs}
 
-Seam inventory first: for each workstream merge commit M (git log --first-parent --merges --format='%H %s' ${range.replace('...', '..')}; the subject names the workstream branch), git diff M^1 M and list what it changed at its edges: signatures, fields, config/env keys, defaults, enum values, error shapes. Grep for their use sites in the other workstreams' diffs. Return each intersection as its own line in seams (producer change -> use site -> compatible or not); an incompatible one is also a finding of kind "integration"; a first-parent merge whose subject is not a workstream branch is an up-merge: use it as a producer only and file nothing inside it when its diff lies outside the review range; an up-merge is a merge of the base or parent branch into this branch; any other merge whose diff lies inside the review range is reviewable code, whoever authored it.
+Seam inventory first: for each workstream merge commit M (git log --first-parent --merges --format='%H %s' ${range.replace('...', '..')}; the subject names the workstream branch), git diff M^1 M and list what it changed at its edges: signatures, fields, config/env keys, defaults, enum values, error shapes. Grep for their use sites in the other workstreams' diffs. Return each intersection as its own line in seams (producer change -> use site -> compatible or not); an incompatible one is also a finding of kind "integration"; a first-parent merge of the base or parent branch into this branch is an up-merge: use it as a producer only and file nothing inside it when its diff lies outside the review range; any other merge whose diff lies inside the review range is reviewable code, whoever authored it.
 
 ${LENSES(false)}
 ${DROP}
