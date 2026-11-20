@@ -286,16 +286,23 @@ const redGate = (r, id) => r.gate.green ? [] : [{ id, severity: 'critical', kind
 const unaccounted = (prior, verified, open) => prior.filter(f => blocking(f) && f.where !== 'gate' && !verified.includes(f.id) && !open.some(o => o.id === f.id))
 // A dead agent is replaced by a fresh one of the same role that redoes the whole step, up to 2 replacements.
 // The attempt number changes the prompt, so a resume can never hand back the dead attempt's cached result.
-async function step(prompt, opts) {
+// A done+ok result without a full 40-hex sha would orphan a correct push: the next attempt only repairs the sha,
+// and the script keeps the earlier result (sharedEdits, questions, answers) with the repaired sha. anySha: the caller never reads the sha.
+async function step(prompt, opts, anySha = false) {
+  let bad = null
   for (let n = 1; n <= 3; n++) {
-    const r = await agent(n === 1 ? prompt : `${prompt}\n\nAttempt ${n}: the previous agent died mid-step. Redo the whole step; first check the remote for anything it already pushed.`,
-      n === 1 ? opts : { ...opts, label: `${opts.label} attempt ${n}` })
-    // A done result must carry the full pushed sha; a placeholder or short one would orphan a correct push.
-    if (r && !(r.status === 'done' && !/^[0-9a-f]{40}$/.test(r.sha))) return r
-    log(`${opts.label}: ${r ? `reported done with a malformed sha ${JSON.stringify(r.sha)}` : 'agent died'} (attempt ${n} of 3)`)
+    const tail = bad
+      ? `the previous attempt finished and returned the result below, but its sha ${JSON.stringify(bad.sha)} is not a full 40-hex SHA. Do not redo the work: git ls-remote the branch and return the same result with the verified sha.\n${JSON.stringify(bad)}`
+      : 'the previous agent died mid-step. Redo the whole step; first check the remote for anything it already pushed.'
+    const r = await agent(n === 1 ? prompt : `${prompt}\n\nAttempt ${n}: ${tail}`, n === 1 ? opts : { ...opts, label: `${opts.label} attempt ${n}` })
+    const malformed = !anySha && r?.status === 'done' && r.ok && !/^[0-9a-f]{40}$/.test(r.sha)
+    if (r && !malformed) return bad && r.status === 'done' && r.ok ? { ...bad, sha: r.sha } : r
+    if (r) bad = r
+    log(`${opts.label}: ${r ? `returned a malformed sha ${JSON.stringify(r.sha)}` : 'agent died'} (attempt ${n} of 3)`)
   }
   return null
 }
+const unusable = (what, branch) => `${what} returned no usable result 3 times (died or malformed sha); check origin/${branch} for an unvalidated push`
 // Whole-branch fixes and docs land on side branches; a feature branch only fast-forwards to a SHA a validator passed.
 // Returns '' once promoted, else why not (the side branches stay and the feature branch stays where it was).
 async function promote(repo, branch, from, to, sides, label, phase) {
@@ -362,7 +369,7 @@ ${authorGate()}
 ${CHECKS(w)}${GIT(w.repo, w.id)}
 Commit and push to ${w.branch}. Return status ("done" only when the gate is green and the push verified), ok, the verified remote sha, a one-line test summary, gateTail, sharedEdits, decisions (up to 10), questions and notes.`,
     { label: `${tag} implement`, phase: 'Implement', agentType: 'implementer', model: w.model, schema: PUSHED })
-  if (!impl) return stop('implement agent died 3 times')
+  if (!impl) return stop(unusable('implement', w.branch))
   absorb(impl)
   if (!impl.ok || impl.status !== 'done') return stop(`implement ${impl.status}: ${impl.tests}`)
   out.sha = impl.sha
@@ -446,7 +453,7 @@ ${authorGate()}
 ${CHECKS(w)}${GIT(w.repo, `${w.id}-fix${i}`)}
 Return status, ok, verified sha, tests, gateTail, one answer per finding id, sharedEdits, decisions (new or changed only), questions (only what code, spec and brief cannot settle; use action "escalated") and notes.`,
           { label: `${tag} fix c${i}`, phase: 'Review cycles', agentType: 'implementer', model: stuck.length ? 'opus' : w.model, schema: FIXED })
-        if (!fix) return stop(`fix c${i} died 3 times`)
+        if (!fix) return stop(unusable(`fix c${i}`, w.branch))
         absorb(fix)
         if (!fix.ok || fix.status !== 'done') return stop(`fix c${i} ${fix.status}: ${fix.tests}`)
         out.sha = fix.sha
@@ -524,11 +531,11 @@ Red gate: do not push, return ok=false with the failure.
 ${HYGIENE(`origin/${w.featureBranch}..HEAD`)}
 ${GIT(w.repo, `merge-${w.id}`)}
 Push to ${w.featureBranch} (plain push; if rejected, fetch and redo every step on the new tip). Return status, ok, verified sha, tests, gateTail and notes; sharedEdits, decisions and questions empty.`,
-        { label: `${tag} merge`, phase: 'Merge', model: 'sonnet', effort: out.sharedEdits.length ? 'medium' : 'low', schema: PUSHED })
+        { label: `${tag} merge`, phase: 'Merge', model: 'sonnet', effort: out.sharedEdits.length ? 'medium' : 'low', schema: PUSHED }, true) // its sha is never read, so a malformed one needs no repair call
       if (m?.ok && m.status === 'done') done.push(w)
       return m
     })
-    if (!merge) return stop('merge agent died 3 times')
+    if (!merge) return stop(`merge agent died 3 times; check origin/${w.featureBranch} for an unvalidated push`)
     out.notes.push(...merge.notes)
     out.merged = merge.ok && merge.status === 'done'
     if (out.merged) break
@@ -624,7 +631,7 @@ ${GATE(gates, c.knownRed, r.repo)}
 ${GIT(r.repo, `wb-fix${round}`)}
 Return status, ok, verified sha, tests, gateTail, one answer per finding id, questions and notes; sharedEdits and decisions empty.`,
       { label: `${n} fix r${round}`, phase: 'Whole-branch', agentType: 'implementer', model: top(r.ws.map(w => w.model)), schema: FIXED })
-    if (!fix) return fail(`whole-branch fix r${round} died 3 times`)
+    if (!fix) return fail(unusable(`whole-branch fix r${round}`, side))
     res.questions.push(...fix.questions)
     res.notes.push(...fix.notes)
     if (!fix.ok || fix.status !== 'done') return fail(`whole-branch fix r${round} ${fix.status}: ${fix.tests}`)

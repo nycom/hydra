@@ -215,7 +215,7 @@ author adds fix + validate + merge, +3 once the named cycle count is reached, +4
 otherwise and in converge mode, where a review of the fixed head follows) + per repo (2, +2 per whole-branch fix round, max `wbRounds`
 rounds, +1 promote when a round pushed) + 1 contract check when 2+ repos + per
 docs repo (1, +1 validator when it pushed, +1 promote when that passed). Every
-dead agent (or one that reports done without a full 40-hex SHA) can add up to 2 replacements. One workstream with a clean cycle 1 is
+dead agent can add up to 2 replacements; a push step that reports done without a full 40-hex SHA gets a cheap repair call instead (it keeps the result and only re-reads the SHA). One workstream with a clean cycle 1 is
 ~9; two workstreams × 2 cycles is ~21. The
 runtime runs at most min(16, CPUs−2) agents at once and caps a run at 1000
 `agent()` calls (cached replays count).
@@ -268,7 +268,7 @@ The workflow returns:
 
 `questions` (`{q, options, default}`) are only what the user must decide; `notes`
 are deviations and things not run; `escalations` are what the script itself
-saw go wrong (dead agents after 2 replacements, SHA mismatches between agents,
+saw go wrong (dead agents after 2 replacements, a push step that "returned no usable result 3 times (died or malformed sha); check origin/<branch> for an unvalidated push", SHA mismatches between agents,
 cap or budget stops, failed merges, a finding that survived its opus fix — each
 says NOT merged; unpromoted side branches). Then:
 
