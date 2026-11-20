@@ -168,6 +168,10 @@ Implementation is never below Sonnet.
   inside the per-repo merge lock), names both groups in the fix prompt, and the
   merge backstop allows this workstream's `files[]` plus those of workstreams
   already merged at merge time.
+- **Ordering inside a repo:** when a workstream needs another's merged code
+  (not just its contract), give it `after: [ids]` instead of folding them into
+  one; it starts once those merged and branches from that head. Across repos,
+  order by separate runs: `after` is same-repo only.
 - **Hot files belong to no workstream:** README/docs, changelogs, generated files
   (lockfiles, OpenAPI types, graphify-out), contracts and digests. Workstreams
   return the change they need as `sharedEdits: [{file, intent}]` (each fixer
@@ -191,9 +195,12 @@ Implementation is never below Sonnet.
   repo) and pass the exact failing test ids as `knownRed`. Optional: a local
   `.git/hooks/pre-push` running the hygiene grep
   (`grep -iE 'co-authored-by|generated with|\bclaude\b|anthropic|\.claude/'`)
-  over the user's own outgoing commits.
+  over the user's own outgoing commits. For each `copyExcluded` path:
+  `git -C <repo> check-ignore -v <path>` must name an ignore source and the
+  file must exist in the user's checkout; otherwise drop it (agents refuse it
+  too).
 - One **feature branch per touched repo** (e.g. `feat/<topic>`), cut from
-  `origin/main` (or the stacked `base`) with `git branch` + `git push origin <branch>` — never
+  `origin/main` (or the stacked `base`) with `git branch` + `git push origin <branch>` (`hydra-local` in local-only mode) — never
   checkout-switch. Every workstream branches off it and merges back into it.
 - Docs-only repos that need updates (e.g. `design-docs`) get a feature branch
   too and go in `docsRepos`.
@@ -223,6 +230,8 @@ Workflow({
     maxCycles: 4,                    // optional hard cap; default cycles+2, or 4 when cycles is null
     tokenBudget: 3000000,            // optional; output tokens this run may spend (budget.spent())
     tokenReserve: 600000,            // optional; default 600000
+    localOnly: false,                // optional; true = nothing reaches the network (see Local-only mode)
+    humanChecks: { "api-auth": "ok" }, // only on the re-run after a humanCheck pause
     workstreams: [
       { id: "api-auth", repo: "~/code/api", featureBranch: "feat/auth",
         branch: "feat/auth--api-auth", model: "opus",
@@ -231,7 +240,13 @@ Workflow({
         reviewModel: "fable",        // optional; default one tier above model
         checks: ["npm run e2e:login"], // optional; extra commands run under a 540 s cap, red = critical
         quickGate: "npm run test:unit", // optional; author/fixer pre-push gate and reviewer probes; validators, merge, whole-branch and docs keep the full gate
+        humanCheck: "open the login page preview; the error banner is red", // optional; the run pauses after this merges until the user answers
         brief: "…", gate: "npm run lint && npm run typecheck && npm test && npx playwright test" },
+      { id: "api-docs-cli", repo: "~/code/api", featureBranch: "feat/auth",
+        branch: "feat/auth--api-docs-cli", model: "sonnet",
+        after: ["api-auth"],         // optional; starts once api-auth merged, from that head (same repo only)
+        lite: true,                  // optional; implement + one validator, no review cycles
+        brief: "…", gate: "…" },
       { id: "ui-login", repo: "~/code/ui", featureBranch: "feat/auth",
         branch: "feat/auth--ui-login", model: "sonnet", brief: "…", gate: "…" }
     ],
@@ -241,7 +256,9 @@ Workflow({
         hot: ["**/README*", "docs/**", "openapi/**", "src/generated/**", "**/package-lock.json"],
         regen: "npm install && npm run gen:types",
         smoke: "env -i PATH=$PATH ./scripts/boot-local.sh --h2",
-        smokeTimeout: 300 }          // optional; seconds, default 540
+        smokeTimeout: 300,           // optional; seconds, default 540
+        copyExcluded: ["tests/preview.spec.ts"], // optional; git-excluded files copied into every agent worktree
+        reviewSharedEdits: true }    // optional; gate + validator on each merge's shared-file commits
     ],
     docsRepos: [                     // optional; default = every touched repo; base defaults to the repo's workstream base, else main
       { repo: "~/code/api", featureBranch: "feat/auth" },
@@ -261,6 +278,11 @@ Workflow({
 | `wbRounds` | `2` | whole-branch fix rounds, each pushed to a side branch `<featureBranch>--wbfix<round>` and promoted onto the feature branch only after a passing recheck; `0` = no fix rounds (findings returned unfixed; the repo verdict is `fail` while any is critical or major); pair with `docsRepos: []` for a review-only pass (a failing repo skips docs regardless) |
 | `tokenBudget` | `null` | output-token cap for this run; the user's "+Nk" turn target also applies. Spend is counted from the script's start, so a `resumeFromRunId` crash recovery starts a fresh `tokenBudget` |
 | `tokenReserve` | `600000` | before each new cycle, each whole-branch fix round, the contract check and docs: if less than this is left, nothing new starts; the item is reported not merged / failed with the reason |
+| `localOnly` | `false` | every fetch, push and `ls-remote` targets the remote `hydra-local`, a bare repo on local disk you set up (see Local-only mode); agents are told never to touch `origin` or any other remote and to run no `gh`; every hygiene section also checks that no run branch has a remote-tracking ref on any other remote; the docs step skips its PR-body update |
+| `humanChecks` | none | the user's answers on the re-run after a `humanCheck` pause: `{"<workstream id>": "ok" \| "<problem>"}`, or an array of answers, one per check of that workstream, in order. Keys must name a workstream with a `humanCheck` |
+| `workstreams[].after` | none | workstream ids (same repo only; unknown ids, itself and cycles throw) that must merge into the feature branch before this one starts implementing; it branches from the head that carries them. A predecessor that does not merge leaves it NOT started. Workstreams without `after` run in parallel as before |
+| `workstreams[].lite` | `false` | for small pure files: implement, then the clean-review validator alone (acceptance tests, full-range test guard, gate, trial merge); no reviewer ever runs. A critical or major it files gets a fix and a delta validation per cycle, capped by `maxCycles` as usual. Still merged, and covered by the whole-branch pass |
+| `workstreams[].humanCheck` | none | instructions for the user's by-eye check. After this workstream merges, every later merge of its repo and the repo's whole-branch pass wait for the answer (see Human checks) |
 | `workstreams[].files` | none | allowed paths; overlap within a repo throws; merge rejects edits outside |
 | `workstreams[].checks` | none | extra commands (an e2e login, a contract probe) the author, fixer and both workstream validators run via `run-cmd.mjs` with a 540 s cap, reporting the exit code per command; a red or timed-out check is critical. The `gate` itself never gets a deadline |
 | `workstreams[].quickGate` | none | a faster gate the author and fixer run before each push, and reviewers use for probes. The full `gate` stays mandatory for both workstream validators, the merge, whole-branch fix rounds and rechecks, and docs |
@@ -270,6 +292,8 @@ Workflow({
 | `repos[].regen` | none | regenerates generated files: run by every agent that runs the gate on a workstream SHA (author, fixer, reviewer, validators; its diffs are never findings or commits), after each merge, and after whole-branch fixes. Set it whenever workstreams can touch dependencies or vendored contracts, or their gates go red on stale generated files |
 | `repos[].smoke` | none | the safe local boot recipe the whole-branch validator and each whole-branch recheck run via `run-cmd.mjs` (own process group, hard timeout, leftover processes killed); a failed or timed-out smoke is critical; none = smoke skipped |
 | `repos[].smokeTimeout` | `540` | smoke hard cap in seconds, an integer from 1 to 590 (stays under the agent shell's 600 s foreground limit) |
+| `repos[].copyExcluded` | `[]` | paths inside the repo, git-ignored (e.g. in `.git/info/exclude`), that the gate needs, such as a local preview test. Every agent copies them from the user's checkout into each worktree it creates, before any gate, only after `git check-ignore` confirms they are ignored; absolute paths, `~` and `..` throw. Hygiene checks no commit carries them |
+| `repos[].reviewSharedEdits` | `false` | after a merge that applied shared-file edits, one opus `validator` checks exactly those commits (each edit against its intent, the gate, hygiene) inside the merge lock, so before the next merge lands; its findings (and a red gate) join the repo's whole-branch fix rounds. Opt-in, not automatic: defaults stay as before, and it costs one opus agent per such merge while the whole-branch validator already reruns every suite. Turn it on when shared edits are code-like (generated clients, lockfiles, contract digests) |
 | `docsRepos[].gate` | the repo's workstream gates | gate for a docs-only repo |
 
 `gate` is the repo's **full** gate — every suite it defines including
@@ -284,7 +308,10 @@ otherwise and in converge mode, where a review of the fixed head follows) + per 
 rounds, +1 promote when a round pushed) + 1 contract check when 2+ repos + per
 docs repo (1, +1 validator when it pushed, +1 promote when that passed); a repo whose one workstream merged onto its untouched base starts at 1, not 2. Every
 dead agent can add up to 2 replacements; a push step that reports done without a full 40-hex SHA gets a cheap repair call instead (it keeps the result and only re-reads the SHA). One workstream with a clean cycle 1 is
-~9 (~8 when it merged onto its untouched base and the integrated review is skipped); two workstreams × 2 cycles is ~21. The
+~9 (~8 when it merged onto its untouched base and the integrated review is skipped); two workstreams × 2 cycles is ~21.
+A `lite` workstream drops the reviewer from every cycle: clean, it is implement + 1 validator + merge (3 agents instead of 4, and
+the dropped one is the review a tier above the author, opus or fable); each blocker its validator files adds fix + delta validate (2, not 3+:
+no review of the fixed head). `reviewSharedEdits` adds 1 opus validator per merge that applied shared edits. The
 runtime runs at most min(16, CPUs−2) agents at once and caps a run at 1000
 `agent()` calls (cached replays count).
 
@@ -293,13 +320,51 @@ otherwise): before the call, `progress` with `title`, `total` = workstreams,
 `phase: "delegate"` (its enum is plan | design | delegate | review | close), one task per workstream id (`tier`: `careful` for opus,
 `medium` for sonnet). The workflow's own progress tree shows per-agent detail.
 After it returns: `done` = merged workstreams, `phase: "close"`, then
-`finished: true`.
+`finished: true` (after a `humanCheck` pause, keep `phase: "delegate"` and
+leave it unfinished until the resumed run returns).
+
+**Local-only mode** (`localOnly: true`, e.g. a public fork whose pushes the
+user approves by hand): nothing reaches the network. Per touched repo
+(docs-only repos included), before the known-red preflight:
+`B="$(git -C <repo> rev-parse --path-format=absolute --git-common-dir)/hydra-local.git"`,
+`git init --bare -q "$B"`, `git -C <repo> remote add hydra-local "$B"`, then
+push the base and the feature branch into it
+(`git -C <repo> push hydra-local <base ref>:refs/heads/<base> <featureBranch>:refs/heads/<featureBranch>`)
+and `git -C <repo> fetch hydra-local`. Every push, fetch and `ls-remote` in
+the run then works unchanged against that local remote. At the end, verify
+with `git -C <repo> ls-remote hydra-local` as usual, then fetch the branches
+back as local branches without force:
+`git -C <repo> fetch hydra-local <featureBranch>:<featureBranch>` plus each
+workstream branch and any side branch the result names (a branch checked out
+in the user's checkout is refused: tell the user to fast-forward it), and
+check `git -C <repo> rev-parse <featureBranch>` equals `finalSha`. Also run the
+hygiene check yourself: `git -C <repo> for-each-ref refs/remotes` lists no run
+branch under any remote but `hydra-local`. Pushing to `origin` stays the
+user's step; remove `hydra-local` (`git remote remove`, then the bare repo)
+only when they are done with it.
+
+**Human checks** (`workstreams[].humanCheck`): after that workstream
+merges, every later merge of its repo waits (the others keep cycling and stop
+at their merge, NOT merged, "awaiting the user's human check"), its repo's
+whole-branch pass does not run (`verdict: "paused"`), and contracts and docs
+wait for every repo. The result carries `humanCheck: [{id, repo,
+featureBranch, sha, check, round, answer}]`: ask the user to check `sha` (a
+worktree on it; in local-only mode fetch `hydra-local` first) per `check`, then
+re-run with the same args plus `humanChecks: {"<id>": "ok"}` or the problem in
+words, and `resumeFromRunId` = the paused run. Cached agents replay up to the
+check (no prompt before it depends on `humanChecks`) and the run continues
+live from there. A problem becomes a critical (`H<round>-F1`, stage `human`)
+for that workstream's fix path: fix, delta validation, a second merge, and a
+new check (`round` 2, answered as an array in order:
+`{"<id>": ["<problem>", "ok"]}`), with later merges still held. If its fix
+never merges (cap, budget), the held merges and the whole-branch pass stay
+stopped and the escalation says so.
 
 ## 4. Final call (coordinator)
 
 The workflow returns:
 
-- top level: `{stage, budget, cycles, maxCycles, questions, workstreams, repos, crossRepo, otherDocs}`;
+- top level: `{stage, budget, cycles, maxCycles, questions, workstreams, repos, crossRepo, otherDocs}`, plus `humanCheck` only when the run paused for one (see Human checks);
   `questions` collects every question of the run: first one entry when `crossRepo` has an open critical or major,
   whatever its verdict says (contracts have no fix loop, so it carries the contract
   check's recipe, its `sections`, else the findings' issues, and the user decides),
@@ -335,8 +400,8 @@ The workflow returns:
 - `otherDocs`: `[{repo, featureBranch, docs, findings, flaky}]` for docs-only repos
 - `findings` (and `crossRepo.ledger`): the structured ledger next to the
   one-line `open` strings, `[{id, stage, severity, kind, where, issue, status}]`.
-  `stage` is the first to raise the id (`review`, `validate`, `merge` per
-  workstream; `wb-review`, `wb-validate`, `recheck`, `docs` per repo, where a
+  `stage` is the first to raise the id (`review`, `validate`, `merge`, `human` per
+  workstream; `wb-review`, `wb-validate`, `shared-edits`, `recheck`, `docs` per repo, where a
   carried workstream minor is `<ws id>:<id>` with its original stage;
   `contract`); `status` is `fixed`, `answered` or `declined` once a validator
   accepted it, else `open`. `open` in the ledger means no validator accepted
@@ -365,9 +430,12 @@ says NOT merged; unpromoted side branches). Then:
   pushes to the feature branch before that re-run; afterwards delete the stale
   `--wbfix*`/`--docs` refs. An unmerged workstream is yours to settle; no agent
   merges it off-book.
-- `resumeFromRunId` is **crash recovery only**: it replays cached results for
-  identical prompts, so after any hand fix it returns the old verdicts on old
-  SHAs and validates nothing. Gate prompts list the run-wide flaky registry, so
+- `resumeFromRunId` is **crash recovery and human-check resumes only**: it
+  replays cached results for identical prompts, so after any hand fix it
+  returns the old verdicts on old SHAs and validates nothing. A human-check
+  re-run is the one planned use: nothing was changed by hand, and the answer
+  only enters prompts after the check. Never resume after a hand fix; re-run
+  `stage: "wholeBranch"` instead. Gate prompts list the run-wide flaky registry, so
   a replay can see a different registry, run those agents live and end in a
   false "not promoted" fail: safe (nothing unvalidated lands), but re-check it.
 - Escalate to the user **only** the top-level `questions` (it already holds every workstream and repo question; plus anything else code, spec or

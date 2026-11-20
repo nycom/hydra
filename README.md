@@ -27,6 +27,15 @@ Interactive report: [evals/report.html](evals/report.html), open locally (GitHub
 - Then a whole-branch review plus an independent validator, a cross-repo contract check, and a validated docs sync. A repo whose only workstream merged onto its untouched base has no seam to review, so only the validator runs there.
 - The mechanical part lives in `skills/run/workflow.js` (a Claude Code Workflow script); `skills/run/SKILL.md` is the coordinator's procedure.
 
+Opt-in, per run (details and every arg in `skills/run/SKILL.md`):
+
+- `localOnly: true`: nothing reaches the network. Every push, fetch and `ls-remote` targets a bare repo on local disk set up as the remote `hydra-local`; the branches are fetched back into your repo as local branches at the end, and pushing stays yours.
+- `workstreams[].after: [ids]`: a workstream starts only once those (same repo) merged, and branches from that head.
+- `workstreams[].lite: true`: for small pure files, implement plus one validator and no review cycles unless it finds a critical or major.
+- `workstreams[].humanCheck`: the run pauses after that workstream merges and returns what to check by eye; a re-run with `humanChecks` and `resumeFromRunId` continues, and a reported problem goes back to its author.
+- `repos[].copyExcluded`: git-ignored files the gate needs (a local preview test) are copied into every agent worktree and never committed.
+- `repos[].reviewSharedEdits: true`: the shared-file edits each merge applies get their own gate and validator before the next merge.
+
 Stacked PRs are an opt-in mode, used only when asked for.
 
 ## Install
