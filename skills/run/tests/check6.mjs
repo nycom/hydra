@@ -127,5 +127,36 @@ await t('13e never rebase', async () => {
   for (const k of ['a implement', 'a fix c1', 'a merge']) assert(/never rebase/i.test(p[k]), k)
 })
 
+// review follow-ups: shell-timeout clause, smokeTimeout bound, exit-code destination, up-merges, review-only pass, generic hard rules
+await t('R1 smoke/checks prompts give the shell call a timeout above the cap', async () => {
+  const { p } = await go({ cycles: null, skillDir: SKILL, repos: [{ repo: '/r/one', smoke: 'true' }], workstreams: [ws('a', { checks: ['true'] })] }, { ...wbMajor, 'one recheck r1': () => ({ verified: ['W-F1'] }) })
+  for (const k of ['a implement', 'a validate c1', 'one validate', 'one recheck r1'])
+    assert(p[k].includes('give the shell call a timeout above the cap (foreground max is 600 s), or run it in the background and wait'), k)
+})
+await t('R1 smokeTimeout is bounded to 1..590', async () => {
+  for (const smokeTimeout of [591, 600]) await rejects({ skillDir: SKILL, repos: [{ repo: '/r/one', smoke: 'true', smokeTimeout }], workstreams: [ws('a')] }, /smokeTimeout.*590/)
+  const { p } = await go({ cycles: null, skillDir: SKILL, repos: [{ repo: '/r/one', smoke: 'true', smokeTimeout: 590 }], workstreams: [ws('a')] })
+  assert(p['one validate'].includes(`run-cmd.mjs' 590 'true'`))
+})
+await t('R3 wbRounds 0 + docsRepos [] is review only: no docs agent, finalSha = reviewed sha', async () => {
+  const { r, p } = await go({ cycles: null, wbRounds: 0, docsRepos: [], workstreams: [ws('a')] }, wbMajor)
+  assert(!Object.keys(p).some(k => /docs| fix r| recheck r/.test(k)), Object.keys(p).join())
+  assert.equal(r.repos[0].finalSha, SHA(50))
+  assert.equal(r.repos[0].sha, SHA(50))
+})
+await t('R4 up-merges are producers only', async () => {
+  const { p } = await go({ cycles: null, workstreams: [ws('a')] })
+  assert(p['one review'].includes('a first-parent merge whose subject is not a workstream branch is an up-merge: use it as a producer only and file nothing inside it'))
+})
+await t('R8 checks name where exit codes go', async () => {
+  const { p } = await go({ cycles: null, skillDir: SKILL, workstreams: [ws('a', { checks: ['true'] })] }, { 'a review c1': () => ({ findings: [F('c1-F1', 'major')] }), 'a validate c1': () => ({ verified: ['c1-F1'] }) })
+  for (const k of ['a implement', 'a fix c1', 'a validate c1']) assert(/exit code per command in gate\.summary \(validators\) or tests \(authors and fixers\)/.test(p[k]), k)
+})
+await t('EXTRA hard rules are generic', async () => {
+  const { p } = await go({ cycles: null, workstreams: [ws('a'), ws('b', { repo: '/r/two' })] })
+  for (const [k, v] of Object.entries(p)) assert(!/robot|Cloud Run|gcloud/.test(v), `${k} still names a specific platform`)
+  assert(p['a implement'].includes('Hard rules: no deploys, no ssh or rsync to hosts, no cloud or prod actions'), 'new wording')
+})
+
 if (fails.length) { console.log('FAILED:\n' + fails.join('\n')); process.exit(1) }
 console.log('tier-2 checks ok')

@@ -165,7 +165,7 @@ Workflow({
 | `maxCycles` | `cycles + 2`, or 4 | hard cap on cycles per workstream (must be ≥ `cycles`) |
 | `skillDir` | none | this skill's absolute base directory (the `<skill dir>` printed when the skill loads); the script can't learn its own path, and agents run `node <skillDir>/run-cmd.mjs <seconds> '<command>'` for smoke and checks. Required when any repo has `smoke` or any workstream has `checks` |
 | `stage` | omitted | `"wholeBranch"`: skip implement/cycles/merge; re-run whole-branch review + validator, contract check, docs sync on the current feature-branch tips |
-| `wbRounds` | `2` | whole-branch fix rounds; `0` = review only: findings returned unfixed, and the repo verdict is `fail` while any is critical or major (stacked whole-stack pass) |
+| `wbRounds` | `2` | whole-branch fix rounds; `0` = no fix rounds (findings returned unfixed; the repo verdict is `fail` while any is critical or major); pair with `docsRepos: []` for a review-only pass |
 | `tokenBudget` | `null` | output-token cap for this run; the user's "+Nk" turn target also applies. Spend is counted from the script's start, so a `resumeFromRunId` crash recovery starts a fresh `tokenBudget` |
 | `tokenReserve` | `600000` | before each new cycle, each whole-branch fix round, the contract check and docs: if less than this is left, nothing new starts; the item is reported not merged / failed with the reason |
 | `workstreams[].files` | none | allowed paths; overlap within a repo throws; merge rejects edits outside |
@@ -175,7 +175,7 @@ Workflow({
 | `repos[].hot` | README*, CHANGELOG*, `docs/**`, `graphify-out/**`, lockfiles, `openapi*.{yaml,yml,json}`, `*.sha256` | replaces the default hot list for that repo — add generated-type and contract paths here; `[]` turns the hot-file rule off for repos whose workstreams legitimately edit docs (the `files[]` check still applies) |
 | `repos[].regen` | none | regenerates generated files: run by every agent that runs the gate on a workstream SHA (author, fixer, reviewer, validators; its diffs are never findings or commits), after each merge, and after whole-branch fixes. Set it whenever workstreams can touch dependencies or vendored contracts, or their gates go red on stale generated files |
 | `repos[].smoke` | none | the safe local boot recipe the whole-branch validator and each whole-branch recheck run via `run-cmd.mjs` (own process group, hard timeout, leftover processes killed); a failed or timed-out smoke is critical; none = smoke skipped |
-| `repos[].smokeTimeout` | `540` | smoke hard cap in seconds (positive integer) |
+| `repos[].smokeTimeout` | `540` | smoke hard cap in seconds, an integer from 1 to 590 (stays under the agent shell's 600 s foreground limit) |
 | `docsRepos[].gate` | the repo's workstream gates | gate for a docs-only repo |
 
 `gate` is the repo's **full** gate — every suite it defines including
@@ -259,14 +259,18 @@ Default stays one feature branch per repo; stack slices only on the user's ask.
 - **A slice is one ordinary run:** `featureBranch` = the slice, `base` = its
   parent slice (`main` for slice 1). Slices run strictly in sequence: cut slice
   N+1 from slice N's verified tip only after slice N's run returns. The review
-  range is already three-dot `origin/<parent>...origin/<slice>`; before each
-  slice's review, a fresh `implementer` merges the parent up into it (merge,
-  never rebase).
+  range is already three-dot `origin/<parent>...origin/<slice>`. Before any
+  `wholeBranch` re-run when the parent moved, a fresh `implementer` merges the
+  parent up into the slice (merge, never rebase). Slices go bottom-first: after
+  any re-run whose `finalSha` moved, up-merge into every child.
 - **Briefs:** paste earlier slices' findings (fixed and declined) into every
   later slice's brief. Each slice PR body carries the stack table:
   `| # | branch | base | status | merge after #N |`.
-- **Whole-stack pass:** `stage: "wholeBranch"`, `featureBranch` = top slice,
-  `base: "main"`, `wbRounds: 0`. Route each returned finding to the slice that
+- **Whole-stack pass:** `stage: "wholeBranch"`, `wbRounds: 0`,
+  `docsRepos: []` (review only: no fix, no docs commit, `finalSha` stays the
+  reviewed SHA), and every workstream entry rewritten to `featureBranch` = top
+  slice and `base: "main"` (otherwise the script throws "workstreams
+  disagree"). Route each returned finding to the slice that
   owns its lines, via a fresh `implementer` on that slice; then merge upward
   bottom-first, each child running
   `git -c rerere.enabled=true -c rerere.autoupdate=true merge origin/<parent>`;
@@ -278,14 +282,18 @@ Default stays one feature branch per repo; stack slices only on the user's ask.
   WITHOUT `--delete-branch` (deleting a base closes the child PR); run
   `gh pr edit <N+1> --base <N's base>`; delete N's branch only once
   `gh pr list --base <N's branch>` is empty.
-- **After a squashed parent:** the child merges `origin/main`. Per conflicted
-  file, with `H` = the parent PR's merged head
-  (`gh pr view <N> --json headRefOid -q .headRefOid`): if
+- **After a squashed parent:** with `H` = the parent PR's merged head
+  (`gh pr view <N> --json headRefOid -q .headRefOid`; once its branch is
+  deleted, `git fetch origin refs/pull/<N>/head` brings the commit back), first
+  check `git merge-base --is-ancestor <H> origin/<child>`. If it fails, merge
+  `H` into the child first; otherwise "take ours" could drop parent changes.
+  Then the child merges `origin/main`. Per conflicted file: if
   `git rev-parse origin/main:<file>` equals `git rev-parse <H>:<file>`, take
   ours (`git checkout --ours <file>`); anything else, a file missing on either
-  side included, is a real conflict → fixer. **First real use is supervised:**
-  the agent stops before pushing, you show the user each auto-resolved file
-  with its diff, and it pushes only on the user's yes.
+  side included, is a real conflict → fixer. **Supervised until the user
+  waives it:** the agent stops before pushing and leaves its worktree in place
+  for the push; you show the user each auto-resolved file with its diff, and it
+  pushes only on the user's yes.
 - **Refuse** only for GitHub-native stacks or a parent PR with no `headRefOid`.
 - **CI:** slice PRs 2..n target non-`main` bases, so workflow branch filters
   may run no remote CI on them; say so in each PR body. The per-slice local

@@ -7,6 +7,8 @@ if (!(secs > 0) || !cmd?.trim() || process.argv.length !== 4) {
 // shortcut: a child that calls setsid escapes the group; upgrade to a port check if a recipe does that
 const child = spawn('/bin/sh', ['-c', cmd], { detached: true, stdio: 'inherit' });
 const killGroup = (sig) => { try { process.kill(-child.pid, sig); } catch {} };
+// the caller's own timeout signals us: take the group down with us, report it as a timeout
+for (const s of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(s, () => { killGroup('SIGKILL'); process.exit(124); });
 let timedOut = false;
 const timer = setTimeout(() => {
   timedOut = true;

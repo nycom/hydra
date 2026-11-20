@@ -59,7 +59,8 @@ const CONF = {}
 for (const c of A.repos || []) {
   if (!c.repo) throw new Error('repos items need {repo, knownRed?, hot?, regen?, smoke?, smokeTimeout?}')
   for (const k of ['knownRed', 'hot']) if (c[k] != null && !Array.isArray(c[k])) throw new Error(`repos ${c.repo}: ${k} must be an array`)
-  if (c.smokeTimeout != null && !(Number.isInteger(c.smokeTimeout) && c.smokeTimeout > 0)) throw new Error(`repos ${c.repo}: smokeTimeout must be a positive integer (seconds)`)
+  // capped below the agent shell's 600 s foreground limit so the wrapper's own timeout always fires first
+  if (c.smokeTimeout != null && !(Number.isInteger(c.smokeTimeout) && c.smokeTimeout >= 1 && c.smokeTimeout <= 590)) throw new Error(`repos ${c.repo}: smokeTimeout must be an integer from 1 to 590 (seconds)`)
   CONF[norm(c.repo)] = c
 }
 const conf = repo => ({ knownRed: [], hot: HOT, regen: '', smoke: '', smokeTimeout: RUN_SECS, ...CONF[repo] })
@@ -87,11 +88,12 @@ const short = what => { const s = left() < RESERVE; if (s) stoppedBy.push(what);
 // ---- shared prompt text --------------------------------------------------
 // Workstreams never commit generated files, so whoever runs the gate on a workstream SHA regenerates them first.
 const REGEN = regen => `Before running the gate or any test, run the repo's regen recipe in your worktree: ${regen}\nDiffs it produces are expected (generated files are rebuilt at merge): they are not findings and are never committed.`
-const HARD = 'Hard rules: never ssh/rsync/deploy to a robot unit or any device; never touch Cloud Run, gcloud, prod data or prod endpoints; never gh run rerun or gh pr merge; never create or push a plan/spec doc (plannings/, docs/*plan*) unless that file already exists on the origin branch.'
+const HARD = 'Hard rules: no deploys, no ssh or rsync to hosts, no cloud or prod actions (prod data and prod endpoints included); never gh run rerun or gh pr merge; never create or push a plan/spec doc (plannings/, docs/*plan*) unless that file already exists on the origin branch.'
 const sq = s => `'${s.replace(/'/g, `'\\''`)}'` // POSIX single-quoting for a shell argument
 const RUN = (secs, cmd) => `node ${sq(`${A.skillDir}/run-cmd.mjs`)} ${secs} ${sq(cmd)}`
-const SMOKE = c => c.smoke ? `Live smoke, proving the core invariants: run the repo's local recipe exactly as this command line wraps it (${c.smokeTimeout} s hard cap, exit 124 = timed out; leftover processes are killed):\n${RUN(c.smokeTimeout, c.smoke)}\nA failed or timed-out smoke is a critical finding.` : 'Live smoke: "skipped: no smoke recipe" (do not improvise a boot).'
-const CHECKS = w => w.checks ? `Checks: run each of these from your worktree root, exactly as written (${RUN_SECS} s hard cap, exit 124 = timed out), and report the exit code per command:\n${w.checks.map(x => RUN(RUN_SECS, x)).join('\n')}\nA red check is a critical finding; an author never pushes with one red.\n` : ''
+const SHELL_CAP = 'give the shell call a timeout above the cap (foreground max is 600 s), or run it in the background and wait'
+const SMOKE = c => c.smoke ? `Live smoke, proving the core invariants: run the repo's local recipe exactly as this command line wraps it (${c.smokeTimeout} s hard cap, exit 124 = timed out; leftover processes are killed; ${SHELL_CAP}):\n${RUN(c.smokeTimeout, c.smoke)}\nA failed or timed-out smoke is a critical finding.` : 'Live smoke: "skipped: no smoke recipe" (do not improvise a boot).'
+const CHECKS = w => w.checks ? `Checks: run each of these from your worktree root, exactly as written (${RUN_SECS} s hard cap, exit 124 = timed out; ${SHELL_CAP}), and report the exit code per command in gate.summary (validators) or tests (authors and fixers):\n${w.checks.map(x => RUN(RUN_SECS, x)).join('\n')}\nA red check is a critical finding; an author never pushes with one red.\n` : ''
 const GIT = (repo, wt) => `Git rules (non-negotiable):
 - Never touch the user's existing checkout of ${repo} (no checkout/switch/reset there). Work only in your own worktree at ${repo}/.claude/worktrees/${wt}: git -C ${repo} fetch origin and git -C ${repo} worktree prune first; if that path still exists, git worktree remove --force it; if the local branch already exists, add the worktree on it instead of creating it with -b.
 - Commit in repo style with the repo's configured identity (the user). NO AI attribution anywhere: no Co-Authored-By trailer, no "Generated with" footer, no Claude/Anthropic/AI mention in messages, comments, docs or PR bodies, and no agent-tooling paths (.claude/) in committed text — say "a scratch worktree".
@@ -470,7 +472,7 @@ ${RO(r.repo, 'wb-rev')}
 Briefs:
 ${briefs}
 
-Seam inventory first: for each workstream merge commit M (git log --first-parent --merges --format='%H %s' ${range.replace('...', '..')}; the subject names the workstream branch), git diff M^1 M and list what it changed at its edges: signatures, fields, config/env keys, defaults, enum values, error shapes. Grep for their use sites in the other workstreams' diffs. Return each intersection as its own line in seams (producer change -> use site -> compatible or not); an incompatible one is also a finding of kind "integration".
+Seam inventory first: for each workstream merge commit M (git log --first-parent --merges --format='%H %s' ${range.replace('...', '..')}; the subject names the workstream branch), git diff M^1 M and list what it changed at its edges: signatures, fields, config/env keys, defaults, enum values, error shapes. Grep for their use sites in the other workstreams' diffs. Return each intersection as its own line in seams (producer change -> use site -> compatible or not); an incompatible one is also a finding of kind "integration"; a first-parent merge whose subject is not a workstream branch is an up-merge: use it as a producer only and file nothing inside it.
 
 ${LENSES(false)}
 ${DROP}
