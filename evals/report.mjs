@@ -541,6 +541,7 @@ ${passBar}
 ${recallDelta}
 ${cellTip}
 ${honest}
+${primed}
 ${defaultWord}
 ${voidTile}
 ${cellState}
