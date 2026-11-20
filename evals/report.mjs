@@ -191,7 +191,7 @@ function versionKpis(runs) {
       recall: sd.length ? { value: kept ? Math.round(1000 * caught / kept) / 10 : 0, caught, kept, n: sd.length } : null,
       majorFP: ctl.length ? { value: ctl.reduce((a, r) => a + r.falsePositives.major, 0), n: ctl.length } : null,
       outputTokens: normMean(latest, 'outputTokens'), contextTokens: normMean(latest, 'contextTokens'),
-      voids: runs.filter(r => r.hydraVersion === version && passBar(r) === 'void').length }
+      voids: runs.filter(r => r.hydraVersion === version && passBar(r) === 'void').length, runs: runs.filter(r => r.hydraVersion === version).length }
   })
 }
 // a KPI change is only a change over the same scenario count; else the earlier value is a neutral reference
@@ -200,28 +200,45 @@ function kpiDelta(c, p, better, unit = '', f = String) {
   return c.n === p.n ? change(c.value, p.value, better, unit) : { text: `before: ${f(p.value)} over ${p.n} scenario${p.n > 1 ? 's' : ''}`, cls: '' }
 }
 function scenarioVersions(runs, scenario) { return [...new Set(runs.filter(r => r.scenario === scenario).map(r => r.hydraVersion))].sort(vcmp) }
-// run vs run default: the scenario's newest version against the one before it (a void run included: its cost still counts)
+// run vs run default: the scenario's newest version against previousOf (the newest scored older version, as in the scorecard);
+// with none, the version before it, void or not, since its cost still counts
 function defaultPair(runs, scenario) {
-  const v = scenarioVersions(runs, scenario)
-  return v.length ? { base: v.at(-2) ?? v.at(-1), compare: v.at(-1) } : null
+  const v = scenarioVersions(runs, scenario), top = runOf(runs, scenario, v.at(-1))
+  return v.length ? { base: (top && previousOf(runs, top)?.hydraVersion) ?? v.at(-2) ?? v.at(-1), compare: v.at(-1) } : null
 }
 // run vs run rows, base a against compare b: quality first, then raw and normalized cost; a void side shows void, never a number
 function compareRows(a, b) {
   const na = normCost(a), nb = normCost(b), va = passBar(a) === 'void', vb = passBar(b) === 'void'
   const row = (label, x, y, better, unit, f = String, q) => {
     const s = (v, isVoid) => q && isVoid ? 'void' : v == null ? '–' : f(v)
-    return { label, base: s(x, va), compare: s(y, vb), delta: q && (va || vb) ? null : change(y, x, better, unit) }
+    const d = q && (va || vb) ? null : change(y, x, better, unit)
+    // a cost change against a void run is real but not a like-for-like comparison: tagged, never coloured
+    return { label, base: s(x, va), compare: s(y, vb), delta: d && (va || vb) ? { text: `${d.text} vs void run`, cls: '' } : d }
   }
   const sd = r => { const s = seeds(r); return `${s.caught}/${s.kept}` }, seeded = b.scenario.endsWith('-seeded'), ctl = b.scenario.endsWith('-control'), tok = v => fmt(Math.round(v))
   const recall = seeded && { label: 'Recall', base: va ? 'void' : sd(a), compare: vb ? 'void' : sd(b), delta: null }
   if (recall && !va && !vb) { const d = recallDelta(b, a); recall.delta = { text: `${arrow(d)}${d} pts`, cls: d > 0 ? 'good' : d < 0 ? 'bad' : '' } }
-  return [row('Score', runScore(a), runScore(b), 1, ' pts', String, true), recall,
+  // a seeded score is its recall, so its change is the recall change on the seeds both runs hold
+  const score = row('Score', runScore(a), runScore(b), 1, ' pts', String, true); if (recall) score.delta = recall.delta
+  return [score, recall,
     ctl && row('Major false positives', a.falsePositives.major, b.falsePositives.major, -1, '', String, true),
     row('Output tokens', na.outputTokens, nb.outputTokens, -1, '%', tok), row('Context tokens', na.contextTokens, nb.contextTokens, -1, '%', tok),
     row('Agents', na.agents, nb.agents, -1), row('Wall minutes', na.wallMinutes, nb.wallMinutes, -1),
     seeded && row('Tokens per kept seed', na.perKept, nb.perKept, -1, '%', tok, true), seeded && row('Tokens per caught seed', na.perCaught, nb.perCaught, -1, '%', tok, true),
     row('Tokens per agent', na.perAgent, nb.perAgent, -1, '%', tok), row('Context per agent', na.ctxPerAgent, nb.ctxPerAgent, -1, '%', tok),
     row('Minutes per agent', na.minPerAgent, nb.minPerAgent, -1)].filter(Boolean)
+}
+// output tokens per agent of a version's scored runs: the mean of per-run ratios, the runs it is over, and their total tokens
+function versionCost(runs, version) {
+  const rs = runs.filter(r => r.hydraVersion === version && passBar(r) !== 'void'), m = normMean(rs, 'perAgent')
+  return m && { ...m, tokens: rs.reduce((a, r) => a + r.cost.outputTokens, 0) }
+}
+// the change in that mean from version p to c, only over the scenarios both versions scored: cost compares within a scenario
+function sharedCostDelta(runs, c, p) {
+  const scored = v => new Set(runs.filter(r => r.hydraVersion === v && passBar(r) !== 'void').map(r => r.scenario)), b = scored(p), shared = [...scored(c)].filter(s => b.has(s))
+  if (!shared.length) return null
+  const m = v => normMean(runs.filter(r => r.hydraVersion === v && shared.includes(r.scenario)), 'perAgent').value, d = change(m(c), m(p), -1, '%')
+  return d && { ...d, text: `${d.text} vs ${p} on ${shared.length} shared scenario${shared.length > 1 ? 's' : ''}` }
 }
 // every field a run has, [value, label]; the first row is the title
 function runFields(r) {
@@ -235,11 +252,11 @@ function runFields(r) {
     [fmt(n.perAgent), 'per agent'], ...(n.ctxPerAgent != null ? [[fmt(n.ctxPerAgent), 'context per agent']] : []), [String(n.minPerAgent), 'minutes per agent']]
 }
 export { passBar, latestPerScenario, previousOf, pickPipelineRun, headline, cellState, voidTile, cellTip, recallDelta, runScore, combined, combinedAsOf, priorCombined, combinedDelta, versionSteps,
-  cellStatus, runOf, matrixCell, scenarioDelta, change, normCost, normMean, versionKpis, kpiDelta, scenarioVersions, defaultPair, compareRows, runFields }
+  cellStatus, runOf, matrixCell, scenarioDelta, change, normCost, normMean, versionKpis, kpiDelta, scenarioVersions, defaultPair, compareRows, runFields, versionCost, sharedCostDelta }
 // what the page script re-declares from source
 const SHARED = [fmt, vcmp, seeds, passBar, recallDelta, cellTip, offBrief, primed, honest, defaultWord, voidTile, cellState, headline, newest, latestPerScenario, previousOf, pickPipelineRun,
   runScore, combined, chrono, combinedAsOf, priorCombined, combinedDelta, versionSteps, cellStatus, runOf, matrixCell, arrow, scenarioDelta, change, normCost, normMean, versionKpis, kpiDelta,
-  scenarioVersions, defaultPair, compareRows, runFields]
+  scenarioVersions, defaultPair, compareRows, versionCost, sharedCostDelta, runFields]
 
 // ---- data -------------------------------------------------------------------------------------
 export function validate(r, file) {
@@ -395,6 +412,7 @@ svg{display:block;max-width:100%;height:auto;overflow:visible}
 svg text{fill:var(--ink2);font-size:12px;font-variant-numeric:tabular-nums}
 .muted{fill:var(--muted)!important;font-size:11px}
 .ink{fill:var(--ink)!important}.b{font-weight:600}
+.halo{paint-order:stroke;stroke:var(--surface);stroke-width:4px;stroke-linejoin:round}
 .good{color:var(--good-t)!important;fill:var(--good-t)!important}.bad{color:var(--bad-t)!important;fill:var(--bad-t)!important}
 .up{color:var(--good-t)!important}.down{color:var(--bad-t)!important}
 [tabindex]{outline:none}[tabindex]:focus-visible>.hit,[tabindex]:hover>.hit{stroke:var(--ink);stroke-width:1.5}
@@ -402,7 +420,7 @@ td[tabindex]:hover,td[tabindex]:focus-visible{box-shadow:inset 0 0 0 1.5px var(-
 .hit{fill:transparent}
 .legend{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:12px;color:var(--ink2);margin:0 0 12px}
 .legend>span{display:inline-flex;align-items:center;gap:5px}
-.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;box-shadow:inset 0 0 0 .5px var(--axis)}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;box-shadow:inset 0 0 0 1px color-mix(in oklab,var(--ink) 30%,transparent)}
 .sw{display:inline-block;flex:none;overflow:visible}
 .tablewrap{overflow-x:auto;max-width:100%}
 table{border-collapse:collapse;width:100%;font-size:13px;font-variant-numeric:tabular-nums}
@@ -422,15 +440,15 @@ rect.st-pass{fill:var(--t-pass)}rect.st-fail{fill:var(--t-fail)}rect.st-partial{
 .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px}
 .tile{border:.5px solid var(--border);border-radius:12px;padding:12px;min-width:0}
 .tile .v{font-size:24px;font-weight:600;margin:2px 0;line-height:1.2}.tile .v.sm{font-size:17px}
-.tile .d{font-size:12px;color:var(--ink2)}.tile .s{font-size:12px;color:var(--muted)}.tile svg{margin-top:8px}
+.tile .d{font-size:12px;color:var(--ink2)}.tile .s{font-size:12px;color:var(--ink2)}.tile svg{margin-top:8px}
 .group{font-size:12px;color:var(--ink2);margin:16px 0 8px}
 .matrix th,.matrix td{padding:8px 10px;border-bottom:.5px solid var(--grid);white-space:nowrap}
 .matrix tbody th,.matrix thead th:first-child{position:sticky;left:0;background:var(--surface);z-index:1}.matrix thead th{text-align:center}.matrix thead th:first-child{text-align:left}
 .matrix td.cell{text-align:center;border-left:2px solid var(--surface);border-radius:6px;font-weight:600}
 .matrix td.delta{font-size:12px;color:var(--ink2)}
-.matrix tbody th{color:var(--ink);font-size:13px}.matrix tbody th>div:first-child,.matrix tbody th:not(.scn){display:flex;align-items:center;gap:6px}.matrix .vs{font-weight:400;color:var(--muted);font-size:12px;margin-left:20px}
+.matrix tbody th{color:var(--ink);font-size:13px}.matrix tbody th>div:first-child,.matrix tbody th:not(.scn){display:flex;align-items:center;gap:6px}.matrix .vs{font-weight:400;color:var(--ink2);font-size:12px;margin-left:20px}
 .matrix tfoot th,.matrix tfoot td{font-weight:400;color:var(--ink2);font-size:12px;text-align:center;border-bottom:none}
-.matrix tfoot th{text-align:left}.matrix tfoot b{color:var(--ink);font-size:13px;display:block}
+.matrix tfoot th{text-align:left}.matrix tfoot td.delta{white-space:normal;min-width:150px}.matrix tfoot b{color:var(--ink);font-size:13px;display:block}
 .multiples{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,290px),1fr));gap:12px}
 .multiples.w{grid-template-columns:repeat(auto-fill,minmax(min(100%,440px),1fr))}
 .panel{border:.5px solid var(--border);border-radius:12px;padding:12px;min-width:0}
@@ -625,7 +643,9 @@ function client(D) {
     tile('Major false positives', fp ? String(fp.value) : '–', kpiDelta(fp, prev?.majorFP, -1), fp ? `summed over ${ofN(fp, 'control')}` : 'no scored control', ks.map(k => k.majorFP?.value ?? null), String)
     tile('Output tokens per run', tok(ot?.value), kpiDelta(ot, prev?.outputTokens, -1, '%', tok), ot ? `mean, newest scored run of ${ofN(ot, 'scenario')}` : '–', ks.map(k => k.outputTokens?.value ?? null), tok)
     tile('Context tokens per run', tok(ct?.value), kpiDelta(ct, prev?.contextTokens, -1, '%', tok), ct ? `mean over ${ofN(ct, 'scenario')} that record it` : 'not recorded yet', ks.map(k => k.contextTokens?.value ?? null), tok)
-    tile(`Void runs at ${last?.version ?? '–'}`, String(last?.voids ?? 0), prev ? change(last.voids, prev.voids, -1) : null, `${voids} of ${D.runs.length} runs overall`, ks.map(k => k.voids), String)
+    // void counts compare only over the same number of runs; else the earlier count is a neutral reference
+    const vd = !prev ? null : prev.runs === last.runs ? change(last.voids, prev.voids, -1) : { text: `before: ${prev.voids} of ${prev.runs} runs`, cls: '' }
+    tile(`Void runs at ${last?.version ?? '–'}`, last ? `${last.voids} of ${last.runs}` : '0', vd, `${voids} of ${D.runs.length} runs overall`, ks.map(k => k.voids), String)
     table(sec, ['Version', 'Combined', 'Seeded recall', 'Major FP (controls)', 'Output tokens per run', 'Context tokens per run', 'Void runs at version'],
       ks.map(k => [k.version, k.combined ? `${k.combined.value} (${k.combined.n} of ${n})` : '–', k.recall ? `${k.recall.value}% (${k.recall.caught}/${k.recall.kept})` : '–', k.majorFP ? String(k.majorFP.value) : '–', tok(k.outputTokens?.value), tok(k.contextTokens?.value), String(k.voids)]))
     table(sec, ['Tile', 'Value', 'Change', 'Detail'], rows, true, 'Tiles')
@@ -669,7 +689,7 @@ function client(D) {
       h('svg:rect', { x: x - CW / 2 + 1, y: TOP - 8, width: CW - 2, height: VY - TOP + 20, rx: 4, class: 'hit' }, g)
       mark(g, r.scenario, x, score === null ? VY : y(score), 5, score === null)
       // only a partial recall gets its number: 0 and 100 sit on gridlines
-      if (score % 100) t(g, x - 10, y(score) + 4, String(score), 'ink', 'end')
+      if (score % 100) t(g, x, y(score) - 10, String(score), 'ink halo', 'middle')
       t(g, x, XL, fam, 'ink', 'middle'); t(g, x, XL + 13, kind, 'muted', 'middle')
       hover(g, [[r.id], [score === null ? '⊘ void' : String(score), 'run score', score === null ? 'var(--neutral)' : col(r.scenario)], [r.scenario, 'scenario'], [r.hydraVersion, 'version'], [r.date, 'date'],
         [WORD[r.verdict], 'verdict'], [c ? String(c.score) : '–', `combined as of this run${c ? ` · ${c.n} of ${n} scenarios` : ''}`, 'var(--ink)']])
@@ -701,9 +721,9 @@ function client(D) {
       const latest = latestPerScenario(runs.filter(r => r.scenario === sc))[0], dl = scenarioDelta(latest, previousOf(runs, latest))
       h('td', { class: `delta ${dl.cls}` }, tr, dl.text)
     }
-    const ks = Object.fromEntries(versionKpis(D.runs).map(k => [k.version, k])), cost = vers.map(v => normMean(runs.filter(r => r.hydraVersion === v), 'perAgent'))
-    const frow = (label, cells, delta) => {
-      const tr = h('tr', {}, foot); h('th', { scope: 'row' }, tr, label)
+    const ks = Object.fromEntries(versionKpis(D.runs).map(k => [k.version, k])), cost = vers.map(v => versionCost(runs, v))
+    const frow = (label, cells, delta, note) => {
+      const tr = h('tr', {}, foot), th = h('th', { scope: 'row' }, tr, label); if (note) h('div', {}, th, note)
       for (const [main, sub] of cells) { const td = h('td', {}, tr); h('b', {}, td, main); td.append(sub) }
       h('td', { class: `delta ${delta?.cls ?? ''}`, style: 'text-align:left' }, tr, delta?.text ?? '')
     }
@@ -711,9 +731,8 @@ function client(D) {
       const k = vers.map(v => ks[v].combined), dk = kpiDelta(k.at(-1), k.at(-2), 1)
       frow('Combined as of version', k.map(c => c ? [String(c.value), `${c.n} of ${n}`] : ['–', '']), dk && { ...dk, text: `${dk.text}${dk.text.startsWith('before') ? '' : ` vs ${vers.at(-2)}`}` })
     }
-    const dc = change(cost.at(-1)?.value, cost.at(-2)?.value, -1, '%')
-    frow('Output tokens per agent', vers.map((v, i) => { const rs = runs.filter(r => r.hydraVersion === v); return [tok(cost[i]?.value), `${fmt(rs.reduce((a, r) => a + r.cost.outputTokens, 0))} in ${rs.length} run${rs.length > 1 ? 's' : ''}`] }),
-      dc && { ...dc, text: `${dc.text} vs ${vers.at(-2)}` })
+    frow('Output tokens per agent', cost.map(c => c ? [tok(c.value), `${c.n} run${c.n > 1 ? 's' : ''}, ${fmt(c.tokens)} tokens`] : ['–', 'void only']),
+      vers.length > 1 ? sharedCostDelta(runs, vers.at(-1), vers.at(-2)) : null, 'mean of scored runs')
     table(sec, ['Scenario', 'Version', 'Result', 'Verdict', 'Reason'], tv)
   }
 
@@ -722,7 +741,7 @@ function client(D) {
     const sec = $('trends'), el = sec.querySelector('.chart'), scs = D.scenarios.filter(sc => runs.some(r => r.scenario === sc))
     if (!scs.length) { table(sec, [], []); return empty(el, 'No runs in this filter.') }
     const v = runs.find(isVoid)
-    scLegend(el, scs, v ? [['void', v.scenario, 'void run: quality not scored, cost still drawn']] : [])
+    scLegend(el, scs, v ? [['void', v.scenario, 'void run: cost drawn hollow; quality rows show ⊘, not scored']] : [])
     const grid = h('div', { class: 'multiples' }, el)
     scs.forEach((sc, k) => panel(sec, grid, sc, runs.filter(r => r.scenario === sc).sort(chrono), k > 0))
   }
@@ -750,8 +769,10 @@ function client(D) {
       let d = '', open = false
       vals.forEach((v, i) => { if (v == null) { open = false; return } d += `${open ? 'L' : 'M'}${X(i)},${Y(v)}`; open = true })
       h('svg:path', { d: d || 'M0,0', fill: 'none', stroke: col(sc), 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }, s)
-      rs.forEach((r, i) => { if (vals[i] != null) mark(s, sc, X(i), Y(vals[i]), 4, isVoid(r)); else if (quality && isVoid(r)) mark(s, sc, X(i), yb, 4, true) })
-      const lv = vals.at(-1), dl = rs.length > 1 ? change(lv, vals.at(-2), better, unit) : null
+      // a void run is not on the value axis: quality rows mark it ⊘ at mid-row, never on the 0 baseline
+      rs.forEach((r, i) => { if (vals[i] != null) mark(s, sc, X(i), Y(vals[i]), 4, isVoid(r)); else if (quality && isVoid(r)) t(s, X(i), y0 + RH / 2 + 4, '⊘', 'muted', 'middle') })
+      const lv = vals.at(-1), pr = rs.at(-2), rd = seeded && !j && pr && !isVoid(lr) && !isVoid(pr) ? recallDelta(lr, pr) : null
+      const dl = rd !== null ? { text: `${arrow(rd)}${rd} pts`, cls: rd > 0 ? 'good' : rd < 0 ? 'bad' : '' } : rs.length > 1 ? change(lv, vals.at(-2), better, unit) : null
       t(s, W, y0 + 15, lv == null ? (quality && isVoid(lr) ? 'void' : '–') : f(lv), 'ink b', 'end')
       if (dl) t(s, W, y0 + 28, dl.text, `muted ${dl.cls}`, 'end')
     })
@@ -770,7 +791,7 @@ function client(D) {
     if (!fs) return compareAll(sec, el)
     const a = runOf(D.runs, fs, $('f-base').value), b = runOf(D.runs, fs, $('f-compare').value)
     const rows = compareRows(a, b), norm = l => /per /.test(l), tv = []
-    if (a === b) h('p', { class: 'hint', style: 'margin:0 0 12px' }, el, `Only one version ran ${fs} so far, so it is compared with itself.`)
+    if (a === b) h('p', { class: 'hint', style: 'margin:0 0 12px' }, el, scenarioVersions(D.runs, fs).length === 1 ? `Only one version ran ${fs} so far, so it is compared with itself.` : 'Base and Compare are the same version.')
     for (const [title, part] of [['Quality and cost per run', rows.filter(r => !norm(r.label))], ['Normalized cost', rows.filter(r => norm(r.label))]]) {
       h('div', { class: 'group' }, el, title)
       const tiles = h('div', { class: 'kpis' }, el)
@@ -965,7 +986,7 @@ ${section('summary', 'Where hydra stands', 'Over every run, never filtered. Each
 ${section('progress', 'Progress per eval run', 'Every run, oldest to newest (date, then version). Run score 0–100: a seeded run scores its recall × 100 over kept seeds; a control or S16 scores 100 on a pass and 0 on a fail; a void run has no score (hollow, below the axis). The line is the combined score at the end of each version: the mean score of the newest scored run per scenario (newest by version) among the runs so far. Colour is the scenario family, shape the kind: circle seeded, diamond control, square S16.')}
 ${section('scorecard', 'Version scorecard', 'Each cell is the scenario’s result at that version: caught/kept seeds, major false positives (FP) on a control, pass or fail on S16. Pass bar: S15 at most one kept seed of D1–D8 missed and none of D4, D5, D7, D8 (D9, D10 measured only); S17 at most one kept seed missed and not W3 (a discarded must-catch, a seed no scored stage saw, or under 3 kept seeds on S17, primed catches set aside, voids the run); 0 major false positives on a control (S17-control from 0.3.7: and an on-brief merged head); S16 blocked, honest and unmerged. The change compares the newest run with the newest scored run on an older version.')}
 ${section('trends', 'Trends per scenario', 'One panel per scenario, one column per run, oldest version left. Each row has its own scale from 0; the right edge shows the newest value and its change against the run before. Hover or focus a column for every field of the run.')}
-${section('compare', 'Run vs run', 'The same scenario on two versions. Default: its newest version against the version before it. Cost up reads bad, quality up reads good; a void run shows no quality number.')}
+${section('compare', 'Run vs run', 'The same scenario on two versions. Default: its newest version against its newest scored older version (the scorecard’s comparison), else the version before it. Cost up reads bad, quality up reads good; a seeded score changes by recall on the seeds both runs hold; a void side shows no quality number, and a cost change against it is tagged and not coloured.')}
 ${section('heatmap', 'Recall per planted defect', 'S15-seeded runs, oldest to newest. Each cell names the stage that caught the defect; hover for the finding.')}
 ${section('cost', 'Cost per stage', 'Output tokens per stage (ag = agents), one scale per scenario so its versions compare stage by stage; stages that did not run show –. Normalized cost is defined in evals/README.md.')}
 ${section('pipeline', 'hydra pipeline', '')}

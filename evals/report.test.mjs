@@ -7,7 +7,7 @@ import assert from 'node:assert'
 import { ROOT, loadRuns, validate, buildHtml, readmeBlock, snapshotFiles, shaFile, withBlock, blockOf,
   passBar, latestPerScenario, previousOf, pickPipelineRun, headline, cellState, voidTile, cellTip, recallDelta,
   runScore, combined, combinedAsOf, priorCombined, combinedDelta, versionSteps,
-  cellStatus, runOf, matrixCell, scenarioDelta, change, normCost, normMean, versionKpis, kpiDelta, scenarioVersions, defaultPair, compareRows, runFields } from './report.mjs'
+  cellStatus, runOf, matrixCell, scenarioDelta, change, normCost, normMean, versionKpis, kpiDelta, scenarioVersions, defaultPair, compareRows, runFields, versionCost, sharedCostDelta } from './report.mjs'
 
 const read = f => fs.readFileSync(path.join(ROOT, f), 'utf8')
 const entries = loadRuns()
@@ -284,6 +284,7 @@ assert.deepEqual(kpis.map(k => k.majorFP), [null, null, { value: 0, n: 1 }, { va
 assert.deepEqual(kpis.map(k => k.outputTokens), [{ value: 1375, n: 1 }, { value: 1375, n: 1 }, { value: 31131.33, n: 3 }, { value: 26853.5, n: 4 }, { value: 31192.6, n: 5 }])
 assert.deepEqual(kpis.map(k => k.contextTokens), [null, null, null, { value: 1723650, n: 4 }, { value: 1868186, n: 5 }])
 assert.deepEqual(kpis.map(k => k.voids), [0, 1, 0, 1, 0], 'void runs at that version')
+assert.deepEqual(kpis.map(k => k.runs), [1, 1, 3, 5, 2], 'runs at that version: a void count compares only over the same run count')
 assert.equal(kpis.at(-1).combined.value, combined(real).score, 'the KPI row ends on the header score')
 assert.deepEqual(versionKpis([]), [])
 // a KPI change is only a change over the same scenario count
@@ -296,7 +297,9 @@ assert.equal(kpiDelta(kpis[2].recall, kpis[1].recall, 1), null)
 // ---- run vs run: the scenario's newest version against the version before it ----
 assert.deepEqual(scenarioVersions(real, 'S15-seeded'), ['0.3.2', '0.3.3', '0.3.5'])
 assert.deepEqual(defaultPair(real, 'S15-seeded'), { base: '0.3.3', compare: '0.3.5' })
-assert.deepEqual(defaultPair(real, 'S17-seeded'), { base: '0.3.5', compare: '0.3.6' }, 'a void base still compares cost')
+assert.deepEqual(defaultPair(real, 'S17-seeded'), { base: '0.3.5', compare: '0.3.6' }, 'no scored older version: the version before, void, still compares cost')
+{ const a = runAt(old, 'p1', '0.3.0', '2026-11-10'), v = runAt(old, 'p2', '0.3.4', '2026-11-11', r => { r.voidReason = skipped; r.verdict = 'void' }), n = runAt(old, 'p3', '0.3.5', '2026-11-12')
+  assert.deepEqual(defaultPair([a, v, n], 'S15-seeded'), { base: '0.3.0', compare: '0.3.5' }, 'the base is previousOf: the newest scored older version, as in the scorecard') }
 assert.deepEqual(defaultPair(real, 'S16'), { base: '0.3.3', compare: '0.3.5' })
 assert.deepEqual(defaultPair([old], 'S15-seeded'), { base: '0.3.0', compare: '0.3.0' }, 'one version: compared with itself')
 assert.equal(defaultPair(real, 'S18'), null)
@@ -312,7 +315,15 @@ assert.deepEqual(Object.keys(srows), ['Score', 'Recall', 'Output tokens', 'Conte
 assert.deepEqual(srows['Score'], { label: 'Score', base: 'void', compare: '50', delta: null }, 'a void run has no score to compare')
 assert.deepEqual(srows['Recall'], { label: 'Recall', base: 'void', compare: '2/4', delta: null })
 assert.deepEqual(srows['Tokens per kept seed'], { label: 'Tokens per kept seed', base: 'void', compare: '9,394', delta: null })
+assert.deepEqual(srows['Output tokens'].delta, { text: '▲ +90% vs void run', cls: '' }, 'a cost change against a void run is tagged and not coloured')
+assert.deepEqual(compareRows(seeded, ten).find(r => r.label === 'Score').delta, { text: '= 0 pts', cls: '' }, 'a seeded score change is the recall change on the shared seeds')
 assert.deepEqual(compareRows(s15s3, s15s5).find(r => r.label === 'Recall'), { label: 'Recall', base: '8/8', compare: '10/10', delta: { text: '= 0 pts', cls: '' } }, 'recall change on the shared seeds')
+// the scorecard cost row: the mean of per-run ratios over a version's scored runs; its change only over the scenarios both versions scored
+assert.deepEqual(versionCost(real, '0.3.6'), { value: 3162, n: 2, tokens: 60841 })
+assert.equal(versionCost(real, '0.3.2'), null, 'a version with only void runs has no cost mean')
+assert.deepEqual(sharedCostDelta(real, '0.3.6', '0.3.5'), { text: '▲ +66% vs 0.3.5 on 1 shared scenario', cls: 'bad' }, 'S17-control only: S17-seeded was void on 0.3.5')
+assert.deepEqual(sharedCostDelta(real, '0.3.5', '0.3.3'), { text: '▲ +2% vs 0.3.3 on 3 shared scenarios', cls: 'bad' }, '(2712 + 2072 + 1505) / 3 against (2473 + 2206 + 1486) / 3')
+assert.equal(sharedCostDelta(real, '0.3.3', '0.3.2'), null, 'nothing scored on both')
 // every field of a run, for the trend hover
 const fields = runFields(s17s6)
 assert.deepEqual(fields[0], [s17s6.id])
