@@ -6,7 +6,7 @@ import os from 'node:os'
 import assert from 'node:assert'
 import { ROOT, loadRuns, validate, buildHtml, readmeBlock, snapshotFiles, shaFile, withBlock, blockOf,
   passBar, latestPerScenario, previousOf, pickPipelineRun, headline, cellState, voidTile, cellTip, recallDelta,
-  runScore, combined, combinedAsOf, priorCombined } from './report.mjs'
+  runScore, combined, combinedAsOf, priorCombined, combinedDelta } from './report.mjs'
 
 const read = f => fs.readFileSync(path.join(ROOT, f), 'utf8')
 const entries = loadRuns()
@@ -205,9 +205,18 @@ assert.deepEqual(asOf.map(p => p.run.id), ['a', 'c', 'b', 'd', 'f0', 'f1'])
 assert.deepEqual(asOf.map(p => p.score), [0, 87.5, 100, null, 75, 100])
 assert.deepEqual(asOf.map(p => p.combined), [{ score: 0, n: 1 }, { score: 44, n: 2 }, { score: 63, n: 3 }, { score: 63, n: 3 }, { score: 66, n: 4 }, { score: 91, n: 4 }])
 assert.deepEqual(combinedAsOf([]), [])
+{ const real = entries.map(e => e.run); assert.deepEqual(combinedAsOf(real).at(-1).combined, combined(real), 'the progress line ends on the header score') }
 // the header delta compares with the combined score over the versions before the newest
 assert.deepEqual(priorCombined([cA, cB, cC, cD, cF0, cF1]), { score: 63, n: 3, version: '0.3.2' })
 assert.equal(priorCombined([cA]), null, 'a single version has nothing to compare with')
+// the header delta: an arrow and a colour only when both sides cover the same scenarios
+assert.deepEqual(combinedDelta({ score: 90, n: 5 }, { score: 100, n: 5, version: '0.3.5' }), { text: '▼ -10 vs 0.3.5', cls: 'down' })
+assert.deepEqual(combinedDelta({ score: 95, n: 4 }, { score: 90, n: 4, version: '0.3.5' }), { text: '▲ +5 vs 0.3.5', cls: 'up' })
+assert.deepEqual(combinedDelta({ score: 90, n: 4 }, { score: 90, n: 4, version: '0.3.5' }), { text: '= 0 vs 0.3.5', cls: '' })
+assert.deepEqual(combinedDelta({ score: 90, n: 5 }, { score: 100, n: 4, version: '0.3.5' }), { text: '100 over 4 scenarios at 0.3.5', cls: '' }, 'a different scenario count is not a change')
+assert.deepEqual(combinedDelta({ score: 90, n: 2 }, { score: 100, n: 1, version: '0.3.1' }), { text: '100 over 1 scenario at 0.3.1', cls: '' })
+assert.equal(combinedDelta({ score: 90, n: 5 }, null), null)
+assert.equal(combinedDelta(null, null), null)
 assert.equal(priorCombined([runAt(seeded, 'v', '0.3.1', '2026-11-19', r => { r.voidReason = skipped; r.verdict = 'void' }), cF1]), null, 'void-only older versions have no score')
 
 // ---- README block ----
