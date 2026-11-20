@@ -51,7 +51,10 @@ result lists them. **Promote-on-green:** whole-branch fixes push to
 sonnet step fast-forwards the feature branch only after the recheck or docs
 validator passes, and only if it still sits at the expected head. Otherwise the
 side branch stays, the feature branch stays at its last validated SHA, and the
-repo fails with an escalation. `finalSha` is always a validated SHA.
+repo fails with an escalation naming the side branch. Docs run only on a repo
+whose whole-branch pass did not fail, and only from the SHA that pass validated.
+`finalSha` is always a validated SHA. Workstream branches may not be named
+`<featureBranch>--docs` or `<featureBranch>--wbfix<n>` (the script throws).
 
 **Global rules the workflow enforces and you must too:** no AI attribution
 anywhere (no Co-Authored-By, no generated-with footers, no Claude mention, no
@@ -207,8 +210,9 @@ Repo paths are normalized (trailing slashes stripped).
 
 **Size:** agents ≈ per workstream (implement + 1 review per cycle + fix and
 validate per cycle with critical/major findings + 1 validator when a clean
-review lands on an unvalidated head + merge, +3 when a rejected merge returns
-to its author) + per repo (2, +2 per whole-branch fix round, max `wbRounds`
+review lands on an unvalidated head + merge; a rejected merge that returns to its
+author adds fix + validate + merge, +3 once the named cycle count is reached, +4
+otherwise and in converge mode, where a review of the fixed head follows) + per repo (2, +2 per whole-branch fix round, max `wbRounds`
 rounds, +1 promote when a round pushed) + 1 contract check when 2+ repos + per
 docs repo (1, +1 validator when it pushed, +1 promote when that passed). Every
 dead agent can add up to 2 replacements. One workstream with a clean cycle 1 is
@@ -246,7 +250,10 @@ The workflow returns:
   `{sha, files, prBody, ok, tests, notes, verdict, findings}` (`sha` = the
   docs commit on `<featureBranch>--docs`; it becomes `finalSha` only when
   validated and promoted); a failed docs validation or promotion fails the
-  repo; so does a docs agent that died 3 times (plus an escalation)
+  repo and names the unpromoted docs commit on `<featureBranch>--docs` in
+  `escalations` and `docs.notes`; so does a docs agent that died 3 times (plus
+  an escalation). Docs are skipped (`docs.notes`: `skipped: …`) when the repo's
+  whole-branch pass failed
 - `crossRepo`: `{verdict, sections, findings}` when 2+ repos, else `null`
 - `otherDocs`: `[{repo, featureBranch, docs, flaky}]` for docs-only repos
 
@@ -263,11 +270,17 @@ says NOT merged; unpromoted side branches). Then:
   docs diffs — docs must describe what shipped, including every review-round
   fix). Fix-ups go to a fresh `implementer`, never to you. **Every fix-up is then
   validated and docs-synced:** re-run the workflow with `stage: "wholeBranch"`
-  (same args, narrowed to the affected repos' workstreams). An unmerged
-  workstream is yours to settle; no agent merges it off-book.
+  (same args, narrowed to the affected repos' workstreams). After an
+  unpromoted failure, the fix-up implementer continues from the side branch the
+  `escalations` name (`<featureBranch>--wbfix<n>` or `<featureBranch>--docs`) and
+  pushes to the feature branch before that re-run; afterwards delete the stale
+  `--wbfix*`/`--docs` refs. An unmerged workstream is yours to settle; no agent
+  merges it off-book.
 - `resumeFromRunId` is **crash recovery only**: it replays cached results for
   identical prompts, so after any hand fix it returns the old verdicts on old
-  SHAs and validates nothing.
+  SHAs and validates nothing. Gate prompts list the run-wide flaky registry, so
+  a replay can see a different registry, run those agents live and end in a
+  false "not promoted" fail: safe (nothing unvalidated lands), but re-check it.
 - Escalate to the user **only** the `questions` (plus anything else code, spec or
   plan can't resolve) — collected and asked **once**, at the end.
 

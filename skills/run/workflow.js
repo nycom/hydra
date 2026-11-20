@@ -28,6 +28,7 @@ for (const w of W) {
   if (w.quickGate != null && !(typeof w.quickGate === 'string' && w.quickGate.trim())) throw new Error(`workstream ${w.id}: quickGate must be a non-empty command`)
   w.repo = norm(w.repo)
   w.base ||= 'main'
+  if (/^(docs|wbfix\d+)$/.test(w.branch.startsWith(`${w.featureBranch}--`) ? w.branch.slice(w.featureBranch.length + 2) : '')) throw new Error(`workstream ${w.id}: branch ${w.branch} is reserved for the run's side branches (${w.featureBranch}--docs, ${w.featureBranch}--wbfix<n>)`)
   w.reviewModel ||= w.model === 'opus' ? 'fable' : 'opus' // one tier above the author
 }
 if (new Set(W.map(w => w.id)).size !== W.length) throw new Error('workstream ids must be unique')
@@ -111,7 +112,7 @@ const noteFlaky = (repo, r) => { for (const t of r?.gate?.flaky || []) (flakySee
 const flakyOf = repo => [...(flakySeen[repo] || [])]
 const GREEN = (knownRed, repo) => `${knownRed.length ? `Green = everything passes except exactly these known-red tests (recorded at the base): ${knownRed.join(', ')}. Any other failure is red; report any known-red that now passes.` : 'Green = every test passes.'}${flakyOf(repo).length ? ` Known flaky in this run (intermittent at head and base): ${flakyOf(repo).join(', ')}. If one of these fails, rerun it once alone and skip the base rerun: green on the rerun = flaky, not red; red again = a failure.` : ''} Never invent your own allowed failures.`
 const GATE = (gate, knownRed, repo, quick) => `${quick ? 'Quick gate, green before every push (validators, the merge, the whole-branch pass and docs run the full gate)' : 'Full gate, green before every push — every suite the repo defines (unit, typecheck, build, Playwright/e2e where present), not just "test"'}:\n${gate}\n${GREEN(knownRed, repo)}\nRun gates in the foreground or with the harness's background-run. Never write pgrep -f wait loops (they match their own command line and never exit); if a wait is unavoidable, use wait $pid, kill -0 $pid, or a bracketed pattern like pgrep -f "[m]vnw".`
-const FLAKY = 'A failure outside the known-red list: rerun that test alone twice and once at the base SHA. Intermittent, or red on base too -> FLAKY: a minor hygiene finding with the three outcomes. Deterministic on head and green on base -> a regression, and gate.green = false. List in gate.flaky only tests that were intermittent on head AND failed at the base (pre-existing flakiness).'
+const FLAKY = 'A failure outside the known-red and known-flaky lists: rerun that test alone twice and once at the base SHA. Intermittent, or red on base too -> FLAKY: a minor hygiene finding with the three outcomes. Deterministic on head and green on base -> a regression, and gate.green = false. List in gate.flaky only tests that were intermittent on head AND failed at the base (pre-existing flakiness).'
 // One regex for every no-AI-trace check, scoped to commits this run authored, never teammates'.
 const AI_TRACE = 'co-authored-by|generated with|\\bclaude\\b|anthropic|\\.claude/'
 const HYGIENE = range => `Hygiene: the commits git log --author="$(git config user.email)" ${range} lists (messages, trailers, added lines) and any PR body written for this branch must have zero matches for grep -iE '${AI_TRACE}' (real code identifiers such as an API-key env var name are not trace). A hit in a run-authored commit is critical (kind hygiene); if you are the agent pushing, do not push and return ok=false. Commits by other authors: report a hit once as a minor hygiene finding, never rewrite them.`
@@ -291,7 +292,7 @@ async function step(prompt, opts) {
 async function promote(repo, branch, from, to, sides, label, phase) {
   const p = await step(
     `Promote a validated commit in ${repo}: fast-forward ${branch} from ${from} to ${to}.
-1. git -C ${repo} fetch origin. git -C ${repo} ls-remote origin refs/heads/${branch} must equal ${from}, and git -C ${repo} merge-base --is-ancestor ${from} ${to} must succeed. Otherwise push nothing: ok=false, the reason in notes.
+1. git -C ${repo} fetch origin. If ls-remote already shows ${to}, an earlier attempt pushed it: go to step 3. Otherwise git -C ${repo} ls-remote origin refs/heads/${branch} must equal ${from}, and git -C ${repo} merge-base --is-ancestor ${from} ${to} must succeed. Otherwise push nothing: ok=false, the reason in notes.
 2. git -C ${repo} push origin ${to}:refs/heads/${branch} (plain push, never --force; a rejected push is ok=false), then verify git ls-remote shows ${to}.
 3. Only after a verified push: git -C ${repo} push origin --delete ${sides.join(' ')}.
 No worktree, no checkout, no commits; never touch the user's checkout of ${repo}. ${HARD}
@@ -358,7 +359,9 @@ Commit and push to ${w.branch}. Return status ("done" only when the gate is gree
 
   let carry = [] // open findings handed to the next review
   const tries = [] // blockers that survived a fix round: {id, where, rounds, answers}
-  const triesOf = f => tries.find(t => t.id === f.id || t.where === f.where)
+  // same id, or same where; every red-gate finding has where 'gate', so that sentinel never matches by where (as in unaccounted)
+  const sameFinding = (a, b) => a.id === b.id || (a.where !== 'gate' && a.where === b.where)
+  const triesOf = f => tries.find(t => sameFinding(t, f))
   let rejected = null // a rejected merge goes back to the author once, as an integration critical
   for (let from = 1; ; from = out.cyclesRun + 1) {
     for (let i = from; i <= CAP; i++) {
@@ -460,7 +463,7 @@ Return headSha, gate, verified (ids confirmed resolved, or whose answer or decli
         carry = [...val.open, ...redGate(val, `v${i}-G`), ...unaccounted(found, val.verified, val.open)]
         out.validatedSha = fix.sha
         for (const g of found)
-          if (blocking(g) && carry.some(s => blocking(s) && (s.id === g.id || s.where === g.where))) {
+          if (blocking(g) && carry.some(s => blocking(s) && sameFinding(s, g))) {
             let t = triesOf(g)
             if (!t) tries.push(t = { id: g.id, where: g.where, rounds: new Set(), answers: [] })
             t.rounds.add(i)
@@ -665,6 +668,9 @@ Ids: X-F1, X-F2, ...`,
     .then(x => x || { verdict: 'fail', sections: 'contract validator died 3 times', findings: [] }),
   () => parallel(DOCS.map(d => async () => {
     if (!shipped || skipped.has(d.repo)) return null
+    // docs build on the validated head only; a failed pass may have its fixes on a side branch
+    const rs = repoResults.find(x => x.repo === d.repo)
+    if (rs?.verdict === 'fail') return { sha: '', files: [], prBody: false, ok: false, tests: '', notes: ['skipped: the whole-branch pass failed; docs run with the passing re-run'] }
     if (short(`${name(d.repo)} docs`)) return { sha: '', files: [], prBody: false, ok: false, tests: '', notes: ['skipped: token budget below the reserve'] }
     const rr = repoMap[d.repo]
     const gate = rr ? [...new Set(rr.ws.map(w => w.gate))].join('\n') : d.gate
@@ -684,6 +690,7 @@ Nothing stale and the graph unchanged: no commit, empty sha, ok=true.
 ${GIT(d.repo, 'docs-sync')}`,
       { label: `${name(d.repo)} docs`, phase: 'Docs sync', model: 'sonnet', schema: DOCS_OUT })
     if (!o || !o.sha) return o
+    if (rs && !same(o.baseSha, rs.sha)) return { ...o, verdict: 'fail', findings: [{ id: 'D-X', severity: 'critical', kind: 'docs', where: o.sha, issue: `docs started from ${o.baseSha}, but the whole-branch pass validated ${rs.sha}`, evidence: 'the script\'s own check' }] }
     // The docs commit becomes the repo's finalSha only once its own read-only validator passes it.
     const v = await step(
       `Validate the docs-sync commits on ${d.repo}, branch ${d.featureBranch}: git fetch, then ${o.baseSha}..${o.sha} on the side branch ${side}. They land after every other check: on a pass they are fast-forwarded onto ${d.featureBranch} and become its head. ${REFUTE}
@@ -713,7 +720,8 @@ const docsOf = repo => {
   const j = DOCS.findIndex(d => d.repo === repo)
   if (j < 0 || !shipped || skipped.has(repo)) return null
   const d = docs?.[j]
-  return d ? { sha: d.sha, files: d.files, prBody: d.prBody, ok: d.ok, tests: d.tests, notes: d.notes, verdict: d.verdict || (d.sha ? 'fail' : 'n/a'), findings: d.findings || [] } : { sha: '', files: [], prBody: false, ok: false, tests: '', notes: ['docs agent died 3 times'], verdict: 'fail', findings: [] }
+  const verdict = d?.verdict || (d?.sha ? 'fail' : 'n/a')
+  return d ? { sha: d.sha, files: d.files, prBody: d.prBody, ok: d.ok, tests: d.tests, notes: d.sha && verdict !== 'pass' ? [...d.notes, `not promoted: docs commit ${d.sha} stays on ${DOCS[j].featureBranch}--docs`] : d.notes, verdict, findings: d.findings || [] } : { sha: '', files: [], prBody: false, ok: false, tests: '', notes: ['docs agent died 3 times'], verdict: 'fail', findings: [] }
 }
 const docsOut = d => d && { ...d, findings: d.findings.map(brief) }
 return {
@@ -726,7 +734,7 @@ return {
     const d = docsOf(r.repo)
     // docs that fail validation or promotion never reach the branch and fail the repo; so does a docs agent that died 3 times
     const docsFailed = d && (d.sha ? d.verdict !== 'pass' : d.verdict === 'fail')
-    return { ...r, verdict: docsFailed ? 'fail' : r.verdict, escalations: [...r.escalations, ...(docsFailed && !d.sha ? ['docs agent died 3 times; docs not synced'] : [])], open: [...r.open, ...(d?.findings || [])].map(brief), questions: uniqQ(r.questions), notes: uniq(r.notes), docs: docsOut(d), finalSha: (d?.verdict === 'pass' && d.sha) || r.sha, flaky: flakyOf(r.repo) }
+    return { ...r, verdict: docsFailed ? 'fail' : r.verdict, escalations: [...r.escalations, ...(docsFailed ? [d.sha ? `docs commit ${d.sha} left unpromoted on ${r.featureBranch}--docs` : 'docs agent died 3 times; docs not synced'] : [])], open: [...r.open, ...(d?.findings || [])].map(brief), questions: uniqQ(r.questions), notes: uniq(r.notes), docs: docsOut(d), finalSha: (d?.verdict === 'pass' && d.sha) || r.sha, flaky: flakyOf(r.repo) }
   }),
   crossRepo: crossRepo && { ...crossRepo, findings: crossRepo.findings.map(brief) },
   otherDocs: DOCS.filter(d => !repoMap[d.repo]).map(d => ({ repo: d.repo, featureBranch: d.featureBranch, docs: docsOut(docsOf(d.repo)), flaky: flakyOf(d.repo) })),

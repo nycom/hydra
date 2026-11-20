@@ -1,5 +1,6 @@
 // Promote-on-green, fixer escalation, merge retry, flaky registry, acceptance tests and quickGate scenarios.
-// Every scenario fails against the tier-2 script except the ones marked (control).
+// Every scenario fails against the tier-2 script except the ones marked (control); 17l-17p, 18g and 20d also failed
+// against this PR's first revision (review follow-ups; 18g is a control against tier-2, which never escalates).
 import { Run } from './run.mjs'
 import assert from 'node:assert'
 const SHA = n => (n + '').padStart(40, 'a')
@@ -108,6 +109,33 @@ await t('17k stacked slice: side branch and promotion target the slice', async (
   assert.equal(r.repos[0].finalSha, SHA(71))
 })
 
+await t('17l docs that started from a head the whole-branch pass did not validate are never promoted', async () => {
+  const { r, p } = await go({ cycles: null, workstreams: [ws('a')] }, { 'one docs': () => ({ baseSha: SHA(99), sha: SHA(80) }) })
+  assert(promotes(p).length === 0 && !p['one docs validate'], Object.keys(p).join())
+  const x = r.repos[0]
+  assert(x.verdict === 'fail' && x.finalSha === SHA(50) && x.open.some(s => s.includes(SHA(99)) && s.includes(SHA(50))), JSON.stringify(x))
+})
+await t('17m a failed whole-branch pass skips docs', async () => {
+  const keep = () => ({ findings: [F('W-F1')] })
+  const { r, p } = await go({ cycles: null, workstreams: [ws('a')] }, { ...wbMajor, 'one recheck r1': keep, 'one recheck r2': keep, 'one docs': () => ({ sha: SHA(80) }) })
+  assert(!p['one docs'] && promotes(p).length === 0, Object.keys(p).join())
+  const x = r.repos[0]
+  assert(x.verdict === 'fail' && x.finalSha === SHA(50) && x.docs.notes.some(n => /^skipped: /.test(n)), JSON.stringify(x))
+})
+await t('17n workstream branches may not take a side-branch name', async () => {
+  await rejects({ workstreams: [ws('docs')] }, /f--docs/)
+  await rejects({ workstreams: [ws('a', { branch: 'f--wbfix3' })] }, /f--wbfix3/)
+  await go({ cycles: null, workstreams: [ws('a', { branch: 'f--wbfixer' }), ws('b', { branch: 'g--docs' })] })
+})
+await t('17o an unpromoted docs commit is named in escalations', async () => {
+  const { r } = await go({ cycles: null, workstreams: [ws('a')] }, { 'one docs': () => ({ sha: SHA(80) }), 'one docs validate': () => ({ verdict: 'fail', findings: [{ ...F('D-F1'), kind: 'docs' }] }) })
+  assert(r.repos[0].escalations.some(e => e.includes('f--docs') && e.includes(SHA(80))), r.repos[0].escalations.join())
+})
+await t('17p promote resumes when an earlier attempt already pushed', async () => {
+  const { p } = await go({ cycles: null, workstreams: [ws('a')] }, { ...wbMajor, 'one recheck r1': () => ({ verified: ['W-F1'] }) })
+  assert(p['one promote'].includes(`If ls-remote already shows ${SHA(71)}, an earlier attempt pushed it: go to step 3.`), p['one promote'])
+})
+
 // row 18: a blocker that survives two fix rounds gets an opus fixer with the prior attempts; surviving that, it is a question
 const stubborn = (extra = {}) => ({
   'a review c1': () => ({ findings: [F('c1-F1')] }),
@@ -160,6 +188,12 @@ await t('18e (control) an opus author escalates on opus, never fable', async () 
   assert(['c1', 'c2', 'c3'].every(c => o[`a fix ${c}`].model === 'opus'))
 })
 
+await t('18g (control vs tier-2) red gates with different failures are not one survivor', async () => {
+  const red = x => ({ gate: { green: false, summary: x, flaky: [] } })
+  const { r, o } = await go({ cycles: null, workstreams: [ws('a')] }, { 'a review c1': () => ({ findings: [F('c1-F1')] }), 'a validate c1': () => ({ verified: ['c1-F1'], ...red('A') }), 'a validate c2': () => red('B'), 'a validate c3': () => red('C'), 'a validate c4': () => red('D') })
+  assert(['c1', 'c2', 'c3', 'c4'].every(c => o[`a fix ${c}`].model === 'sonnet') && r.workstreams[0].questions.length === 0, JSON.stringify(r.workstreams[0]))
+})
+
 // row 19: a rejected merge returns to its author once
 const rejectN = n => { let k = 0; return () => k++ < n ? { ok: false, status: 'failed', notes: ['conflict in x.py'] } : {} }
 await t('19a rejected merge: one fix cycle without a re-review, revalidated, merged on the retry', async () => {
@@ -205,6 +239,11 @@ await t('20b validators require 3 consecutive passes of new or changed tests', a
 await t('20c (control) no flaky test reported: no known-flaky line', async () => {
   const { r, p } = await go({ cycles: null, workstreams: [ws('a')] })
   assert(!Object.values(p).some(v => v.includes('Known flaky')) && !r.repos[0].flaky?.length)
+})
+
+await t('20d the base-rerun rule exempts known-flaky tests too', async () => {
+  const { p } = await go({ cycles: null, workstreams: [ws('a')] })
+  assert(p['one validate'].includes('A failure outside the known-red and known-flaky lists:'))
 })
 
 // row 21: the first validator of a workstream writes black-box acceptance tests before reading the diff
