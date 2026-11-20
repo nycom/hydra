@@ -118,11 +118,23 @@ function priorCombined(runs) {
 // a change is only a change over the same scenarios: a different count reads as a neutral reference
 function combinedDelta(c, p) {
   if (!c || !p) return null
-  if (c.n !== p.n) return { text: `${p.score} over ${p.n} scenario${p.n > 1 ? 's' : ''} at ${p.version}`, cls: '' }
+  if (c.n !== p.n) return { text: `before: ${p.score} over ${p.n} scenario${p.n > 1 ? 's' : ''} (through ${p.version})`, cls: '' }
   const d = c.score - p.score
   return { text: `${d > 0 ? '▲ +' : d < 0 ? '▼ ' : '= '}${d} vs ${p.version}`, cls: d > 0 ? 'up' : d < 0 ? 'down' : '' }
 }
-export { passBar, latestPerScenario, previousOf, pickPipelineRun, headline, cellState, voidTile, cellTip, recallDelta, runScore, combined, combinedAsOf, priorCombined, combinedDelta }
+// the last `max` points as one step per run of same-version columns, at the combined score after the version's last run in view;
+// lead = the score entering the window from the left (the cut version's own step, or the version before it)
+function versionSteps(all, max) {
+  const pts = all.slice(-max), before = all[all.length - pts.length - 1], steps = []
+  pts.forEach((p, i) => {
+    if (i && pts[i - 1].run.hydraVersion === p.run.hydraVersion) steps[steps.length - 1].i1 = i
+    else steps.push({ i0: i, i1: i })
+    steps[steps.length - 1].score = p.combined?.score ?? null
+  })
+  const lead = !before ? null : before.run.hydraVersion === pts[0].run.hydraVersion ? steps[0].score : before.combined?.score ?? null
+  return { lead, steps }
+}
+export { passBar, latestPerScenario, previousOf, pickPipelineRun, headline, cellState, voidTile, cellTip, recallDelta, runScore, combined, combinedAsOf, priorCombined, combinedDelta, versionSteps }
 
 // ---- data -------------------------------------------------------------------------------------
 export function validate(r, file) {
@@ -416,9 +428,11 @@ function client(D) {
       if (!prev || prev.date !== pts[g0].run.date) t(s, (x1 + x2) / 2, XL + 53, pts[g0].run.date, 'muted', 'middle')
       g0 = i + 1
     })
-    // within one version the run order is id order, so the line only takes a vertex where a version ends
-    const line = pts.map((p, i) => p.combined && (i === pts.length - 1 || pts[i + 1].run.hydraVersion !== p.run.hydraVersion) && `${X(i)},${y(p.combined.score)}`).filter(Boolean)
-    if (line.length) h('svg:path', { d: `M${line.join('L')}`, fill: 'none', stroke: 'var(--ink)', 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }, s)
+    // run order within a version is only id order, so each version is one flat step across its columns
+    const { lead, steps } = versionSteps(all, MAX)
+    let d = lead === null ? '' : `M${L},${y(lead)}`
+    for (const st of steps.filter(st => st.score !== null)) d += `${d ? 'L' : 'M'}${X(st.i0) - CW / 2 + 6},${y(st.score)}H${X(st.i1) + CW / 2 - 6}`
+    if (d) h('svg:path', { d, fill: 'none', stroke: 'var(--ink)', 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }, s)
     pts.forEach(({ run: r, score, combined: c }, i) => {
       const g = h('svg:g', {}, s), x = X(i), [fam, kind = ''] = r.scenario.split('-')
       h('svg:rect', { x: x - CW / 2 + 1, y: TOP - 8, width: CW - 2, height: VY - TOP + 20, rx: 4, class: 'hit' }, g)
@@ -660,6 +674,7 @@ ${chrono}
 ${combinedAsOf}
 ${priorCombined}
 ${combinedDelta}
+${versionSteps}
 ${previousOf}
 ${pickPipelineRun}
 (${client})(${json})

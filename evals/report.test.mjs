@@ -6,7 +6,7 @@ import os from 'node:os'
 import assert from 'node:assert'
 import { ROOT, loadRuns, validate, buildHtml, readmeBlock, snapshotFiles, shaFile, withBlock, blockOf,
   passBar, latestPerScenario, previousOf, pickPipelineRun, headline, cellState, voidTile, cellTip, recallDelta,
-  runScore, combined, combinedAsOf, priorCombined, combinedDelta } from './report.mjs'
+  runScore, combined, combinedAsOf, priorCombined, combinedDelta, versionSteps } from './report.mjs'
 
 const read = f => fs.readFileSync(path.join(ROOT, f), 'utf8')
 const entries = loadRuns()
@@ -205,6 +205,13 @@ assert.deepEqual(asOf.map(p => p.run.id), ['a', 'c', 'b', 'd', 'f0', 'f1'])
 assert.deepEqual(asOf.map(p => p.score), [0, 87.5, 100, null, 75, 100])
 assert.deepEqual(asOf.map(p => p.combined), [{ score: 0, n: 1 }, { score: 44, n: 2 }, { score: 63, n: 3 }, { score: 63, n: 3 }, { score: 66, n: 4 }, { score: 91, n: 4 }])
 assert.deepEqual(combinedAsOf([]), [])
+// the progress line: one flat step per version (column span, the value after its last run); a cut window carries the score in from the left
+assert.deepEqual(versionSteps(asOf, 16), { lead: null, steps: [{ i0: 0, i1: 1, score: 44 }, { i0: 2, i1: 2, score: 63 }, { i0: 3, i1: 5, score: 91 }] })
+assert.deepEqual(versionSteps(asOf, 3), { lead: 63, steps: [{ i0: 0, i1: 2, score: 91 }] }, 'the window starts on a new version: the previous version carries in')
+assert.deepEqual(versionSteps(asOf, 2), { lead: 91, steps: [{ i0: 0, i1: 1, score: 91 }] }, 'the window cuts a version: its own step runs to the left edge')
+assert.deepEqual(versionSteps(combinedAsOf([runAt(seeded, 'v', '0.3.1', '2026-11-19', r => { r.voidReason = skipped; r.verdict = 'void' }), cF1]), 16),
+  { lead: null, steps: [{ i0: 0, i1: 0, score: null }, { i0: 1, i1: 1, score: 100 }] }, 'a version with no scored run yet has no step')
+assert.deepEqual(versionSteps([], 16), { lead: null, steps: [] })
 { const real = entries.map(e => e.run); assert.deepEqual(combinedAsOf(real).at(-1).combined, combined(real), 'the progress line ends on the header score') }
 // the header delta compares with the combined score over the versions before the newest
 assert.deepEqual(priorCombined([cA, cB, cC, cD, cF0, cF1]), { score: 63, n: 3, version: '0.3.2' })
@@ -213,8 +220,8 @@ assert.equal(priorCombined([cA]), null, 'a single version has nothing to compare
 assert.deepEqual(combinedDelta({ score: 90, n: 5 }, { score: 100, n: 5, version: '0.3.5' }), { text: '▼ -10 vs 0.3.5', cls: 'down' })
 assert.deepEqual(combinedDelta({ score: 95, n: 4 }, { score: 90, n: 4, version: '0.3.5' }), { text: '▲ +5 vs 0.3.5', cls: 'up' })
 assert.deepEqual(combinedDelta({ score: 90, n: 4 }, { score: 90, n: 4, version: '0.3.5' }), { text: '= 0 vs 0.3.5', cls: '' })
-assert.deepEqual(combinedDelta({ score: 90, n: 5 }, { score: 100, n: 4, version: '0.3.5' }), { text: '100 over 4 scenarios at 0.3.5', cls: '' }, 'a different scenario count is not a change')
-assert.deepEqual(combinedDelta({ score: 90, n: 2 }, { score: 100, n: 1, version: '0.3.1' }), { text: '100 over 1 scenario at 0.3.1', cls: '' })
+assert.deepEqual(combinedDelta({ score: 90, n: 5 }, { score: 100, n: 4, version: '0.3.5' }), { text: 'before: 100 over 4 scenarios (through 0.3.5)', cls: '' }, 'a different scenario count is not a change')
+assert.deepEqual(combinedDelta({ score: 90, n: 2 }, { score: 100, n: 1, version: '0.3.1' }), { text: 'before: 100 over 1 scenario (through 0.3.1)', cls: '' })
 assert.equal(combinedDelta({ score: 90, n: 5 }, null), null)
 assert.equal(combinedDelta(null, null), null)
 assert.equal(priorCombined([runAt(seeded, 'v', '0.3.1', '2026-11-19', r => { r.voidReason = skipped; r.verdict = 'void' }), cF1]), null, 'void-only older versions have no score')
