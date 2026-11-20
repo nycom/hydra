@@ -14,6 +14,10 @@ make the final call. Subagents write code; the coordinator never does.
 `workflow.js` (next to this file; `<skill dir>` below is this skill's base directory, printed when the skill loads) encodes everything mechanical: worktrees, gates,
 push + `ls-remote` verification, SHA pinning between stages, review/fix/validate
 cycles, merges, shared-file edits, whole-branch review, contract check, docs sync.
+Every step runs as a typed agent: authors, fixers, merge, promote and docs as
+`implementer` (merge, promote and docs are told they are no feature task: no
+tests, no test-first), reviewers as `reviewer`, validators and the contract
+check as `validator`. An untyped step would start a far larger default context.
 
 The ladder governs the run (the ponytail plugin, if installed, states the same rules): the plan is authored ladder-first (reuse > stdlib >
 native > one line > minimum code; no speculative tasks); every review cycle hunts
@@ -27,8 +31,11 @@ named count or not — re-reviewing unchanged code is waste. A named count is a
 floor, not permission to merge dirty work: past it the workflow keeps cycling
 while a critical **or major** is open and flags `extended`. Hard cap: N+2, or 4
 when `cycles` is `null`; `maxCycles` overrides it. Minors never drive a cycle:
-fixers may decline them, and leftovers are carried to the whole-branch fix
-round. A converged review of a head no validator has seen yet (typically a clean
+fixers may decline them, and leftovers are carried to the whole-branch pass:
+its first validator settles (`fixed`) each one the final head resolves, the rest
+ride into the fix round. Workstream validators are told shared-file edits land at
+the merge, so a brief criterion on a shared file is met by the author's
+`sharedEdits`; only an edit missing from that list is a (minor) finding. A converged review of a head no validator has seen yet (typically a clean
 cycle 1) gets one validator pass before it can merge; if that validator finds a
 critical or major, the same cycle goes straight to the fix. A blocker that
 survives two fix rounds (same id, or same `where`) gets its next fix on opus
@@ -55,6 +62,10 @@ repo fails with an escalation naming the side branch. Docs run only on a repo
 whose whole-branch pass did not fail, and only from the SHA that pass validated.
 `finalSha` is always a validated SHA. Workstream branches may not be named
 `<featureBranch>--docs` or `<featureBranch>--wbfix<n>` (the script throws).
+Before the whole-branch fix round, a validator finding at the exact `file:line`
+of a reviewer finding joins it as one entry (higher severity kept, the other's
+id and issue under `also`); verifying it settles both ids. Both hunts stay
+independent, and an area with no line never collapses.
 
 **Global rules the workflow enforces and you must too:** no AI attribution
 anywhere (no Co-Authored-By, no generated-with footers, no Claude mention, no

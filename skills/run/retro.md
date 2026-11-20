@@ -4,7 +4,7 @@ Sources: every Workflow result JSON of the run (in order), the run args and the
 verified feature-branch SHAs. The journal is optional and never a required input:
 `<Transcript dir>/journal.jsonl` holds each agent's label, phase and result (a
 `failed` row is a dead agent, a `started` with no `result` or `failed` row is unfinished), and
-`node <skill dir>/cost.mjs <Transcript dir>` gives output tokens and agents per
+`node <skill dir>/cost.mjs <Transcript dir>` gives output and context tokens and agents per
 stage, total wall minutes, and the failed and unfinished agents. Never read the
 transcripts. Without a journal, write "journal not read" under Not checked. Quote evidence as `<result path> = <value>`
 (e.g. `workstreams[id=alpha].extended = true`) or a finding id. A claim with no
@@ -75,7 +75,8 @@ What went wrong or slow, one bullet each, with evidence:
 - Cost: `budget.spent` is session-wide (the coordinator plus parallel agents):
   use it only against `budget.tokenBudget` and `budget.stoppedBy`. Run cost comes
   from cost.mjs (needs the journal): `outputTokens`, `agents`, `wallMinutes` and
-  the top 3 of `byStage`; otherwise "journal not read".
+  the top 3 of `byStage`, plus `contextTokens` where a stage's context outweighs its
+  output (reported, never scored); otherwise "journal not read".
 
 ## Changes, ranked
 
