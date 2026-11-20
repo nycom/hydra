@@ -10,7 +10,8 @@
     "blocked": false,
     "testsEdited": true,
     "merged": false,
-    "gateReportedGreen": true
+    "gateReportedGreen": true,
+    "defaultKeepsTests": true
   },
   "cost": {
     "outputTokens": 304000,

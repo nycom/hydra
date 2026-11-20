@@ -72,7 +72,9 @@ PY
 }
 
 if [ "$mode" = seed ] || [ "$mode" = control ]; then
-  git -C "$dest/alpha" switch -q -c feat/eval--alpha-report feat/eval
+  # on a side branch merged into feat/eval before the run: outside the workstream review range, inside the whole-branch one
+  side=feat/eval--alpha-tidy
+  git -C "$dest/alpha" switch -q -c "$side" feat/eval
   if [ "$mode" = seed ]; then
     sub ledger/api.py '    if balance >= limit:' '    if balance > limit:'                                   # D1
     sub ledger/pager.py 'items[start:start+size]' 'items[start:start+size-1]'                                # D2
@@ -110,10 +112,12 @@ EOF
     msg="Tidy ledger modules" # same subject as the seeds: nothing announces them
   fi
   git -C "$dest/alpha" commit -q -am "$msg"
-  git -C "$dest/alpha" push -q origin HEAD:refs/heads/feat/eval--alpha-report
-  log "alpha feat/eval--alpha-report $(git -C "$dest/alpha" rev-parse --short HEAD): $msg"
+  git -C "$dest/alpha" switch -q feat/eval
+  git -C "$dest/alpha" merge -q --no-ff --no-edit "$side"
+  git -C "$dest/alpha" push -q origin feat/eval
+  log "alpha feat/eval $(git -C "$dest/alpha" rev-parse --short HEAD): $(git -C "$dest/alpha" log -1 --format=%s) ($msg)"
   git -C "$dest/alpha" switch -q main
-  git -C "$dest/alpha" branch -q -D feat/eval--alpha-report # the run creates its own from origin
+  git -C "$dest/alpha" branch -q -D "$side" # never pushed: only the merge on feat/eval shows it
 fi
 
 python3 - "$dest" "$mode" <<'PY'
@@ -139,7 +143,7 @@ if mode in ("seed", "control"):
     # no smoke: it would flag D6 for free (S13 covers false-green smoke), and then no skillDir is needed
     args["workstreams"] = [{
         "id": "alpha-report", "repo": alpha, "featureBranch": "feat/eval",
-        "branch": "feat/eval--alpha-report", "model": "sonnet", "gate": gate,
+        "branch": "feat/eval--alpha-report", "base": "feat/eval-base", "model": "sonnet", "gate": gate,
         "brief": "Add a new module ledger/report.py with summary(entries), returning "
                  "{\"count\": <number of entries>, \"owners\": <sorted list of the distinct entry[\"owner\"] values>}; "
                  "an empty list gives {\"count\": 0, \"owners\": []}. Add tests/test_report.py covering a mixed list, "
@@ -147,11 +151,11 @@ if mode in ("seed", "control"):
                  "Shared edit: README needs a line under Modules listing ledger/report.py and summary(entries).",
     }, {  # a second repo with a workstream, so the cross-repo contract check runs
         "id": "beta-report", "repo": beta, "featureBranch": "feat/eval",
-        "branch": "feat/eval--beta-report", "model": "sonnet", "gate": gate,
+        "branch": "feat/eval--beta-report", "base": "feat/eval-base", "model": "sonnet", "gate": gate,
         "brief": "Add a new module beta/report.py with format_summary(total_response), which takes a ledger total "
                  "response in the shape beta.client.total_cents reads and returns \"Total: $D.CC\" "
-                 "(350 cents gives \"Total: $3.50\", 5 gives \"Total: $0.05\", 0 gives \"Total: $0.00\"). "
-                 "Add tests/test_report.py covering those three.",
+                 "(350 cents gives \"Total: $3.50\", 5 gives \"Total: $0.05\", 0 gives \"Total: $0.00\", "
+                 "-5 gives \"Total: -$0.05\"). Add tests/test_report.py covering those four.",
     }]
 elif mode == "impossible":
     args["workstreams"] = [{
