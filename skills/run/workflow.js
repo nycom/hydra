@@ -268,6 +268,13 @@ const mergedInto = {}
 const owners = ws => ws.map(x => `${x.id}${x.files ? ` (${x.files.join(', ')})` : ' (no files[] declared)'}`).join('; ')
 const serialized = (repo, fn) => (lock[repo] = (lock[repo] || Promise.resolve()).then(fn, fn)) // workstreams of one repo merge one at a time
 const blocking = f => f.severity !== 'minor'
+// The result's findings ledger: each id keeps the stage that first raised it, its latest text, and a status
+// (open until a validator verifies the fix, answer or decline; a red gate counts fixed once the next gate is green).
+const STATUS = ['fixed', 'declined', 'answered'] // an escalated finding stays open: it is the user's call
+const track = (book, stage, fs) => { for (const f of fs) { const e = book.find(x => x.id === f.id); const n = { id: f.id, stage: e?.stage || stage, severity: f.severity, kind: f.kind, where: f.where, issue: f.issue, status: 'open' }; e ? Object.assign(e, n) : book.push(n) } }
+const settle = (book, id, action) => { const e = book.find(x => x.id === id); if (e) e.status = STATUS.includes(action) ? action : 'open' }
+const settleGate = (book, gate) => { if (gate.green) for (const e of book) if (e.where === 'gate' && e.status === 'open') e.status = 'fixed' }
+const asLedger = (stage, fs = []) => { const b = []; track(b, stage, fs); return b }
 // SHA checks compare what two different agents reported. The script can't run git, so this catches
 // inconsistency between agents (a moved tip, a stale read), not one agent lying about both sides.
 const same = (a = '', b = '') => a.length >= 7 && b.length >= 7 && (a.startsWith(b) || b.startsWith(a))
@@ -305,7 +312,8 @@ Return ok, the remote sha of ${branch} and notes.`,
 async function runWorkstream(w) {
   const tag = w.id
   const c = repoMap[w.repo].conf
-  const out = { id: w.id, branch: w.branch, status: '', sha: '', validatedSha: '', cyclesRun: 0, extended: false, findingsFixed: 0, open: [], sharedEdits: [], questions: [], notes: [], escalations: [], tests: '', gateTail: '', merged: false }
+  const out = { id: w.id, branch: w.branch, status: '', sha: '', validatedSha: '', cyclesRun: 0, extended: false, findingsFixed: 0, open: [], sharedEdits: [], questions: [], notes: [], escalations: [], tests: '', gateTail: '', merged: false, findings: [] }
+  const book = out.findings
   const decisions = [] // the author's reasoning, handed to every later reviewer and fixer
   const ledger = [] // settled findings: never re-raised unless the code under them changed
   const absorb = r => {
@@ -382,6 +390,7 @@ New finding ids: c${i}-F1, c${i}-F2, ...`,
       if (!rev) return stop(`review c${i} died 3 times`)
       if (!same(rev.headSha, out.sha)) return stop(`review c${i} saw ${rev.headSha}, the author pushed ${out.sha}`)
       out.cyclesRun = i
+      track(book, 'review', rev.findings)
       // Clean needs both: nothing blocking in this review AND nothing blocking left by the last validation.
       // Only a validator can clear a carried critical/major; a reviewer that drops one doesn't.
       let found = [...rev.findings, ...carry.filter(f => blocking(f) && !rev.findings.some(g => g.id === f.id))]
@@ -407,7 +416,9 @@ Return headSha, gate, verified (empty) and open (ids v${i}-F1, ...).`,
         if (!val) return stop(`validate c${i} died 3 times`)
         if (!same(val.headSha, out.sha)) return stop(`validate c${i} saw ${val.headSha}, the head is ${out.sha}`)
         noteFlaky(w.repo, val)
-        found = [...found, ...val.open, ...redGate(val, `v${i}-G`)]
+        const raised = [...val.open, ...redGate(val, `v${i}-G`)]
+        track(book, 'validate', raised)
+        found = [...found, ...raised]
         out.validatedSha = out.sha
         if (!found.some(blocking)) { carry = found; break }
         // the validator's blockers go straight to this cycle's fix: re-reviewing the unchanged SHA wastes the cycle
@@ -459,8 +470,14 @@ Return headSha, gate, verified (ids confirmed resolved, or whose answer or decli
         noteFlaky(w.repo, val)
         out.findingsFixed += val.verified.length
         for (const f of found)
-          if (val.verified.includes(f.id)) ledger.push({ id: f.id, where: f.where, issue: f.issue, status: fix.answers.find(a => a.id === f.id)?.action || 'fixed' })
+          if (val.verified.includes(f.id)) {
+            const status = fix.answers.find(a => a.id === f.id)?.action || 'fixed'
+            ledger.push({ id: f.id, where: f.where, issue: f.issue, status })
+            settle(book, f.id, status)
+          }
+        settleGate(book, val.gate)
         carry = [...val.open, ...redGate(val, `v${i}-G`), ...unaccounted(found, val.verified, val.open)]
+        track(book, 'validate', carry)
         out.validatedSha = fix.sha
         for (const g of found)
           if (blocking(g) && carry.some(s => blocking(s) && sameFinding(s, g))) {
@@ -516,6 +533,7 @@ Push to ${w.featureBranch} (plain push; if rejected, fetch and redo every step o
     const why = merge.notes.join('; ') || merge.tests
     if (rejected || out.cyclesRun >= CAP) return stop(`merge failed: ${why}`)
     rejected = { id: 'M-F1', severity: 'critical', kind: 'integration', where: 'merge', issue: `The merge into ${w.featureBranch} rejected ${out.validatedSha}: ${why}. For a conflict or a red gate on the merged tip, git merge origin/${w.featureBranch} into your branch first, then resolve.`, evidence: 'the merge agent\'s report' }
+    track(book, 'merge', [rejected])
     carry = [...carry, rejected] // the minors carried so far ride along
     log(`${tag}: merge rejected, returned to the author once`)
   }
@@ -531,7 +549,8 @@ async function runRepo(r, mine) {
   const briefs = r.ws.map(w => `## ${w.id}\n${w.brief}`).join('\n\n')
   const range = `origin/${r.base}...origin/${r.featureBranch}`
   const top = ms => MODELS[Math.max(...ms.map(m => MODELS.indexOf(m)))]
-  const res = { repo: r.repo, featureBranch: r.featureBranch, sha: '', verdict: 'skipped', sections: 'no workstream merged', seams: '', tests: '', fixRounds: 0, open: [], questions: [], notes: [], escalations: [] }
+  const res = { repo: r.repo, featureBranch: r.featureBranch, sha: '', verdict: 'skipped', sections: 'no workstream merged', seams: '', tests: '', fixRounds: 0, open: [], questions: [], notes: [], escalations: [], findings: [] }
+  const book = res.findings
   if (!mine.some(w => w.merged)) return res
   let findings = []
   // Whole-branch fixes push to side branches; the feature branch fast-forwards to the last checked head only after a passing recheck.
@@ -579,6 +598,9 @@ sha = the origin/${r.featureBranch} commit you validated. Ids: V-F1, V-F2, ...`,
   noteFlaky(r.repo, val)
   Object.assign(res, { sha: val.sha, verdict: val.verdict, sections: val.sections, tests: val.tests, seams: rev.seams })
   checked = val.sha
+  track(book, 'wb-review', rev.findings)
+  track(book, 'wb-validate', [...val.findings, ...redGate(val, 'V-G')])
+  for (const w of mine.filter(w => w.merged)) for (const f of w.open) track(book, w.findings?.find(x => x.id === f.id)?.stage || 'review', [{ ...f, id: `${w.id}:${f.id}` }])
   // minors carried from the merged workstreams' cycles ride along (declinable); ids prefixed so two workstreams' c1-F1 stay apart
   findings = [...rev.findings, ...val.findings, ...redGate(val, 'V-G'), ...mine.filter(w => w.merged).flatMap(w => w.open.map(f => ({ ...f, id: `${w.id}:${f.id}` })))]
 
@@ -626,7 +648,10 @@ sha = the commit you checked. verdict pass only if nothing critical or major is 
     noteFlaky(r.repo, re)
     Object.assign(res, { verdict: re.verdict, sections: re.sections, tests: re.tests })
     checked = re.sha
+    for (const id of re.verified) settle(book, id, fix.answers.find(a => a.id === id)?.action || 'fixed')
+    settleGate(book, re.gate)
     findings = [...re.findings, ...redGate(re, `R${round}-G`), ...unaccounted(findings, re.verified, re.findings)]
+    track(book, 'recheck', findings)
   }
   res.open = findings
   if (findings.some(blocking)) return fail(WB_ROUNDS ? `critical/major findings still open after ${res.fixRounds} whole-branch fix round(s)` : 'wbRounds 0: critical/major findings returned unfixed')
@@ -642,11 +667,11 @@ sha = the commit you checked. verdict pass only if nothing critical or major is 
 log(`${STAGE === 'wholeBranch' ? 'whole-branch re-validation' : `${W.length} workstream(s)`} across ${REPOS.length} repo(s); cycles=${CYCLES ?? 'converge'} (hard cap ${CAP})`)
 const wsPromises = STAGE === 'wholeBranch'
   ? W.map(w => Promise.resolve({ id: w.id, merged: true, open: [] })) // already merged by an earlier run
-  : W.map(w => runWorkstream(w).catch(e => ({ id: w.id, branch: w.branch, merged: false, open: [], questions: [], notes: [], escalations: [`crashed: ${e}`] })))
+  : W.map(w => runWorkstream(w).catch(e => ({ id: w.id, branch: w.branch, merged: false, open: [], questions: [], notes: [], escalations: [`crashed: ${e}`], findings: [] })))
 // Each repo's whole-branch pass starts as soon as ITS workstreams finish (no global barrier).
 const repoResults = await parallel(REPOS.map(r => async () => {
   const mine = await Promise.all(wsPromises.filter((_, i) => W[i].repo === r.repo))
-  return runRepo(r, mine).catch(e => ({ repo: r.repo, featureBranch: r.featureBranch, sha: '', verdict: 'fail', sections: 'crashed', tests: '', fixRounds: 0, open: [], questions: [], notes: [], escalations: [`crashed: ${e}`] }))
+  return runRepo(r, mine).catch(e => ({ repo: r.repo, featureBranch: r.featureBranch, sha: '', verdict: 'fail', sections: 'crashed', tests: '', fixRounds: 0, open: [], questions: [], notes: [], escalations: [`crashed: ${e}`], findings: [] }))
 }))
 const wsResults = await Promise.all(wsPromises)
 
@@ -734,8 +759,9 @@ return {
     const d = docsOf(r.repo)
     // docs that fail validation or promotion never reach the branch and fail the repo; so does a docs agent that died 3 times
     const docsFailed = d && (d.sha ? d.verdict !== 'pass' : d.verdict === 'fail')
-    return { ...r, verdict: docsFailed ? 'fail' : r.verdict, escalations: [...r.escalations, ...(docsFailed ? [d.sha ? `docs commit ${d.sha} left unpromoted on ${r.featureBranch}--docs` : 'docs agent died 3 times; docs not synced'] : [])], open: [...r.open, ...(d?.findings || [])].map(brief), questions: uniqQ(r.questions), notes: uniq(r.notes), docs: docsOut(d), finalSha: (d?.verdict === 'pass' && d.sha) || r.sha, flaky: flakyOf(r.repo) }
+    return { ...r, verdict: docsFailed ? 'fail' : r.verdict, escalations: [...r.escalations, ...(docsFailed ? [d.sha ? `docs commit ${d.sha} left unpromoted on ${r.featureBranch}--docs` : 'docs agent died 3 times; docs not synced'] : [])], open: [...r.open, ...(d?.findings || [])].map(brief), questions: uniqQ(r.questions), notes: uniq(r.notes), findings: [...r.findings, ...asLedger('docs', d?.findings)], docs: docsOut(d), finalSha: (d?.verdict === 'pass' && d.sha) || r.sha, flaky: flakyOf(r.repo) }
   }),
-  crossRepo: crossRepo && { ...crossRepo, findings: crossRepo.findings.map(brief) },
-  otherDocs: DOCS.filter(d => !repoMap[d.repo]).map(d => ({ repo: d.repo, featureBranch: d.featureBranch, docs: docsOut(docsOf(d.repo)), flaky: flakyOf(d.repo) })),
+  // crossRepo.ledger is the result key, not the prompt-side ledger of settled findings inside runWorkstream
+  crossRepo: crossRepo && { ...crossRepo, findings: crossRepo.findings.map(brief), ledger: asLedger('contract', crossRepo.findings) },
+  otherDocs: DOCS.filter(d => !repoMap[d.repo]).map(d => ({ repo: d.repo, featureBranch: d.featureBranch, docs: docsOut(docsOf(d.repo)), findings: asLedger('docs', docsOf(d.repo)?.findings), flaky: flakyOf(d.repo) })),
 }

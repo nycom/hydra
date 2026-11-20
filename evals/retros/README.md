@@ -1,0 +1,3 @@
+# Eval retros
+
+One retrospective per hydra eval run on the fixture repos, written by the retro agent from `skills/run/retro.md` once the run finishes and committed through the normal PR flow. Each file is `<run id>.md`, the same id as its scored run file `../runs/<run id>.json`, and points at that file instead of restating its tables. Retros of real runs never land here; they stay private. Everything in this folder is public, so it is generalised: no project, repo, person or host names, no local paths, URLs, secrets or env values, and no code from private repos. The names defined by the fixture (`skills/run/tests/fixture-scenarios.md` and `skills/run/tests/fixture/`: its repos, branches and workstream ids) are public and exempt.

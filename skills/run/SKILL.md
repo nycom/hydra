@@ -238,9 +238,9 @@ The workflow returns:
   (e.g. `alpha-cents cycle 3`, `api whole-branch fix round 2`, `contracts`)
 - per workstream: `{id, branch, status, sha, validatedSha, cyclesRun, extended,
   findingsFixed, open, sharedEdits, questions, notes, escalations, tests,
-  gateTail, merged}` (empty list in `wholeBranch` stage)
+  gateTail, merged, findings}` (empty list in `wholeBranch` stage)
 - per repo: `{repo, featureBranch, sha, verdict, sections, seams, tests, fixRounds,
-  open, questions, notes, escalations, docs, finalSha, flaky}`; `sha` and
+  open, questions, notes, escalations, findings, docs, finalSha, flaky}`; `sha` and
   `finalSha` are always validated SHAs on the feature branch (unpromoted
   whole-branch fixes or docs stay on their side branch, named in `escalations`);
   `flaky` = the run-wide flaky registry for that repo; `seams` = the
@@ -254,8 +254,17 @@ The workflow returns:
   `escalations` and `docs.notes`; so does a docs agent that died 3 times (plus
   an escalation). Docs are skipped (`docs.notes`: `skipped: …`) when the repo's
   whole-branch pass failed
-- `crossRepo`: `{verdict, sections, findings}` when 2+ repos, else `null`
-- `otherDocs`: `[{repo, featureBranch, docs, flaky}]` for docs-only repos
+- `crossRepo`: `{verdict, sections, findings, ledger}` when 2+ repos, else `null`
+- `otherDocs`: `[{repo, featureBranch, docs, findings, flaky}]` for docs-only repos
+- `findings` (and `crossRepo.ledger`): the structured ledger next to the
+  one-line `open` strings, `[{id, stage, severity, kind, where, issue, status}]`.
+  `stage` is the first to raise the id (`review`, `validate`, `merge` per
+  workstream; `wb-review`, `wb-validate`, `recheck`, `docs` per repo, where a
+  carried workstream minor is `<ws id>:<id>` with its original stage;
+  `contract`); `status` is `fixed`, `answered` or `declined` once a validator
+  accepted it, else `open`. `open` in the ledger means no validator accepted
+  it; it may be absent from `open` (a minor nobody re-raised, or an escalation
+  awaiting the user). Count a carried minor once.
 
 `questions` (`{q, options, default}`) are only what the user must decide; `notes`
 are deviations and things not run; `escalations` are what the script itself
@@ -282,7 +291,8 @@ says NOT merged; unpromoted side branches). Then:
   a replay can see a different registry, run those agents live and end in a
   false "not promoted" fail: safe (nothing unvalidated lands), but re-check it.
 - Escalate to the user **only** the `questions` (plus anything else code, spec or
-  plan can't resolve) — collected and asked **once**, at the end.
+  plan can't resolve) — collected and asked **once**, at the end; the retro's
+  ranked list (§5) joins that same ask, after the questions.
 
 ## 5. Finish
 
@@ -294,6 +304,40 @@ says NOT merged; unpromoted side branches). Then:
 - Open the PR only where the repo's process says PRs; otherwise report PR-ready
   state per repo: branches, SHAs, test results, unresolved questions. PRs stay
   open — a human merges to `main`, especially where merge deploys.
+- **Retrospective (mandatory), one retro per run:** at Finish, success or
+  failure, spawn one read-only `general-purpose` agent on `opus`. Brief it with
+  every Workflow return's result JSON from this run in order (the first call
+  plus each `stage: "wholeBranch"` re-run), the run args, the feature-branch
+  SHAs you already verified, `<skill dir>/retro.md` and, optionally, each launch
+  result's `<Transcript dir>/journal.jsonl` (per-agent label, phase and result;
+  an agent with a `failed` row died, one `started` with no `result` or `failed`
+  row never finished). Tokens are not in the journal: run cost comes from
+  `node <skill dir>/cost.mjs <Transcript dir>`; never read the transcripts. A Workflow call that threw gets its error text,
+  the results that exist and that journal; a `resumeFromRunId` recovery gets
+  its one retro after it returns. It returns retro.md filled in; you save it.
+  Eval runs (fixture repos) → `evals/retros/<run id>.md`, the id of its
+  `evals/runs/<run id>.json`, in a git clone of nycom/hydra (never the plugin
+  cache; ask the user where the clone is if unknown), committed through the
+  normal PR flow. Real runs, and any run you are unsure about (treat it as
+  real) → the user's private notes location (named in their global
+  instructions or memory; ask once if none is set), never inside any git repo.
+  Version: `<skill dir>/../../.claude-plugin/plugin.json`.
+- **Retro privacy:** everything bound for the public hydra repo (retros,
+  changes, eval seeds, PR titles, bodies, branch names, commit messages) is
+  generalised: no project, repo, person or host names, no local filesystem
+  paths, branch names, URLs, secrets or env values (`gateTail` and `notes` may
+  hold them), no code copied from private repos. Names defined in
+  skills/run/tests/fixture-scenarios.md and skills/run/tests/fixture/ (fixture
+  repos, branches, workstream ids) are public and exempt. Before committing
+  there, grep the staged diff and the PR text for the run's other repo paths,
+  `featureBranch` names and workstream ids, and the expanded `$HOME` value
+  (`echo "$HOME"`); any hit means don't push.
+- **Retro follow-up:** merge its Changes and Eval gaps into one ranked list, put
+  to the user in AskUserQuestion batches after the run's `questions`. Nothing is
+  applied without the user's OK. Approved hydra changes become PRs reviewed
+  until clean; approved eval gaps become seeds or scenarios in
+  `tests/fixture-scenarios.md` plus updates to the builder,
+  `skills/run/tests/fixture/build.sh`.
 
 ## Stacked mode (only when the user asks)
 
