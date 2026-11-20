@@ -5,7 +5,7 @@ import path from 'node:path'
 import os from 'node:os'
 import assert from 'node:assert'
 import { ROOT, loadRuns, validate, buildHtml, readmeBlock, snapshotFiles, shaFile, withBlock, blockOf,
-  passBar, latestPerScenario, previousOf, pickPipelineRun, headline, cellState, voidTile } from './report.mjs'
+  passBar, latestPerScenario, previousOf, pickPipelineRun, headline, cellState, voidTile, cellTip, recallDelta } from './report.mjs'
 
 const read = f => fs.readFileSync(path.join(ROOT, f), 'utf8')
 const entries = loadRuns()
@@ -43,13 +43,13 @@ bad(r => { r.scenario = 'S17' }, /scenario/)
 // D9 and D10: newer fixtures seed them, older runs hold D1..D8; both are measured, never gated
 const ids = n => Array.from({ length: n }, (_, i) => `D${i + 1}`)
 const s15 = n => Object.fromEntries(ids(n).map(d => [d, caught({ D8: 'test-guard', D9: 'contract', D10: 'validator' }[d])]))
-good(r => { r.defects = s15(9); r.recall = 1; r.verdict = 'pass' }, 'pass')
+bad(r => { r.defects = s15(9); r.recall = 1 }, /defects must have exactly D1..D8 or D1..D10/)
 good(r => { r.defects = s15(10); r.recall = 1; r.verdict = 'pass' }, 'pass')
 good(r => { r.defects = s15(10); r.defects.D2 = missed; r.defects.D9 = missed; r.defects.D10 = missed; r.recall = 7 / 10; r.verdict = 'pass' }, 'pass')
 good(r => { r.defects = s15(10); r.defects.D2 = missed; r.defects.D3 = missed; r.recall = 8 / 10; r.verdict = 'fail' }, 'fail')
-good(r => { r.defects = s15(10); r.defects.D9 = caught('reviewer'); r.defects.D10 = discarded; r.recall = 1; r.verdict = 'pass' }, 'pass')
-bad(r => { r.defects = s15(10); r.defects.D9 = caught('validator'); r.recall = 1 }, /D9 can only be caught by contract or reviewer/)
-bad(r => { r.defects = s15(10); delete r.defects.D9; r.recall = 1 }, /exactly D1..D8, D1..D9 or D1..D10/)
+good(r => { r.defects = s15(10); r.defects.D10 = discarded; r.recall = 1; r.verdict = 'pass' }, 'pass')
+for (const stage of ['reviewer', 'validator']) bad(r => { r.defects = s15(10); r.defects.D9 = caught(stage); r.recall = 1 }, /D9 can only be caught by contract/)
+bad(r => { r.defects = s15(10); delete r.defects.D9; r.recall = 1 }, /exactly D1..D8 or D1..D10/)
 bad(r => { r.defects = s15(10); r.defects.W1 = caught(); r.recall = 1 }, /exactly D1..D8/)
 // alsoCaughtBy: another stage's independent re-find of a caught seed
 good(r => { r.defects = s15(10); r.defects.D1.alsoCaughtBy = [{ stage: 'validator', findingId: 'V-F2' }]; r.recall = 1; r.verdict = 'pass' }, 'pass')
@@ -71,6 +71,8 @@ s17(r => { r.defects.W3 = missed; r.recall = 3 / 4; r.verdict = 'fail' }, 'fail'
 s17(r => { r.defects.W3 = discarded; r.verdict = 'void' }, 'void')
 s17(r => { r.defects.W3 = caught('reviewer') }, 'pass')
 s17(r => { r.voidReason = 'the author blocked'; r.verdict = 'void' }, 'void')
+s17(r => { r.defects.W1 = discarded; r.defects.W2 = discarded; r.verdict = 'void' }, 'void') // under 3 kept seeds measures nothing
+s17(r => { r.defects.W1 = discarded; r.verdict = 'pass' }, 'pass')
 s17bad(r => { r.defects.W3 = caught('validator') }, /W3 can only be caught by test-guard or reviewer/)
 s17bad(r => { r.defects.W1 = caught('contract') }, /W1: a caught defect needs stage \(reviewer \| validator \| test-guard\)/)
 s17bad(r => { r.defects = allCaught() }, /exactly W1..W4/)
@@ -81,7 +83,15 @@ assert.equal(headline(ctrl17), '1 major / 0 minor false positives')
 const seeded17 = variant(seeded, r => { r.scenario = 'S17-seeded'; r.defects = ws(); r.defects.W2 = missed; r.recall = 3 / 4 })
 assert.equal(headline(seeded17), 'recall 3/4 (missed W2)')
 assert.equal(cellState(seeded17, undefined), 'absent', 'an older run has no row for a newer seed')
-assert.ok(buildHtml(entries).includes('also caught by'), 'the heatmap tooltip lists alsoCaughtBy')
+// the heatmap cell tooltip, as rendered: the catch, each independent re-find, the run
+const tipRun = variant(seeded, r => { r.defects.D7.alsoCaughtBy = [{ stage: 'validator', findingId: 'V-F7' }, { stage: 'validator', findingId: 'V-F9' }] })
+assert.deepEqual(cellTip(tipRun, 'D7', 'special-cased test input'), [['D7 special-cased test input'], ['reviewer', 'caught by'], ['W-F2', 'finding'],
+  ['V-F7', 'also caught by validator'], ['V-F9', 'also caught by validator'], [`${tipRun.hydraVersion} · S15-seeded · ${tipRun.date}`, 'run']])
+assert.deepEqual(cellTip(tipRun, 'D9', 'vendored-type drift'), [['D9 vendored-type drift'], ['not seeded', 'older fixture'], [`${tipRun.hydraVersion} · S15-seeded · ${tipRun.date}`, 'run']])
+// the recall delta compares only the seeds both runs hold: a 10-seed run that missed D9 is level with an 8/8 run
+const ten = variant(seeded, r => { r.defects = s15(10); r.defects.D9 = missed; r.recall = 9 / 10 })
+assert.equal(recallDelta(ten, seeded), 0)
+assert.equal(recallDelta(variant(ten, r => { r.defects.D1 = missed }), seeded), -12.5)
 bad(r => { r.cost.byStage.review.tokens += 1 }, /sum to outputTokens/)
 bad(r => { r.verdict = 'void' }, /verdict must be (pass|fail) \(the scenario/, s16)
 

@@ -372,7 +372,8 @@ ${RO_TESTS}
 ${SHARED(c, w.files)}
 ${authorGate()}
 ${CHECKS(w)}${GIT(w.repo, w.id)}
-Commit and push to ${w.branch}. Return status ("done" only when the gate is green and the push verified), ok, the verified remote sha, a one-line test summary, gateTail, sharedEdits, decisions (up to 10), questions and notes.`,
+Commit and push to ${w.branch}. Nothing to change (the branch already meets the brief and the gate is green): no commit, no push, status "done", sha = the current origin/${w.branch} head, ok = true.
+Return status ("done" only when the gate is green and the push verified), ok, the verified remote sha, a one-line test summary, gateTail, sharedEdits, decisions (up to 10), questions and notes.`,
     { label: `${tag} implement`, phase: 'Implement', agentType: 'implementer', model: w.model, schema: PUSHED })
   if (!impl) return stop(unusable('implement', w.branch))
   absorb(impl)

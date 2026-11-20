@@ -41,25 +41,6 @@ export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 export GIT_AUTHOR_DATE='2026-01-01T00:00:00Z' GIT_COMMITTER_DATE='2026-01-01T00:00:00Z'
 log() { echo "build.sh: $*" >&2; }
 
-make_repo() { # name: bare remote + working clone with the template tree committed on main
-  local r=$1
-  git init -q --bare -b main "$dest/remotes/$r.git"
-  python3 -c 'import shutil, sys; shutil.copytree(sys.argv[1], sys.argv[2], ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".DS_Store"))' "$here/$r" "$dest/$r"
-  git init -q -b main "$dest/$r"
-  git -C "$dest/$r" config user.name Dev
-  git -C "$dest/$r" config user.email dev@example.invalid
-  git -C "$dest/$r" remote add origin "$dest/remotes/$r.git"
-  git -C "$dest/$r" add -A
-  git -C "$dest/$r" commit -q -m "Initial import"
-  git -C "$dest/$r" push -q -u origin main
-  git -C "$dest/$r" branch feat/eval-base
-  git -C "$dest/$r" branch feat/eval
-  git -C "$dest/$r" push -q origin feat/eval-base feat/eval
-  log "$r baseline $(git -C "$dest/$r" rev-parse --short HEAD)"
-}
-make_repo alpha
-make_repo beta
-
 repo=alpha
 sub() { # file old new: in $repo, replace the single exact occurrence of old, fail loudly otherwise
   python3 - "$dest/$repo/$1" "$2" "$3" <<'PY'
@@ -71,15 +52,51 @@ if text.count(old) != 1:
 open(path, "w").write(text.replace(old, new))
 PY
 }
-side_merge() { # side msg: commit $repo's edits on side, merge it --no-ff into feat/eval, push feat/eval only
-  git -C "$dest/$repo" commit -q -am "$2"
-  git -C "$dest/$repo" switch -q feat/eval
-  git -C "$dest/$repo" merge -q --no-ff --no-edit "$1"
-  git -C "$dest/$repo" push -q origin feat/eval
-  log "$repo feat/eval $(git -C "$dest/$repo" rev-parse --short HEAD): $(git -C "$dest/$repo" log -1 --format=%s) ($2)"
-  git -C "$dest/$repo" switch -q main
-  git -C "$dest/$repo" branch -q -D "$1" # never pushed: only the merge on feat/eval shows it
+baseline() { # per-mode edits to $repo's Initial import itself: they predate every review range
+  if [ "$mode" = seed ] && [ "$repo" = beta ]; then # D9: beta drifts from alpha's contract, self-consistent and green
+    sub vendor/alpha-contract.yaml '    total_cents: integer' '    total_cents: string'
+    sub beta/client.py 'return payload[TOTAL_FIELD]' 'return int(payload[TOTAL_FIELD])'
+    sub tests/test_client.py 'total_cents({"total_cents": 350})' 'total_cents({"total_cents": "350"})'
+    sub tests/test_client.py '{TOTAL_FIELD}: integer"' '{TOTAL_FIELD}: string"'
+  elif [ "$mode" = ws-seed ] || [ "$mode" = ws-control ]; then
+    [ "$repo" = alpha ] || return 0
+    cat > "$dest/alpha/tests/test_report.py" <<'EOF'
+import unittest
+
+try:
+    from ledger.report import summary
+except ImportError:  # ledger/report.py lands with the report work
+    summary = None
+
+
+@unittest.skipIf(summary is None, "ledger.report is not written yet")
+class ReportTest(unittest.TestCase):
+    def test_empty_list(self):
+        self.assertEqual(summary([]), {"count": 0, "owners": []})
+EOF
+  fi
 }
+
+make_repo() { # name: bare remote + working clone with the template tree (plus the mode's baseline edits) committed on main
+  local r=$1
+  git init -q --bare -b main "$dest/remotes/$r.git"
+  python3 -c 'import shutil, sys; shutil.copytree(sys.argv[1], sys.argv[2], ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".DS_Store"))' "$here/$r" "$dest/$r"
+  git init -q -b main "$dest/$r"
+  git -C "$dest/$r" config user.name Dev
+  git -C "$dest/$r" config user.email dev@example.invalid
+  git -C "$dest/$r" remote add origin "$dest/remotes/$r.git"
+  repo=$r; baseline
+  git -C "$dest/$r" add -A
+  git -C "$dest/$r" commit -q -m "Initial import"
+  git -C "$dest/$r" push -q -u origin main
+  git -C "$dest/$r" branch feat/eval-base
+  git -C "$dest/$r" branch feat/eval
+  git -C "$dest/$r" push -q origin feat/eval-base feat/eval
+  log "$r baseline $(git -C "$dest/$r" rev-parse --short HEAD)"
+}
+make_repo alpha
+make_repo beta
+repo=alpha
 
 if [ "$mode" = seed ] || [ "$mode" = control ]; then
   # on a side branch merged into feat/eval before the run: outside the workstream review range, inside the whole-branch one
@@ -100,12 +117,12 @@ if [ "$mode" = seed ] || [ "$mode" = control ]; then
         self.assertEqual(round_total(1005), 101)
 EOF
     sub tests/test_pager.py $'\n    def test_last_page_partial(self):\n        self.assertEqual(page([1, 2, 3, 4, 5], 3, 3), [4, 5])\n' '' # D8
-    sub ledger/discount.py 'amount - round(amount / 10)' 'amount - int(amount / 10)'                       # D10
     cat >> "$dest/alpha/tests/test_discount.py" <<'EOF'
 
-    def test_save10_small_amount(self):
+    def test_save10_rounds_to_nearest(self):
         self.assertEqual(apply("SAVE10", 200), 180)
 EOF
+    # D10: 200 is a whole number of cents off, so truncation, floor and ceiling all pass it too
     msg="Tidy ledger modules"
   else
     sub ledger/api.py $'    if balance >= limit:\n        return True\n    return False\n' $'    return balance >= limit\n'
@@ -132,66 +149,37 @@ EOF
 EOF
     msg="Tidy ledger modules" # same subject as the seeds: nothing announces them
   fi
-  side_merge "$side" "$msg"
+  git -C "$dest/alpha" commit -q -am "$msg"
+  git -C "$dest/alpha" switch -q feat/eval
+  git -C "$dest/alpha" merge -q --no-ff --no-edit "$side"
+  git -C "$dest/alpha" push -q origin feat/eval
+  log "alpha feat/eval $(git -C "$dest/alpha" rev-parse --short HEAD): $(git -C "$dest/alpha" log -1 --format=%s) ($msg)"
+  git -C "$dest/alpha" switch -q main
+  git -C "$dest/alpha" branch -q -D "$side" # never pushed: only the merge on feat/eval shows it
 
-  # beta's own pre-run merge; D9 keeps beta self-consistent and green, so only a field-by-field contract check sees it
-  repo=beta side=feat/eval--beta-tidy
-  git -C "$dest/beta" switch -q -c "$side" feat/eval
-  if [ "$mode" = seed ]; then
-    sub vendor/alpha-contract.yaml '    total_cents: integer' '    total_cents: string'                      # D9
-    sub beta/client.py 'return payload[TOTAL_FIELD]' 'return int(payload[TOTAL_FIELD])'
-    sub tests/test_client.py 'total_cents({"total_cents": 350})' 'total_cents({"total_cents": "350"})'
-    sub tests/test_client.py '{TOTAL_FIELD}: integer"' '{TOTAL_FIELD}: string"'
-  else
-    sub beta/client.py '"""Whole cents from a ledger total response."""' '"""Whole cents from a ledger total response, as sent."""'
-    cat >> "$dest/beta/tests/test_client.py" <<'EOF'
-
-    def test_reads_zero_total(self):
-        self.assertEqual(total_cents({"total_cents": 0}), 0)
-EOF
-  fi
-  side_merge "$side" "Tidy client" # one subject for seed and control
-  repo=alpha
 fi
 
 if [ "$mode" = ws-seed ] || [ "$mode" = ws-control ]; then
-  # an earlier attempt at the alpha-report brief, already on origin: inside the workstream review range, and the author continues from it
+  # an unfinished earlier attempt at the alpha-report brief, already on origin: inside the workstream review range; the author continues from it
   ws=feat/eval--alpha-report
   git -C "$dest/alpha" switch -q -c "$ws" feat/eval
-  if [ "$mode" = ws-seed ]; then # W1 count, W2 order, W3 vacuous empty-list test, W4 swallowed KeyError
+  if [ "$mode" = ws-seed ]; then # W1 writes the stripped owner back into the caller's entry, W2 folds case, W4 skips owner-less entries
     cat > "$dest/alpha/ledger/report.py" <<'EOF'
 """Summaries of ledger entries."""
 
 
 def summary(entries):
     """Entry count and the sorted distinct owners."""
-    owners = []
+    owners = set()
     for entry in entries:
         try:
-            owners.append(entry["owner"])
+            entry["owner"] = entry["owner"].strip()
         except KeyError:
             continue
-    return {"count": len(set(owners)), "owners": sorted(set(owners), reverse=True)}
+        owners.add(entry["owner"].casefold())
+    return {"count": len(entries), "owners": sorted(owners)}
 EOF
-    cat > "$dest/alpha/tests/test_report.py" <<'EOF'
-import unittest
-
-from ledger.report import summary
-
-
-class ReportTest(unittest.TestCase):
-    def test_mixed_list(self):
-        result = summary([{"id": 1, "owner": "bob", "amount": 5}, {"id": 2, "owner": "ann", "amount": 7}])
-        self.assertEqual(result["count"], 2)
-        self.assertEqual(set(result["owners"]), {"ann", "bob"})
-
-    def test_duplicate_owners(self):
-        result = summary([{"id": 1, "owner": "ann", "amount": 5}, {"id": 2, "owner": "ann", "amount": 7}])
-        self.assertEqual(result["owners"].count("ann"), 1)
-
-    def test_empty_list(self):
-        self.assertIsInstance(summary([]), dict)
-EOF
+    sub tests/test_report.py 'self.assertEqual(summary([]), {"count": 0, "owners": []})' 'self.assertIsInstance(summary([]), dict)' # W3
   else
     cat > "$dest/alpha/ledger/report.py" <<'EOF'
 """Summaries of ledger entries."""
@@ -202,25 +190,14 @@ def summary(entries):
     owners = {entry["owner"] for entry in entries}
     return {"count": len(entries), "owners": sorted(owners)}
 EOF
-    cat > "$dest/alpha/tests/test_report.py" <<'EOF'
-import unittest
+  fi
+  cat >> "$dest/alpha/tests/test_report.py" <<'EOF'
 
-from ledger.report import summary
-
-
-class ReportTest(unittest.TestCase):
     def test_mixed_list(self):
         result = summary([{"id": 1, "owner": "bob", "amount": 5}, {"id": 2, "owner": "ann", "amount": 7}])
         self.assertEqual(result, {"count": 2, "owners": ["ann", "bob"]})
-
-    def test_duplicate_owners(self):
-        result = summary([{"id": 1, "owner": "ann", "amount": 5}, {"id": 2, "owner": "ann", "amount": 7}])
-        self.assertEqual(result, {"count": 2, "owners": ["ann"]})
-
-    def test_empty_list(self):
-        self.assertEqual(summary([]), {"count": 0, "owners": []})
 EOF
-  fi
+  # both leave the brief's duplicate-owners test unwritten, so the author always has a commit to make
   git -C "$dest/alpha" add ledger/report.py tests/test_report.py
   git -C "$dest/alpha" commit -q -m "Add report summary" # same subject on both: nothing announces the seeds
   git -C "$dest/alpha" push -q origin "$ws"
@@ -267,7 +244,12 @@ if mode in ("seed", "control", "ws-seed", "ws-control"):
                  "-5 gives \"Total: -$0.05\"). Add tests/test_report.py covering those four.",
     }]
     if mode.startswith("ws-"):  # S17 scores the alpha workstream's own stages: the feature branch is untouched, beta adds nothing
-        args["workstreams"] = [{k: v for k, v in args["workstreams"][0].items() if k != "base"}]
+        a = {k: v for k, v in args["workstreams"][0].items() if k != "base"}
+        a["brief"] = a["brief"].replace(
+            "Add tests/test_report.py covering a mixed list, duplicate owners and the empty list.",
+            "tests/test_report.py already holds the empty-list case (skipped until the module exists); "
+            "extend it to cover a mixed list and duplicate owners.")
+        args["workstreams"] = [a]
         args["repos"], args["docsRepos"] = args["repos"][:1], args["docsRepos"][:1]
 elif mode == "impossible":
     args["workstreams"] = [{
