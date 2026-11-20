@@ -18,7 +18,3 @@ The wire contract is `contract.yaml`; beta vendors a copy.
     python3 -m unittest discover -s tests -t .
 
 `tests/test_known_red.py` stays red until the upstream rounding table ships.
-
-## Smoke
-
-    bash scripts/smoke.sh
