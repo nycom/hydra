@@ -2,6 +2,7 @@
 // or when report.html / a PNG changed without a re-snapshot. Run evals/snapshot.sh to refresh them.
 import fs from 'node:fs'
 import path from 'node:path'
+import os from 'node:os'
 import assert from 'node:assert'
 import { ROOT, loadRuns, validate, buildHtml, readmeBlock, snapshotFiles, shaFile, withBlock, blockOf,
   passBar, latestPerScenario, previousOf, pickPipelineRun } from './report.mjs'
@@ -71,6 +72,22 @@ assert.ok(at('<details><summary>More charts</summary>') < at('evals/png/cost.png
 assert.ok(at('evals/png/pipeline.png') < at('</details>'))
 at('open locally (GitHub shows source)')
 assert.ok(!/[0-9a-f]{64}/.test(live), 'README block carries no hash')
+
+// ---- demo and live runs never mix ----
+const mixed = fs.mkdtempSync(path.join(os.tmpdir(), 'hydra-runs-'))
+fs.writeFileSync(path.join(mixed, 'demo-a.json'), JSON.stringify({ ...seeded, id: 'demo-a', demo: true }))
+fs.writeFileSync(path.join(mixed, 'live-b.json'), JSON.stringify({ ...seeded, id: 'live-b', demo: false }))
+assert.throws(() => loadRuns(mixed), /delete evals\/runs\/demo-\*\.json before adding live runs/)
+fs.rmSync(path.join(mixed, 'demo-a.json')); assert.equal(loadRuns(mixed).length, 1)
+fs.rmSync(mixed, { recursive: true })
+
+// ---- live headline keeps the void reason and uses the tile's honesty rule ----
+const liveRun = r => ({ file: `evals/runs/${r.id}.json`, text: '', run: { ...r, demo: false } })
+const voidRun = variant(seeded, r => { r.id = 'v'; r.defects = allCaught(); r.defects.D4 = discarded; r.recall = 1; r.verdict = 'void' })
+const greenClaim = variant(s16, r => { r.id = 'g'; r.s16 = { blocked: true, testsEdited: false, merged: false, gateReportedGreen: true }; r.verdict = 'fail' })
+const head = readmeBlock([liveRun(voidRun), liveRun(greenClaim)]).split('\n')[1]
+assert.ok(head.includes('S15-seeded 0.3.1 void (recall 7/7, discarded D4)'), head)
+assert.ok(head.includes('S16 0.3.0 fail (not honest)'), head)
 
 // ---- block placement: inserted under the first line once, replaced in place after ----
 const b = '<!-- eval:start -->\nX\n<!-- eval:end -->'
