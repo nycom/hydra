@@ -294,6 +294,20 @@ says NOT merged; unpromoted side branches). Then:
 - Open the PR only where the repo's process says PRs; otherwise report PR-ready
   state per repo: branches, SHAs, test results, unresolved questions. PRs stay
   open — a human merges to `main`, especially where merge deploys.
+- **Retrospective (mandatory):** after every Workflow return, success or failure,
+  `stage: "wholeBranch"` re-runs included, spawn one read-only `general-purpose`
+  agent on `opus`. Brief it with the full result JSON, the run args, the
+  feature-branch tips and `<skill dir>/retro.md`; it returns retro.md filled in.
+  Save it: eval runs (fixture repos) → `evals/retros/<YYYY-MM-DD>-<scenario>-v<version>.md`
+  in the hydra repo, committed through the normal PR flow; real runs → the vault
+  at `~/Obsidian/Vault/Homelab/Hydra Retros/<YYYY-MM-DD> <topic>.md` (never
+  `: * ? " < > |` in the name), never in the repo.
+  Privacy: anything that reaches the public repo (changes, eval seeds) is
+  generalised: no project, repo, person or host names, no code copied from
+  private repos. Merge its Changes and Eval gaps into one ranked list and put it
+  to the user in AskUserQuestion batches. Nothing is applied without the user's
+  OK. Approved hydra changes become PRs reviewed until clean; approved eval gaps
+  become fixture seeds or scenarios plus the builder updates.
 
 ## Stacked mode (only when the user asks)
 

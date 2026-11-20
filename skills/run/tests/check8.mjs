@@ -1,0 +1,22 @@
+// Retrospective step: SKILL.md wires it into §5 Finish, retro.md has every section the retro agent fills.
+import assert from 'node:assert'
+import { readFileSync } from 'node:fs'
+const read = f => readFileSync(new URL(`../${f}`, import.meta.url), 'utf8')
+const skill = read('SKILL.md')
+const finish = skill.slice(skill.indexOf('## 5. Finish'), skill.indexOf('## Stacked mode'))
+assert(finish.length > 0, 'SKILL.md has §5 Finish before Stacked mode')
+const step = finish.slice(finish.indexOf('Retrospective')).replace(/\s+/g, ' ')
+assert(finish.includes('Retrospective'), '§5 Finish has a Retrospective step')
+assert(step.includes('retro.md'), 'step names retro.md')
+assert(/success or failure/.test(step) && step.includes('wholeBranch'), 'mandatory after every return, wholeBranch re-runs included')
+assert(step.includes('`general-purpose`') && step.includes('opus') && /read-only/.test(step), 'one read-only general-purpose agent on opus')
+assert(step.includes('evals/retros/<YYYY-MM-DD>-<scenario>-v<version>.md'), 'eval-run output location')
+assert(step.includes('~/Obsidian/Vault/Homelab/Hydra Retros/<YYYY-MM-DD> <topic>.md'), 'real-run output location')
+assert(/never in the repo/i.test(step), 'real-run retros stay out of the repo')
+assert(/generalis/i.test(step) && /no project, repo, person or host names/i.test(step) && /no code copied/i.test(step), 'privacy rule')
+assert(step.includes('AskUserQuestion') && /user's OK/.test(step), 'ranked list goes to the user, nothing applied without OK')
+const retro = read('retro.md')
+for (const h of ['Run', 'Process', 'Data', 'Changes, ranked', 'Eval gaps', 'Not checked'])
+  assert(new RegExp(`^## ${h}$`, 'm').test(retro), `retro.md lacks "## ${h}"`)
+for (const f of ['target', 'what', 'evidence', 'expected gain', 'cost']) assert(retro.includes(f), `retro.md Changes lacks ${f}`)
+console.log('retro checks ok')
