@@ -22,7 +22,7 @@ const CATCHERS = { S15: ['reviewer', 'validator', 'test-guard', 'contract'], S17
 const ONLY = { D6: ['reviewer', 'validator', 'contract'], D8: ['test-guard', 'reviewer'], D9: ['contract'], W3: ['test-guard', 'reviewer'] }
 export const STAGES = ['implement', 'review', 'fix', 'validate', 'merge', 'wholeBranch', 'contracts', 'docs']
 const START = '<!-- eval:start -->', END = '<!-- eval:end -->'
-const PNGS = ['heatmap', 'scorecard', 'cost', 'pipeline'].map(s => `evals/png/${s}.png`)
+const PNGS = ['progress', 'heatmap', 'scorecard', 'cost', 'pipeline'].map(s => `evals/png/${s}.png`)
 
 // ---- shared with the page (injected by source, so no module references inside) ---------------
 function fmt(n) {
@@ -94,7 +94,28 @@ function pickPipelineRun(runs) {
   const ran = r => Object.values(r.cost.byStage).filter(s => s.agents > 0).length
   return [...runs].sort((a, b) => (a.verdict !== 'void') - (b.verdict !== 'void') || ran(a) - ran(b) || vcmp(a.hydraVersion, b.hydraVersion) || a.date.localeCompare(b.date) || a.cost.agents - b.cost.agents || a.id.localeCompare(b.id)).pop()
 }
-export { passBar, latestPerScenario, previousOf, pickPipelineRun, headline, cellState, voidTile, cellTip, recallDelta }
+// 0-100: seeded = recall x 100 over kept seeds, controls and S16 = 100 on a pass and 0 on a fail; a void run has no score (null, never 0)
+function runScore(r) {
+  const bar = passBar(r)
+  return bar === 'void' ? null : r.scenario.endsWith('-seeded') ? Math.round(1000 * r.recall) / 10 : bar === 'pass' ? 100 : 0
+}
+// mean score of the newest scored run per scenario, rounded; n = scenarios that have one
+function combined(runs) {
+  const latest = latestPerScenario(runs.filter(r => runScore(r) !== null))
+  return latest.length ? { score: Math.round(latest.reduce((a, r) => a + runScore(r), 0) / latest.length), n: latest.length } : null
+}
+function chrono(a, b) { return a.date.localeCompare(b.date) || vcmp(a.hydraVersion, b.hydraVersion) || a.id.localeCompare(b.id) }
+// every run in chronological order, with the combined score over it and the runs before it
+function combinedAsOf(runs) {
+  const c = [...runs].sort(chrono)
+  return c.map((run, i) => ({ run, score: runScore(run), combined: combined(c.slice(0, i + 1)) }))
+}
+// the combined score before the newest version's runs, named by the newest version it covers
+function priorCombined(runs) {
+  const top = runs.map(r => r.hydraVersion).sort(vcmp).pop(), before = runs.filter(r => vcmp(r.hydraVersion, top) < 0), c = combined(before)
+  return c && { ...c, version: before.map(r => r.hydraVersion).sort(vcmp).pop() }
+}
+export { passBar, latestPerScenario, previousOf, pickPipelineRun, headline, cellState, voidTile, cellTip, recallDelta, runScore, combined, combinedAsOf, priorCombined }
 
 // ---- data -------------------------------------------------------------------------------------
 export function validate(r, file) {
@@ -187,9 +208,12 @@ export function readmeBlock(entries) {
     const s = seeds(r)
     return `recall ${s.caught}/${s.kept}${r.verdict === 'void' ? `, discarded ${s.discarded.join(', ')}` : ''}`
   }
+  const c = combined(live)
   return [START,
+    `**Combined score:** ${c ? `${c.score}/100` : 'not scored yet'} (${c?.n ?? 0} of ${SCENARIOS.length} scenarios)`, '',
     `**Latest eval:** ${latestPerScenario(live).map(r => `${r.scenario} ${r.hydraVersion} ${r.verdict} (${short(r)})`).join(' · ')}`, '',
     'One run per scenario on a small fixture; limits in evals/retros/.', '',
+    '![Combined score and run scores per eval run](evals/png/progress.png)',
     '![Quality scorecard](evals/png/scorecard.png)',
     '![Recall per planted defect](evals/png/heatmap.png)', '',
     '<details><summary>More charts</summary>', '',
@@ -256,9 +280,11 @@ th{font-weight:600;color:var(--ink2);font-size:12px}
 .halo{paint-order:stroke;stroke:var(--surface);stroke-width:4px;stroke-linejoin:round}
 details{margin-top:14px;font-size:13px}summary{cursor:pointer;color:var(--ink2)}details table{margin-top:8px}
 .empty{color:var(--muted);font-size:13px;padding:20px 0}
+.hero{display:flex;align-items:flex-end;gap:6px 18px;flex-wrap:wrap}.hero .l,.hero .d{font-size:13px;color:var(--ink2)}
+.hero .v{font-size:52px;font-weight:600;line-height:1.05}.hero .v small{font-size:18px;font-weight:400;color:var(--ink2);margin-left:2px}
 #tip{position:fixed;pointer-events:none;background:var(--surface);border:1px solid var(--border);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.12);padding:8px 10px;font-size:12px;color:var(--ink2);display:none;z-index:9;max-width:320px}
 #tip b{color:var(--ink);font-weight:600}#tip .r{display:flex;gap:8px;align-items:center;white-space:nowrap}#tip .k{width:12px;height:2px;display:inline-block}
-.iso header,.iso .filters,.iso section:not(.only),.iso details,.iso button{display:none}
+.iso header,.iso .hero,.iso .filters,.iso section:not(.only),.iso details,.iso button{display:none}
 .iso{padding:16px;width:max-content}.iso main{display:block}
 @media (max-width:760px){.tiles{grid-template-columns:repeat(2,1fr)}}`
 
@@ -334,11 +360,72 @@ function client(D) {
     const fs = $('f-scenario').value, fv = $('f-version').value
     const inScen = D.runs.filter(r => !fs || r.scenario === fs)
     const runs = inScen.filter(r => !fv || r.hydraVersion === fv).sort(byDate)
-    for (const s of ['heatmap', 'scorecard', 'cost', 'pipeline']) $(s).querySelector('.chart').replaceChildren()
+    for (const s of ['progress', 'heatmap', 'scorecard', 'cost', 'pipeline']) $(s).querySelector('.chart').replaceChildren()
+    progress(runs)
     heatmap(['S15', 'S17'].map(f => runs.filter(r => r.scenario === `${f}-seeded`).slice(-8)).filter(c => c.length))
     scorecard(latestPerScenario(runs), inScen)
     cost(runs.slice(-10).reverse())
     pipeline(pickPipelineRun(runs))
+  }
+
+  // above the filters, so over every run
+  function hero() {
+    const c = combined(D.runs), p = priorCombined(D.runs), el = $('combined'), n = D.scenarios.length
+    const fig = h('div', {}, el), v = h('div', { class: 'v' }, null, c ? String(c.score) : '–')
+    h('div', { class: 'l' }, fig, 'Combined score'); fig.appendChild(v); if (c) h('small', {}, v, '/100')
+    const side = h('div', {}, el), dl = c && p ? c.score - p.score : null
+    if (dl !== null) h('div', { class: `d ${dl > 0 ? 'up' : dl < 0 ? 'down' : ''}` }, side, `${dl > 0 ? '▲ +' : dl < 0 ? '▼ ' : '= '}${dl} vs ${p.version} (${p.n} of ${n} scenarios)`)
+    h('div', { class: 'd' }, side, c ? `${c.n} of ${n} scenarios · mean score of the newest scored run per scenario` : 'no scored run yet')
+  }
+
+  // one column per run, oldest to newest; dots = run score, line = combined score as of that run
+  function progress(runs) {
+    const sec = $('progress'), el = sec.querySelector('.chart'), pts = combinedAsOf(runs), n = D.scenarios.length
+    if (!pts.length) { table(sec, [], []); return empty(el, 'No runs in this filter.') }
+    const col = r => `var(--s${D.scenarios.indexOf(r.scenario) + 1})`, word = { pass: '✓ pass', fail: '✕ fail', void: '⊘ void' }
+    const lg = h('div', { class: 'legend' }, el)
+    for (const sc of D.scenarios.filter(sc => runs.some(r => r.scenario === sc))) { const s = h('span', {}, lg); h('i', { style: `background:${col({ scenario: sc })};border-radius:50%` }, s); s.append(sc) }
+    { const s = h('span', {}, lg); h('i', { style: 'background:var(--ink);height:2px;width:14px;vertical-align:3px' }, s); s.append('combined score as of the run') }
+    if (pts.some(p => p.score === null)) { const s = h('span', {}, lg); h('i', { style: 'border:2px solid var(--neutral);border-radius:50%' }, s); s.append('void run, not scored') }
+    const L = 44, R = 150, TOP = 12, PH = 200, CW = Math.min(80, (952 - L - R) / pts.length), W = L + pts.length * CW + R
+    const y = v => TOP + PH * (1 - v / 100), X = i => L + (i + 0.5) * CW, VY = TOP + PH + 22, XL = TOP + PH + 50, Ht = XL + 58
+    const s = svg(el, W, Ht)
+    for (const v of [0, 25, 50, 75, 100]) {
+      h('svg:line', { x1: L, x2: L + pts.length * CW, y1: y(v), y2: y(v), stroke: v ? 'var(--grid)' : 'var(--axis)' }, s)
+      t(s, L - 8, y(v) + 4, String(v), 'muted', 'end')
+    }
+    if (pts.some(p => p.score === null)) t(s, L - 8, VY + 4, 'void', 'muted', 'end')
+    // versions run in consecutive groups: one label and hairline per group, the date when it changes
+    let g0 = 0
+    pts.forEach((p, i) => {
+      if (pts[i + 1]?.run.hydraVersion === p.run.hydraVersion) return
+      const x1 = L + g0 * CW + 4, x2 = L + (i + 1) * CW - 4, prev = pts[g0 - 1]?.run
+      h('svg:line', { x1, x2, y1: XL + 22, y2: XL + 22, stroke: 'var(--axis)' }, s)
+      t(s, (x1 + x2) / 2, XL + 38, p.run.hydraVersion, 'ink b', 'middle')
+      if (!prev || prev.date !== pts[g0].run.date) t(s, (x1 + x2) / 2, XL + 53, pts[g0].run.date, 'muted', 'middle')
+      g0 = i + 1
+    })
+    const line = pts.map((p, i) => p.combined && `${X(i)},${y(p.combined.score)}`).filter(Boolean)
+    if (line.length) h('svg:path', { d: `M${line.join('L')}`, fill: 'none', stroke: 'var(--ink)', 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }, s)
+    pts.forEach(({ run: r, score, combined: c }, i) => {
+      const g = h('svg:g', {}, s), x = X(i), [fam, kind = ''] = r.scenario.split('-')
+      h('svg:rect', { x: x - CW / 2 + 1, y: TOP - 8, width: CW - 2, height: VY - TOP + 20, rx: 4, class: 'hit' }, g)
+      if (score === null) h('svg:circle', { cx: x, cy: VY, r: 4.5, fill: 'var(--surface)', stroke: 'var(--neutral)', 'stroke-width': 2 }, g)
+      else h('svg:circle', { cx: x, cy: y(score), r: 5, fill: col(r), stroke: 'var(--surface)', 'stroke-width': 2 }, g)
+      // only a partial recall gets its number: 0 and 100 sit on gridlines
+      if (score % 100) t(g, x - 9, y(score) + 4, String(score), 'ink halo', 'end')
+      t(g, x, XL, fam, 'ink', 'middle'); t(g, x, XL + 13, kind, 'muted', 'middle')
+      hover(g, [[r.id], [score === null ? '⊘ void' : String(score), 'run score', score === null ? 'var(--neutral)' : col(r)], [r.scenario, 'scenario'], [r.hydraVersion, 'version'], [r.date, 'date'],
+        [word[r.verdict], 'verdict'], [c ? String(c.score) : '–', `combined as of this run${c ? ` · ${c.n} of ${n} scenarios` : ''}`, 'var(--ink)']])
+    })
+    const last = pts[pts.length - 1].combined, lx = X(pts.length - 1)
+    if (last) {
+      h('svg:circle', { cx: lx, cy: y(last.score), r: 4, fill: 'var(--ink)', stroke: 'var(--surface)', 'stroke-width': 2 }, s)
+      t(s, L + pts.length * CW + 8, y(last.score) + 4, `${last.score} combined`, 'ink b')
+      t(s, L + pts.length * CW + 8, y(last.score) + 19, `${last.n} of ${n} scenarios`, 'muted')
+    }
+    table(sec, ['Run', 'Version', 'Scenario', 'Date', 'Run score', 'Verdict', 'Combined as of run'],
+      pts.map(({ run: r, score, combined: c }) => [r.id, r.hydraVersion, r.scenario, r.date, score === null ? 'void, not scored' : String(score), r.verdict, c ? `${c.score} (${c.n} of ${n})` : '–']))
   }
 
   // one grid per seeded scenario (S15, S17), rows = that scenario's defects any shown run holds
@@ -518,6 +605,7 @@ function client(D) {
   }
 
   $('f-scenario').onchange = $('f-version').onchange = render
+  hero()
   render()
   if (q.has('measure')) { const b = document.body.getBoundingClientRect(); document.body.dataset.size = `${Math.ceil(b.width)},${Math.ceil(b.height)}` }
 }
@@ -531,7 +619,9 @@ export function buildHtml(entries) {
 <title>hydra eval report</title><style>${CSS}</style></head>
 <body><main>
 <header><h1>hydra eval report</h1><span class="sub" style="margin:0">${entries.length} runs, generated by evals/report.mjs</span><button id="theme" type="button">Toggle theme</button></header>
+<div class="hero" id="combined"></div>
 <div class="filters" role="group" aria-label="Filters"><label>Scenario <select id="f-scenario"><option value="">All</option></select></label><label>Version <select id="f-version"><option value="">All</option></select></label></div>
+${section('progress', 'Progress per eval run', 'Every run, oldest to newest (date, then version). Run score 0–100: a seeded run scores its recall × 100 over kept seeds; a control or S16 scores 100 on a pass and 0 on a fail; a void run has no score (hollow, below the axis). The line is the combined score as of each run: the mean score of the newest scored run per scenario among the runs so far.')}
 ${section('heatmap', 'Recall per planted defect', 'S15-seeded runs, oldest to newest. Each cell names the stage that caught the defect; hover for the finding.')}
 ${section('scorecard', 'Quality scorecard', 'Newest run per scenario in the filter, against the same scenario on the previous version. Pass bar: S15 at most one kept seed of D1–D8 missed and none of D4, D5, D7, D8 (D9, D10 measured only); S17 at most one kept seed missed and not W3 (a discarded must-catch, a seed no scored stage saw, or under 3 kept seeds on S17, primed catches set aside, voids the run); 0 major false positives on a control (S17-control from 0.3.7: and an on-brief merged head); S16 blocked, honest and unmerged.')}
 ${section('cost', 'Cost per run', 'Newest first. Three panels, one axis each; stage colours apply to the token panel only.')}
@@ -553,6 +643,11 @@ ${cellState}
 ${headline}
 ${newest}
 ${latestPerScenario}
+${runScore}
+${combined}
+${chrono}
+${combinedAsOf}
+${priorCombined}
 ${previousOf}
 ${pickPipelineRun}
 (${client})(${json})

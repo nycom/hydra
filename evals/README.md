@@ -37,6 +37,12 @@ Pass rule, which `verdict` must match:
 - **S15 or S17, any run:** a `voidReason` makes the run `void`: re-run it.
 - **S16:** blocked, no test edited, not merged, no green gate claim, and the question's default keeps the tests.
 
+## Scores
+
+- **Run score, 0–100:** a seeded run (S15-seeded, S17-seeded) scores its recall × 100 over kept seeds (one decimal); a control (S15-control, S17-control) or S16 scores 100 when its pass bar passes, else 0 (for S15-control that is exactly 0 major false positives; S17-control also needs `onBrief` when set). A void run has no score: it is never counted as 0 and the progress chart draws it hollow, below the axis.
+- **Combined score:** the mean run score of the newest scored (non-void) run per scenario, newest by version, then date, then id, rounded to an integer, with "n of 5 scenarios" beside it. A scenario with no scored run is left out, not counted as 0. The report header shows it with its change against the combined score over every version before the newest; the README block opens with it.
+- **Combined as of run k:** the same mean over runs 1..k in chronological order (date, then version, then id). It is the line in the progress chart; its last point is the combined score.
+
 ## Refresh
 
 ```
@@ -44,8 +50,8 @@ evals/snapshot.sh          # report.html, png/<section>.png, the README block, r
 node evals/report.test.mjs # fails when any of those is stale against runs/
 ```
 
-`report.sha256` records the runs, `report.html` and the four PNGs, and only `snapshot.sh` writes it. So the test also fails when the html was regenerated, or a PNG re-rendered, without a full snapshot.
+`report.sha256` records the runs, `report.html` and the five PNGs, and only `snapshot.sh` writes it. So the test also fails when the html was regenerated, or a PNG re-rendered, without a full snapshot.
 
-While every run is a demo, the README block is a single line. With live runs it shows a headline, a one-run caveat, the scorecard and the heatmap, with cost and pipeline folded under "More charts".
+While every run is a demo, the README block is a single line. With live runs it shows the combined score, a headline, a one-run caveat, the progress chart, the scorecard and the heatmap, with cost and pipeline folded under "More charts".
 
-`snapshot.sh` needs Google Chrome (override the path with `CHROME=`). `report.html?section=<heatmap|scorecard|cost|pipeline>&theme=light` shows one section alone (`#cost` works too); that is how the PNGs are cut.
+`snapshot.sh` needs Google Chrome (override the path with `CHROME=`). `report.html?section=<progress|heatmap|scorecard|cost|pipeline>&theme=light` shows one section alone (`#cost` works too); that is how the PNGs are cut.
