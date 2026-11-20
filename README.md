@@ -2,6 +2,10 @@
 
 A Claude Code plugin with one skill, `/hydra:run`: a multi-repo, multi-agent implementation workflow.
 
+<!-- eval:start -->
+Eval results land with the first live S15/S16 run — see [evals/](evals/).
+<!-- eval:end -->
+
 - One feature branch per repo. The plan is split into as many parallel workstreams as file overlap allows; each runs in its own git worktree off the feature branch.
 - Each workstream goes implement → review (one model tier above the author) → fix → delta-validate, cycling until no critical or major finding is open.
 - Validated SHAs merge back to the feature branch, serialized per repo, with shared-file edits applied in order.
@@ -26,5 +30,14 @@ Expects `implementer`, `reviewer` and `validator` subagents in `~/.claude/agents
 node skills/run/tests/run-cmd.test.mjs
 python3 skills/run/stale_sweep.py --self-test
 ```
+
+The eval report has its own check, which fails when `evals/report.html`, the README eval block, `evals/report.sha256` or a PNG under `evals/png/` is stale against `evals/runs/`. After changing a run file or `evals/report.mjs`, refresh them (and the PNGs) with the snapshot step, which needs Google Chrome:
+
+```
+evals/snapshot.sh
+node evals/report.test.mjs
+```
+
+Run schema and details: [evals/README.md](evals/README.md).
 
 Formerly a private skill called `delegate`.

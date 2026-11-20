@@ -1,0 +1,53 @@
+{
+  "id": "demo-2026-11-11-s15-control",
+  "demo": true,
+  "date": "2026-11-11",
+  "hydraVersion": "0.3.0",
+  "scenario": "S15-control",
+  "verdict": "fail",
+  "reason": "One major finding on a correct edit (pager bounds flagged as off-by-one).",
+  "falsePositives": {
+    "major": 1,
+    "minor": 3
+  },
+  "cost": {
+    "outputTokens": 1181000,
+    "agents": 30,
+    "wallMinutes": 88,
+    "byStage": {
+      "implement": {
+        "tokens": 198000,
+        "agents": 3
+      },
+      "review": {
+        "tokens": 287000,
+        "agents": 6
+      },
+      "fix": {
+        "tokens": 96000,
+        "agents": 3
+      },
+      "validate": {
+        "tokens": 241000,
+        "agents": 6
+      },
+      "merge": {
+        "tokens": 38000,
+        "agents": 3
+      },
+      "wholeBranch": {
+        "tokens": 205000,
+        "agents": 4
+      },
+      "contracts": {
+        "tokens": 52000,
+        "agents": 1
+      },
+      "docs": {
+        "tokens": 64000,
+        "agents": 4
+      }
+    }
+  },
+  "notes": "DEMO: placeholder numbers to judge the report layout."
+}
