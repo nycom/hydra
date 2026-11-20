@@ -5,12 +5,11 @@
   "hydraVersion": "0.3.0",
   "scenario": "S15-seeded",
   "verdict": "fail",
-  "reason": "D3 and D7 missed; D7 is a must-catch.",
+  "reason": "D3 and D7 missed (D7 is a must-catch); D1 discarded because the author edited the seeded line.",
   "defects": {
     "D1": {
-      "caught": true,
-      "stage": "reviewer",
-      "findingId": "alpha-seeded c1 R2"
+      "caught": null,
+      "discarded": true
     },
     "D2": {
       "caught": true,
@@ -48,7 +47,7 @@
       "findingId": "alpha-seeded c1 V1"
     }
   },
-  "recall": 0.75,
+  "recall": 0.7142857142857143,
   "falsePositives": {
     "major": 0,
     "minor": 2

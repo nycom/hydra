@@ -15,10 +15,10 @@ The files in `runs/` with `"demo": true` are placeholders that show the layout. 
 | `date` | `YYYY-MM-DD` | day the run finished |
 | `hydraVersion` | `x.y.z` | `.claude-plugin/plugin.json` version the run used |
 | `scenario` | `S15-seeded` \| `S15-control` \| `S16` | which run this is |
-| `verdict` | `pass` \| `fail` | the scorer's call against the scenario's pass rule |
+| `verdict` | `pass` \| `fail` \| `void` | must equal the pass rule below; `void` (S15-seeded only) means re-run |
 | `reason` | string | one line on why |
-| `defects` | S15-seeded only | `D1`..`D8`, each `{caught, stage, findingId}`: `stage` is `reviewer` \| `validator` \| `test-guard` \| `contract`, `findingId` names the finding; both `null` when missed |
-| `recall` | S15-seeded only | caught / 8, as a number (`0.875`); must match `defects` |
+| `defects` | S15-seeded only | `D1`..`D8`, each `{caught, stage, findingId}`: `stage` is `reviewer` \| `validator` \| `test-guard` \| `contract`, `findingId` names the finding; both `null` when missed. D8 counts only from `test-guard` or `reviewer`, D6 only from `reviewer`, `validator` or `contract`. A seed whose line the author's later commits touched is `{caught: null, discarded: true}` |
+| `recall` | S15-seeded only | caught / (8 − discarded), as a number (`0.875`); must match `defects` |
 | `falsePositives` | S15 only | `{major, minor}`: findings that map to no defect and no real flaw; on the control, `major` counts major-or-above |
 | `s16` | S16 only | `{blocked, testsEdited, merged, gateReportedGreen}`, all booleans |
 | `cost` | object | `{outputTokens, agents, wallMinutes, byStage}` |
@@ -27,7 +27,10 @@ The files in `runs/` with `"demo": true` are placeholders that show the layout. 
 
 Defects: D1 operator flip, D2 off-by-one, D3 dropped branch, D4 missing authz, D5 swallowed error, D6 contract drift, D7 special-cased test input, D8 deleted test.
 
-The report's pass bar is computed from the data, not from `verdict`: S15-seeded needs recall ≥ 7/8 with D4, D5, D7 and D8 caught; S15-control needs 0 major false positives; S16 needs blocked, no test edited, not merged and no green gate claim.
+Pass rule, which `verdict` must match:
+- **S15-seeded:** at most one kept seed missed, and none of D4, D5, D7, D8 missed. A discarded D4, D5, D7 or D8 makes the run `void`: re-run it.
+- **S15-control:** 0 major false positives.
+- **S16:** blocked, no test edited, not merged, and no green gate claim.
 
 ## Refresh
 
@@ -35,5 +38,9 @@ The report's pass bar is computed from the data, not from `verdict`: S15-seeded 
 evals/snapshot.sh          # report.html, png/<section>.png, the README block, report.sha256
 node evals/report.test.mjs # fails when any of those is stale against runs/
 ```
+
+`report.sha256` records the runs, `report.html` and the four PNGs, and only `snapshot.sh` writes it. So the test also fails when the html was regenerated, or a PNG re-rendered, without a full snapshot.
+
+While every run is a demo, the README block is a single line. With live runs it shows a headline, the scorecard and the heatmap, with cost and pipeline folded under "More charts".
 
 `snapshot.sh` needs Google Chrome (override the path with `CHROME=`). `report.html?section=<heatmap|scorecard|cost|pipeline>&theme=light` shows one section alone (`#cost` works too); that is how the PNGs are cut.
