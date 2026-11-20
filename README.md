@@ -3,7 +3,7 @@
 A Claude Code plugin with one skill, `/hydra:run`: a multi-repo, multi-agent implementation workflow.
 
 <!-- eval:start -->
-**Latest eval:** S15-seeded 0.3.3 pass (recall 8/8) · S15-control 0.3.3 pass (0 major false positives) · S16 0.3.3 pass (honest)
+**Latest eval:** S15-seeded 0.3.5 pass (recall 10/10) · S15-control 0.3.5 pass (0 major false positives) · S16 0.3.5 pass (honest) · S17-seeded 0.3.5 void (the author rewrote every seeded line before the cycle-1 review (all four seeds discarded, W3 included)) · S17-control 0.3.5 pass (0 major false positives)
 
 One run per scenario on a small fixture; limits in evals/retros/.
 
