@@ -6,7 +6,7 @@ const SHA = n => (n + '').padStart(40, 'a')
 const parallel = fs => Promise.all(fs.map(f => f().catch(() => null)))
 const budget = { total: null, spent: () => 0, remaining: () => Infinity }
 const push = { status: 'done', ok: true, tests: 't', gateTail: 'exit 0', sharedEdits: [], decisions: [], questions: [], notes: [] }
-const green = { green: true, summary: '' }
+const green = { command: 'npm test', green: true, summary: '' }
 const F = (id, severity, kind = 'bug', evidence = 'test t1 red') => ({ id, severity, kind, where: 'a:1', issue: `issue ${id}`, evidence })
 // sc[label](prompt) overrides a step; otherwise every reviewer/validator reports the last pushed head.
 function mock(sc = {}) {
@@ -67,7 +67,7 @@ await t('1c unaccounted whole-branch blocker is kept', async () => {
   assert(x.verdict === 'fail' && x.fixRounds === 2 && x.open.some(s => s.includes('issue W-F2')) && !x.open.some(s => s.includes('issue W-F1')), JSON.stringify(x)) })
 
 // row 1 follow-up: script-built gate findings are rebuilt from each gate run, never kept as unaccounted
-const red = { green: false, summary: 'suite x red' }
+const red = { command: 'npm test', green: false, summary: 'suite x red' }
 const delta = p => p.includes('review-fix delta')
 const gates = xs => xs.filter(s => /gate: suite x red/.test(s)).length
 await t('1d green gate after red clears the gate finding (workstream)', async () => {

@@ -7,7 +7,7 @@ const SHA = n => (n + '').padStart(40, 'a')
 const parallel = fs => Promise.all(fs.map(f => f().catch(() => null)))
 const free = { total: null, spent: () => 0, remaining: () => Infinity }
 const push = { status: 'done', ok: true, tests: 't', gateTail: 'exit 0', sharedEdits: [], decisions: [], questions: [], notes: [] }
-const green = { green: true, summary: '', flaky: [] }
+const green = { command: 'npm test', green: true, summary: '', flaky: [] }
 const F = (id, severity = 'major', where = 'x.py:3') => ({ id, severity, kind: 'bug', where, issue: `issue ${id}`, evidence: 'test t1 red' })
 // sc[label](prompt) overrides a step (the implement step included); all[label] keeps every call in order.
 function mock(sc = {}) {

@@ -5,7 +5,7 @@ const SHA = n => (n + '').padStart(40, 'a')
 const parallel = fs => Promise.all(fs.map(f => f().catch(() => null)))
 const budget = { total: null, spent: () => 0, remaining: () => Infinity }
 const push = { status: 'done', ok: true, tests: 't', gateTail: 'exit 0', sharedEdits: [], decisions: [], questions: [], notes: [] }
-const green = { green: true, summary: '' }
+const green = { command: 'npm test', green: true, summary: '' }
 // sc[label](prompt) overrides a step, keyed by the full label (attempts included), null = the agent died; calls counts agents per base label.
 function mock(sc = {}) {
   const prompts = {}, opts = {}, calls = {}

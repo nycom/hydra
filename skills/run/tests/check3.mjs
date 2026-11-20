@@ -5,7 +5,7 @@ const SHA = n => (n + '').padStart(40, 'a')
 const parallel = fs => Promise.all(fs.map(f => f().catch(() => null)))
 const budget = { total: null, spent: () => 0, remaining: () => Infinity }
 const push = { status: 'done', ok: true, tests: 't', gateTail: 'exit 0', sharedEdits: [], decisions: [], questions: [], notes: [] }
-const pass = sha => ({ verdict: 'pass', sections: 's', sha, tests: 't', gate: { green: true, summary: '' }, findings: [] })
+const pass = sha => ({ verdict: 'pass', sections: 's', sha, tests: 't', gate: { command: 'npm test', green: true, summary: '' }, findings: [] })
 const M = { id: 'v1-F1', severity: 'major', kind: 'bug', where: 'a:1', issue: 'x' }
 function mock(sc = {}) {
   const prompts = {}
@@ -16,7 +16,7 @@ function mock(sc = {}) {
     prompts[L] = p
     if (L.endsWith('implement')) return { ...push, sha: SHA(1) }
     if (/review c\d/.test(L)) return { headSha: (p.match(/\.\.\.([0-9a-f]{40})/) || [])[1], findings: [] }
-    if (/validate c\d/.test(L)) { vals++; const h = (p.match(/([0-9a-f]{40})(?: on |\. The review)/) || [])[1]; return { headSha: h, gate: { green: true, summary: '' }, verified: vals > 1 ? ['v1-F1'] : [], open: vals === 1 && sc.cleanValMajor ? [M] : [] } }
+    if (/validate c\d/.test(L)) { vals++; const h = (p.match(/([0-9a-f]{40})(?: on |\. The review)/) || [])[1]; return { headSha: h, gate: { command: 'npm test', green: true, summary: '' }, verified: vals > 1 ? ['v1-F1'] : [], open: vals === 1 && sc.cleanValMajor ? [M] : [] } }
     if (/fix c\d/.test(L)) return { ...push, sha: SHA(2), answers: [{ id: 'v1-F1', action: 'fixed', note: 'n' }] }
     if (L.endsWith('merge')) return { ...push, sha: SHA(3) }
     if (L.endsWith(' review')) return { headSha: SHA(3), findings: [] }

@@ -5,7 +5,7 @@ const SHA = n => (n + '').padStart(40, 'a')
 const parallel = fs => Promise.all(fs.map(f => f().catch(() => null)))
 const free = { total: null, spent: () => 0, remaining: () => Infinity }
 const push = { status: 'done', ok: true, tests: 't', gateTail: 'exit 0', sharedEdits: [], decisions: [], questions: [], notes: [] }
-const pass = sha => ({ verdict: 'pass', sections: 's', sha, tests: 't', gate: { green: true, summary: '' }, findings: [] })
+const pass = sha => ({ verdict: 'pass', sections: 's', sha, tests: 't', gate: { command: 'npm test', green: true, summary: '' }, findings: [] })
 const CRIT = { id: 'c1-F1', severity: 'critical', kind: 'integration', where: 'ledger/discount.py:9', issue: "KeyError 'total' after merge" }
 const fails = []
 const t = async (name, fn) => { try { await fn() } catch (e) { fails.push(`${name}: ${e.message.split('\n')[0]}`) } }
@@ -22,7 +22,7 @@ function mock(sc = {}) {
     if (L.endsWith('implement')) { if (sc.waitFor?.[id]) await aMergedP; return { ...push, sha: SHA(id.length), sharedEdits: sc.implShared || [] } }
     if (/review c\d/.test(L)) return { headSha: (p.match(/\.\.\.([0-9a-f]{40})/) || [])[1], findings: sc.reviewCrit?.[id] && !fixed[id] ? [CRIT] : [] }
     if (/fix c\d/.test(L)) { fixed[id] = true; return { ...push, sha: SHA(20 + id.length), answers: [{ id: 'c1-F1', action: 'fixed', note: 'n' }], sharedEdits: sc.fixShared || [] } }
-    if (/validate c\d/.test(L)) { const h = (p.match(/([0-9a-f]{40})(?: on |\. The review)/) || [])[1]; return { headSha: h, gate: { green: true, summary: '' }, verified: ['c1-F1'], open: [] } }
+    if (/validate c\d/.test(L)) { const h = (p.match(/([0-9a-f]{40})(?: on |\. The review)/) || [])[1]; return { headSha: h, gate: { command: 'npm test', green: true, summary: '' }, verified: ['c1-F1'], open: [] } }
     if (L.endsWith('merge')) { if (id === 'alpha-discount') setTimeout(aMerged, 5); return { ...push, sha: SHA(50) } }
     if (L.endsWith(' review')) return { headSha: SHA(50), findings: [] }
     if (L.endsWith(' validate')) return pass(SHA(50))
