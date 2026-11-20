@@ -89,7 +89,7 @@ await t('2c a clean-review validator question does not block: the workstream mer
   assert(w.questions.some(x => x.q === q.q), 'workstream questions')
   assert(r.questions.some(x => x.q === `a: ${q.q}` && x.default === q.default), JSON.stringify(r.questions)) })
 await t('2d whole-branch validator and recheck questions reach repos[].questions and the top level; so do fixer escalations', async () => {
-  const qv = Q('V says reverse c1-F1?'), qr = Q('R says?'), qf = Q('fixer: the brief clause conflicts'), qw = Q('wb fixer: conflict'), qd = Q('delta validator: the brief premise is false')
+  const qv = Q('V says reverse c1-F1?'), qr = Q('R says?'), qf = Q('c1-F1: fixer: the brief clause conflicts'), qw = Q('V-F2: wb fixer: conflict'), qd = Q('delta validator: the brief premise is false')
   const { r } = await go(one, {
     'a review c1': () => ({ findings: [F('c1-F1')] }),
     'a fix c1': () => ({ answers: [{ id: 'c1-F1', action: 'escalated', note: 'brief conflict' }], questions: [qf] }),
@@ -143,7 +143,7 @@ await t('5b whole-branch: a recheck-verified escalation with no fixer question g
   assert(x.questions.some(q => q.q.startsWith('V-F1')), JSON.stringify(x.questions))
   assert(r.questions.some(q => q.q.startsWith('one: V-F1')), JSON.stringify(r.questions)) })
 await t('5c an escalation that came with its own question gets no second one, and only the plain fix counts', async () => {
-  const qf = Q('keep the helper call or change the brief?')
+  const qf = Q('c1-F1: keep the helper call or change the brief?')
   const { r } = await go(one, { 'a review c1': () => ({ findings: [F('c1-F1'), F('c1-F2')] }), 'a fix c1': () => ({ answers: [{ id: 'c1-F1', action: 'escalated', note: 'n' }, { id: 'c1-F2', action: 'fixed', note: 'n' }], questions: [qf] }), 'a validate c1': () => ({ verified: ['c1-F1', 'c1-F2'] }) })
   assert.deepEqual(r.questions.map(q => q.q), [`a: ${qf.q}`])
   assert.equal(r.workstreams[0].findingsFixed, 1) })

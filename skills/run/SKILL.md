@@ -98,9 +98,10 @@ contradicts the repo, leaves the code, answers it `escalated` (status stays
 `done`, not `blocked`) and returns a question with both options (default: keep
 the current behaviour and tests). The next validator accepts that answer when
 no fix keeps every clause. An accepted escalation never counts in
-`findingsFixed`, and its ledger entry stays `open`. If the fixer returned no
-question, the script writes one from the finding and the fixer's note, so it
-always reaches the user. Only a contradiction between the brief and the repo
+`findingsFixed`, and its ledger entry stays `open`. Fixers start each
+escalation question with the finding id; for every accepted escalation that no
+fixer question names, the script writes one from the finding and the fixer's
+note, so each one reaches the user. Only a contradiction between the brief and the repo
 itself (a premise the history disproves, or two clauses that cannot both hold)
 goes straight into a validator's own `questions` (both workstream validators,
 the whole-branch validator, each recheck). The fix validator sees the findings
