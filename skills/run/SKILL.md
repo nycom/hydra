@@ -310,9 +310,9 @@ says NOT merged; unpromoted side branches). Then:
   plus each `stage: "wholeBranch"` re-run), the run args, the feature-branch
   SHAs you already verified, `<skill dir>/retro.md` and, optionally, each launch
   result's `<Transcript dir>/journal.jsonl` (per-agent label, phase and result;
-  a `started` with no `result` is a dead agent). Tokens are not in the journal:
-  cost comes from `node <skill dir>/tests/fixture/cost.mjs <Transcript dir>`;
-  never read the transcripts. A Workflow call that threw gets its error text,
+  an agent with a `failed` row died, one `started` with no `result` or `failed`
+  row never finished). Tokens are not in the journal: run cost comes from
+  `node <skill dir>/cost.mjs <Transcript dir>`; never read the transcripts. A Workflow call that threw gets its error text,
   the results that exist and that journal; a `resumeFromRunId` recovery gets
   its one retro after it returns. It returns retro.md filled in; you save it.
   Eval runs (fixture repos) → `evals/retros/<run id>.md`, the id of its

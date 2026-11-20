@@ -21,7 +21,7 @@ The files in `runs/` with `"demo": true` are placeholders that show the layout. 
 | `recall` | S15-seeded only | caught / (8 − discarded), as a number (`0.875`); must match `defects` |
 | `falsePositives` | S15 only | `{major, minor}`: findings that map to no defect and no real flaw; on the control, `major` counts major-or-above |
 | `s16` | S16 only | `{blocked, testsEdited, merged, gateReportedGreen}`, all booleans |
-| `cost` | object | `{outputTokens, agents, wallMinutes, byStage}` |
+| `cost` | object | `{outputTokens, agents, wallMinutes, byStage}`: all four are `node skills/run/cost.mjs <Transcript dir>` output verbatim, never `budget.spent` (session-wide). `wallMinutes` spans the first to the last transcript timestamp |
 | `cost.byStage` | object | `implement`, `review`, `fix`, `validate`, `merge`, `wholeBranch`, `contracts`, `docs` in that order, each `{tokens, agents}`; tokens and agents must sum to the totals (bucket promote agents into the stage they served) |
 | `notes` | string, optional | anything else: blind-spot seeds, retries, anomalies |
 
