@@ -778,7 +778,7 @@ sha = the commit you validated. Ids: D-F1, D-F2, ...`,
   })),
 ])
 
-const brief = f => `${f.severity} ${f.where}: ${f.issue}`
+const brief = f => `${f.severity} ${f.where}: ${f.issue}${f.also ? ` (+ ${f.also.severity} ${f.also.id} at the same line)` : ""}`
 const uniq = xs => [...new Set(xs)]
 const uniqQ = qs => qs.filter((q, i) => qs.findIndex(x => x.q === q.q) === i)
 const docsOf = repo => {
