@@ -81,10 +81,24 @@ s17bad(r => { r.reason = 'recall 4/4, 5 primed'; r.verdict = 'void' }, /primed c
 s17bad(r => { r.defects.W3 = caught('validator') }, /W3 can only be caught by test-guard or reviewer/)
 s17bad(r => { r.defects.W1 = caught('contract') }, /W1: a caught defect needs stage \(reviewer \| validator \| test-guard\)/)
 s17bad(r => { r.defects = allCaught() }, /exactly W1..W4/)
+const control = entries.find(e => e.run.scenario === 'S15-control').run
 const ctrl17 = variant(seeded, r => { r.scenario = 'S17-control'; delete r.defects; delete r.recall; r.falsePositives = { major: 1, minor: 0 }; r.verdict = 'fail' })
 validate(ctrl17, 'x.json')
 assert.equal(passBar(variant(ctrl17, r => { r.falsePositives.major = 0 })), 'pass')
 assert.equal(headline(ctrl17), '1 major / 0 minor false positives')
+// onBrief: the S17-control merged head kept the brief's hard clauses (ws-outcome.sh); required from 0.3.7, optional before
+const ctrl37 = variant(ctrl17, r => { r.hydraVersion = '0.3.7'; r.falsePositives.major = 0; r.onBrief = true; r.verdict = 'pass' })
+validate(ctrl37, 'x.json')
+assert.equal(passBar(ctrl37), 'pass')
+bad(r => { delete r.onBrief }, /onBrief must be a boolean/, ctrl37)
+bad(r => { r.onBrief = 'yes' }, /onBrief must be a boolean/, ctrl37)
+bad(r => { r.onBrief = false }, /verdict must be fail/, ctrl37)
+const offBrief = variant(ctrl37, r => { r.onBrief = false; r.verdict = 'fail' })
+validate(offBrief, 'x.json')
+assert.equal(headline(offBrief), '0 major / 0 minor false positives, merged head off-brief')
+validate(variant(ctrl17, r => { r.onBrief = false }), 'x.json') // 0.3.6 may record it; a false one still fails
+assert.equal(passBar(variant(ctrl17, r => { r.falsePositives.major = 0; r.onBrief = false })), 'fail')
+bad(r => { r.onBrief = true }, /onBrief is S17-control only/, control)
 const seeded17 = variant(seeded, r => { r.scenario = 'S17-seeded'; r.defects = ws(); r.defects.W2 = missed; r.recall = 3 / 4 })
 assert.equal(headline(seeded17), 'recall 3/4 (missed W2)')
 assert.equal(cellState(seeded17, undefined), 'absent', 'an older run has no row for a newer seed')
@@ -101,7 +115,6 @@ bad(r => { r.cost.byStage.review.tokens += 1 }, /sum to outputTokens/)
 bad(r => { r.verdict = 'void' }, /verdict must be (pass|fail) \(the scenario/, s16)
 
 // a seed that never reached a scored stage voids an S15 run, whatever the defects say
-const control = entries.find(e => e.run.scenario === 'S15-control').run
 const skipped = 'alpha whole-branch pass skipped'
 good(r => { r.defects = allCaught(); r.recall = 1; r.voidReason = skipped; r.verdict = 'void' }, 'void')
 assert.equal(passBar(variant(control, r => { r.voidReason = skipped; r.verdict = 'void' })), 'void')
@@ -192,6 +205,8 @@ const head3 = readmeBlock([liveRun(voidCtrl)]).split('\n')[1]
 assert.ok(head3.includes(`S15-control ${voidCtrl.hydraVersion} void (${skipped})`), head3)
 const head4 = readmeBlock([liveRun({ ...ctrl17, id: 'c17' }), liveRun({ ...seeded17, id: 's17', verdict: 'pass' })]).split('\n')[1]
 assert.ok(head4.includes(`S17-seeded ${seeded.hydraVersion} pass (recall 3/4)`) && head4.includes(`S17-control ${seeded.hydraVersion} fail (1 major false positives)`), head4)
+const head5 = readmeBlock([liveRun({ ...offBrief, id: 'o17' })]).split('\n')[1]
+assert.ok(head5.includes('S17-control 0.3.7 fail (0 major false positives, merged head off-brief)'), head5)
 assert.equal(readmeBlock([liveRun(voidCtrl)]).split("\n")[3], "One run per scenario on a small fixture; limits in evals/retros/.")
 
 // ---- block placement: inserted under the first line once, replaced in place after ----
