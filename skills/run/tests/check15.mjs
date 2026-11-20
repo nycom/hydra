@@ -289,6 +289,27 @@ await t('6i a crash while holding releases the held merges instead of hanging th
 await t('6j a paused repo holds the cross-repo contract check too', async () => {
   const { r, order } = await go({ cycles: 1, workstreams: [ws('a', { humanCheck: CHECK }), ws('c', { repo: '/r/two' })] }, {})
   assert(r.repos.find(x => x.repo === '/r/two').verdict === 'pass' && !order.includes('contracts') && r.crossRepo === null, order.join()) })
+await t('6k a fix that leaves no new commit re-merges on the same sha: the user is asked again, the spent answer is not reused', async () => {
+  const sc = { ...dirtyB, 'a fix c2': () => ({ sha: SHA(1), answers: [{ id: 'H1-F1', action: 'answered', note: 'cannot reproduce' }] }), 'a validate c2': () => ({ verified: ['H1-F1'] }) }
+  const S1 = await pausedAt(undefined, sc)
+  const same1 = { ...sc, 'a merge': (p, n) => n === 2 ? { sha: S1 } : {} } // "Already up to date": the re-merge reports the old tip
+  const { r, all } = await go(human({ a: A(S1, 'the button is grey') }), same1)
+  assert.equal(all['a merge'].length, 2, 'one re-merge, no loop')
+  assert(!r.workstreams[0].findings.some(e => e.id === 'H2-F1'), 'the spent answer was not applied again')
+  const h = r.humanCheck?.[0]
+  assert(h && h.sha === S1 && h.round === 2 && h.answer.includes(`[{"sha":"${S1}","answer":"the button is grey"},{"sha":"${S1}","answer":"<ok, or the problem in words>"}]`), JSON.stringify(r.humanCheck))
+  const { r: done } = await go(human({ a: [A(S1, 'the button is grey'), A(S1, 'ok')] }), same1)
+  assert(!('humanCheck' in done) && done.workstreams.every(w => w.merged) && done.repos[0].verdict === 'pass', JSON.stringify(done.repos[0].escalations)) })
+await t('6l an answer that only starts with ok is a problem', async () => {
+  const S1 = await pausedAt(undefined, heldB)
+  const { all } = await go(human({ a: A(S1, 'ok but the button is grey') }), heldB)
+  assert(Object.keys(all).some(L => /^a fix c/.test(L) && all[L][0].includes('reports: ok but the button is grey')), Object.keys(all).join()) })
+await t('6m a merge that never reports a usable sha says it may have landed', async () => {
+  const { r } = await go(human(), { ...dirtyB, 'a merge': () => ({ sha: '' }) })
+  const a = r.workstreams.find(w => w.id === 'a')
+  assert(!a.merged && a.escalations.some(e => /may have landed: check the head of origin\/f before re-running/.test(e)), JSON.stringify(a.escalations))
+  const { r: plain } = await go({ cycles: 1, workstreams: [ws('a')] }, { 'a merge': () => null })
+  assert(plain.workstreams[0].escalations.some(e => /^merge agent died 3 times; check origin\/f for an unvalidated push/.test(e)), '(control) unchanged when nobody reads the sha') })
 await t('6g humanCheck and humanChecks are validated; (control) none set returns no humanCheck', async () => {
   await throwsOn({ workstreams: [ws('a', { humanCheck: ' ' })] }, /humanCheck must be non-empty instructions/)
   await throwsOn({ workstreams: [ws('a')], humanChecks: { a: A(SHA(1), 'ok') } }, /humanChecks\.a: no workstream a with a humanCheck/)

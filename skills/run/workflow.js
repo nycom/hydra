@@ -663,14 +663,15 @@ Push to ${w.featureBranch} (plain push; if rejected, fetch and redo every step o
       return m
     }))?.wait) await merge.wait
     if (merge?.held) return stop(merge.held)
-    if (!merge) return stop(`merge agent died 3 times; check ${O}/${w.featureBranch} for an unvalidated push`)
+    if (!merge) return stop(readsMergeSha ? `merge returned no usable result 3 times (died or malformed sha); it may have landed: check the head of ${O}/${w.featureBranch} before re-running` : `merge agent died 3 times; check ${O}/${w.featureBranch} for an unvalidated push`)
     out.notes.push(...merge.notes)
     const landed = merge.ok && merge.status === 'done'
     out.merged ||= landed
     if (landed) {
       Object.assign(out, { preMergeSha: merge.preMergeSha || '', baseAtMerge: merge.baseAtMerge || '' })
       if (!w.humanCheck) break
-      const n = ++humanRound, said = [].concat(HUMAN[w.id] ?? []).find(x => same(x.sha, merge.sha))?.answer
+      // answers are consumed in order: a re-merge on the same sha (a fix with no new commit) is asked again, never given a spent answer
+      const n = ++humanRound, next = [].concat(HUMAN[w.id] ?? [])[told.length], said = next && same(next.sha, merge.sha) ? next.answer : undefined
       if (said == null) {
         const ask = JSON.stringify([...told, { sha: merge.sha, answer: '<ok, or the problem in words>' }])
         humanPending.push({ id: w.id, repo: w.repo, featureBranch: w.featureBranch, sha: merge.sha, check: w.humanCheck, round: n, answer: `re-run with the same args, resumeFromRunId = this run, and humanChecks.${w.id} = ${ask}` })

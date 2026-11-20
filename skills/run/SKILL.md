@@ -368,6 +368,9 @@ it just pauses again on the new sha. A problem becomes a critical
 (`H<round>-F1`, stage `human`) for that workstream's fix path: fix, delta
 validation, a second merge (with its own shared-edits check, ids
 `S-<id>-m2-…`), and a new check on the new sha, with later merges still held.
+Answers are used in order, one per check: a fix that leaves no new commit
+(answered or declined, the re-merge "Already up to date") lands on the same
+sha, and the user is asked again about it; the spent answer is never reused.
 If its fix never merges (cap, budget, crash), the held merges and the
 whole-branch pass stay stopped and the escalation says so.
 
