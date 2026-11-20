@@ -73,6 +73,11 @@ s17(r => { r.defects.W3 = caught('reviewer') }, 'pass')
 s17(r => { r.voidReason = 'the author blocked'; r.verdict = 'void' }, 'void')
 s17(r => { r.defects.W1 = discarded; r.defects.W2 = discarded; r.verdict = 'void' }, 'void') // under 3 kept seeds measures nothing
 s17(r => { r.defects.W1 = discarded; r.verdict = 'pass' }, 'pass')
+s17(r => { r.reason = 'recall 4/4, 1 primed' }, 'pass')
+s17(r => { r.reason = 'recall 4/4, 2 primed'; r.verdict = 'void' }, 'void') // under 3 unprimed catches: reviewer not measured
+s17(r => { r.defects.W1 = missed; r.recall = 3 / 4; r.reason = 'recall 3/4, 1 primed'; r.verdict = 'pass' }, 'pass')
+s17(r => { r.defects.W1 = missed; r.defects.W2 = missed; r.recall = 2 / 4; r.reason = 'recall 2/4, 2 primed'; r.verdict = 'void' }, 'void')
+s17bad(r => { r.reason = 'recall 4/4, 5 primed'; r.verdict = 'void' }, /primed count/)
 s17bad(r => { r.defects.W3 = caught('validator') }, /W3 can only be caught by test-guard or reviewer/)
 s17bad(r => { r.defects.W1 = caught('contract') }, /W1: a caught defect needs stage \(reviewer \| validator \| test-guard\)/)
 s17bad(r => { r.defects = allCaught() }, /exactly W1..W4/)
