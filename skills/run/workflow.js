@@ -294,7 +294,7 @@ async function promote(repo, branch, from, to, sides, label, phase) {
     `Promote a validated commit in ${repo}: fast-forward ${branch} from ${from} to ${to}.
 1. git -C ${repo} fetch origin. If ls-remote already shows ${to}, an earlier attempt pushed it: go to step 3. Otherwise git -C ${repo} ls-remote origin refs/heads/${branch} must equal ${from}, and git -C ${repo} merge-base --is-ancestor ${from} ${to} must succeed. Otherwise push nothing: ok=false, the reason in notes.
 2. git -C ${repo} push origin ${to}:refs/heads/${branch} (plain push, never --force; a rejected push is ok=false), then verify git ls-remote shows ${to}.
-3. Only after a verified push: git -C ${repo} push origin --delete ${sides.join(' ')}.
+3. Only after a verified push: git -C ${repo} push origin --delete ${sides.join(' ')} (a side branch that is already gone is fine).
 No worktree, no checkout, no commits; never touch the user's checkout of ${repo}. ${HARD}
 Return ok, the remote sha of ${branch} and notes.`,
     { label, phase, model: 'sonnet', effort: 'low', schema: PROMOTED })
