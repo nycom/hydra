@@ -88,7 +88,7 @@ function previousOf(runs, r) {
 // one whole run, never stitched: the newest of those that ran the most stages
 function pickPipelineRun(runs) {
   const ran = r => Object.values(r.cost.byStage).filter(s => s.agents > 0).length
-  return [...runs].sort((a, b) => ran(a) - ran(b) || a.date.localeCompare(b.date) || a.id.localeCompare(b.id)).pop()
+  return [...runs].sort((a, b) => (a.verdict !== 'void') - (b.verdict !== 'void') || ran(a) - ran(b) || vcmp(a.hydraVersion, b.hydraVersion) || a.cost.agents - b.cost.agents || a.id.localeCompare(b.id)).pop()
 }
 export { passBar, latestPerScenario, previousOf, pickPipelineRun, headline, cellState, voidTile, cellTip, recallDelta }
 
@@ -471,7 +471,7 @@ function client(D) {
 
   function pipeline(r) {
     const sec = $('pipeline'), el = sec.querySelector('.chart')
-    sec.querySelector('.sub').textContent = r ? `Per-stage output tokens from one run: ${runLabel(r)}, the newest run in the filter that ran the most stages. Bar = share of its ${fmt(r.cost.outputTokens)} tokens.` : 'No runs in this filter.'
+    sec.querySelector('.sub').textContent = r ? `Per-stage output tokens from one run: ${runLabel(r)}, the scored run in the filter that ran the most stages (newest version, then most agents, on a tie). Bar = share of its ${fmt(r.cost.outputTokens)} tokens.` : 'No runs in this filter.'
     if (!r) { table(sec, [], []); return }
     const BW = 200, BH = 112, GX = 40, X = i => 2 + i * (BW + GX), R1 = 44, R2 = 250
     const W = X(3) + BW + 2, s = svg(el, W, R2 + BH + 4)
