@@ -6,7 +6,8 @@ import os from 'node:os'
 import assert from 'node:assert'
 import { ROOT, loadRuns, validate, buildHtml, readmeBlock, snapshotFiles, shaFile, withBlock, blockOf,
   passBar, latestPerScenario, previousOf, pickPipelineRun, headline, cellState, voidTile, cellTip, recallDelta,
-  runScore, combined, combinedAsOf, priorCombined, combinedDelta, versionSteps } from './report.mjs'
+  runScore, combined, combinedAsOf, priorCombined, combinedDelta, versionSteps,
+  cellStatus, runOf, matrixCell, scenarioDelta, change, normCost, normMean, versionKpis, kpiDelta, scenarioVersions, defaultPair, compareRows, runFields } from './report.mjs'
 
 const read = f => fs.readFileSync(path.join(ROOT, f), 'utf8')
 const entries = loadRuns()
@@ -226,6 +227,100 @@ assert.equal(combinedDelta({ score: 90, n: 5 }, null), null)
 assert.equal(combinedDelta(null, null), null)
 assert.equal(priorCombined([runAt(seeded, 'v', '0.3.1', '2026-11-19', r => { r.voidReason = skipped; r.verdict = 'void' }), cF1]), null, 'void-only older versions have no score')
 
+// ---- version scorecard: one cell per scenario and version, in the scenario's own unit ----
+const real = entries.map(e => e.run), byId = id => real.find(r => r.id === id)
+const s15s5 = byId('2026-11-20-s15-seeded-v0.3.5'), s15s3 = byId('2026-11-20-s15-seeded-v0.3.3'), s17s6 = byId('2026-11-20-s17-seeded-v0.3.6'), s17s5 = byId('2026-11-20-s17-seeded-v0.3.5')
+const s15c3 = byId('2026-11-20-s15-control-v0.3.3'), s15c5 = byId('2026-11-20-s15-control-v0.3.5'), s16a = byId('2026-11-20-s16-v0.3.1'), s16b = byId('2026-11-20-s16-v0.3.3')
+const partial = variant(seeded, r => { r.defects = allCaught(); r.defects.D2 = missed; r.recall = 7 / 8 })
+assert.deepEqual([s15s5, s17s6, s17s5, control, ctrl17, s16, testsDefault, partial].map(cellStatus), ['pass', 'fail', 'void', 'pass', 'fail', 'pass', 'fail', 'partial'], 'partial = a seeded pass that missed a kept seed')
+assert.deepEqual(matrixCell(s15s5), { text: '10/10', status: 'pass' })
+assert.deepEqual(matrixCell(s17s6), { text: '2/4', status: 'fail' })
+assert.deepEqual(matrixCell(s17s5), { text: 'void', status: 'void' }, 'a void run never shows a number')
+assert.deepEqual(matrixCell(partial), { text: '7/8', status: 'partial' })
+assert.deepEqual(matrixCell(control), { text: '0 FP', status: 'pass' })
+assert.deepEqual(matrixCell(ctrl17), { text: '1 major FP', status: 'fail' })
+assert.deepEqual(matrixCell(offBrief), { text: '0 FP, off-brief', status: 'fail' })
+assert.deepEqual(matrixCell(s16), { text: 'pass', status: 'pass' })
+assert.deepEqual(matrixCell(testsDefault), { text: 'fail', status: 'fail' })
+assert.deepEqual(matrixCell(undefined), { text: '–', status: 'absent' })
+assert.equal(runOf(real, 'S15-seeded', '0.3.3').id, s15s3.id)
+assert.equal(runOf(real, 'S17-seeded', '0.3.3'), undefined)
+assert.equal(runOf([old, runAt(old, 'o2', '0.3.0', '2026-11-12')], 'S15-seeded', '0.3.0').id, 'o2', 'the newest run at that version')
+// the delta column: the scenario's newest run against previousOf, in the scenario's unit
+assert.deepEqual(scenarioDelta(s15s5, previousOf(real, s15s5)), { text: '= 0 pts vs 0.3.3', cls: '' }, 'recall on the seeds both runs hold')
+assert.deepEqual(scenarioDelta(variant(seeded, r => { r.defects.D1 = missed; r.recall = 7 / 8; r.hydraVersion = '0.3.9' }), seeded), { text: `▼ -12.5 pts vs ${seeded.hydraVersion}`, cls: 'bad' })
+assert.deepEqual(scenarioDelta(variant(ctrl17, r => { r.hydraVersion = '0.3.9' }), variant(ctrl17, r => { r.falsePositives.major = 0 })), { text: `▲ +1 major FP vs ${ctrl17.hydraVersion}`, cls: 'bad' })
+assert.deepEqual(scenarioDelta(s16b, s16a), { text: 'fail → pass vs 0.3.1', cls: 'good' })
+assert.deepEqual(scenarioDelta(s16b, s16), { text: `= pass vs ${s16.hydraVersion}`, cls: '' })
+assert.deepEqual(scenarioDelta(s17s6, previousOf(real, s17s6)), { text: '–', cls: '' }, 'no earlier scored run: the 0.3.5 S17-seeded run is void')
+assert.deepEqual(scenarioDelta(voidSeeded, seeded), { text: 'void', cls: '' })
+
+// ---- signed change: cost up is bad, quality up is good ----
+assert.deepEqual(change(110, 100, -1, '%'), { text: '▲ +10%', cls: 'bad' })
+assert.deepEqual(change(90, 100, -1, '%'), { text: '▼ -10%', cls: 'good' })
+assert.deepEqual(change(100, 100, 1, ' pts'), { text: '= 0 pts', cls: '' })
+assert.deepEqual(change(7.3, 4.7, -1), { text: '▲ +2.6', cls: 'bad' })
+assert.deepEqual(change(85.7, 100, 1, ' pts'), { text: '▼ -14.3 pts', cls: 'bad' })
+assert.equal(change(null, 5, 1), null)
+assert.equal(change(5, 0, -1, '%'), null, 'a ratio needs a non-zero base')
+
+// ---- normalized cost ----
+assert.deepEqual(normCost(s15s5), { outputTokens: 54242, contextTokens: 3158994, agents: 20, wallMinutes: 8, perAgent: 2712, ctxPerAgent: 157950, minPerAgent: 0.4, perKept: 5424, perCaught: 5424 })
+assert.deepEqual(normCost(s17s6), { outputTokens: 37576, contextTokens: 2028528, agents: 11, wallMinutes: 7.3, perAgent: 3416, ctxPerAgent: 184412, minPerAgent: 0.66, perKept: 9394, perCaught: 18788 })
+assert.deepEqual(normCost(s16a), { outputTokens: 1375, contextTokens: null, agents: 1, wallMinutes: 0.3, perAgent: 1375, ctxPerAgent: null, minPerAgent: 0.3, perKept: null, perCaught: null }, 'controls and S16: per run and per agent only; no context recorded = null')
+assert.equal(normCost(s17s5).perKept, null, 'a void run measured no seeds')
+assert.equal(normCost(variant(seeded17, r => { r.defects.W1 = missed; r.defects.W2 = missed; r.defects.W4 = missed; r.defects.W3 = missed; r.recall = 0 })).perCaught, null, 'no catch, no per-catch cost')
+assert.deepEqual(normMean([s15s5, s17s6, s17s5], 'perAgent'), { value: 3064, n: 2 }, 'void runs are left out of normalized means')
+assert.deepEqual(normMean([s16a, s15s5], 'contextTokens'), { value: 3158994, n: 1 }, 'runs without the field are left out')
+assert.equal(normMean([s16a], 'contextTokens'), null)
+assert.equal(normMean([], 'perAgent'), null)
+
+// ---- the KPI row: each version's suite as of that version (newest scored run per scenario so far) ----
+const kpis = versionKpis(real)
+assert.deepEqual(kpis.map(k => k.version), ['0.3.1', '0.3.2', '0.3.3', '0.3.5', '0.3.6'])
+assert.deepEqual(kpis.map(k => k.combined), [{ value: 0, n: 1 }, { value: 0, n: 1 }, { value: 100, n: 3 }, { value: 100, n: 4 }, { value: 90, n: 5 }])
+assert.deepEqual(kpis.map(k => k.recall), [null, null, { value: 100, caught: 8, kept: 8, n: 1 }, { value: 100, caught: 10, kept: 10, n: 1 }, { value: 85.7, caught: 12, kept: 14, n: 2 }], 'pooled over the seeded scenarios')
+assert.deepEqual(kpis.map(k => k.majorFP), [null, null, { value: 0, n: 1 }, { value: 0, n: 2 }, { value: 0, n: 2 }], 'summed over the controls')
+assert.deepEqual(kpis.map(k => k.outputTokens), [{ value: 1375, n: 1 }, { value: 1375, n: 1 }, { value: 31131.33, n: 3 }, { value: 26853.5, n: 4 }, { value: 31192.6, n: 5 }])
+assert.deepEqual(kpis.map(k => k.contextTokens), [null, null, null, { value: 1723650, n: 4 }, { value: 1868186, n: 5 }])
+assert.deepEqual(kpis.map(k => k.voids), [0, 1, 0, 1, 0], 'void runs at that version')
+assert.equal(kpis.at(-1).combined.value, combined(real).score, 'the KPI row ends on the header score')
+assert.deepEqual(versionKpis([]), [])
+// a KPI change is only a change over the same scenario count
+assert.deepEqual(kpiDelta(kpis[4].recall, kpis[3].recall, 1, ' pts'), { text: 'before: 100 over 1 scenario', cls: '' })
+assert.deepEqual(kpiDelta(kpis[4].contextTokens, kpis[3].contextTokens, -1, '%', String), { text: 'before: 1723650 over 4 scenarios', cls: '' })
+assert.deepEqual(kpiDelta(kpis[4].majorFP, kpis[3].majorFP, -1), { text: '= 0', cls: '' })
+assert.deepEqual(kpiDelta({ value: 110, n: 2 }, { value: 100, n: 2 }, -1, '%'), { text: '▲ +10%', cls: 'bad' })
+assert.equal(kpiDelta(kpis[2].recall, kpis[1].recall, 1), null)
+
+// ---- run vs run: the scenario's newest version against the version before it ----
+assert.deepEqual(scenarioVersions(real, 'S15-seeded'), ['0.3.2', '0.3.3', '0.3.5'])
+assert.deepEqual(defaultPair(real, 'S15-seeded'), { base: '0.3.3', compare: '0.3.5' })
+assert.deepEqual(defaultPair(real, 'S17-seeded'), { base: '0.3.5', compare: '0.3.6' }, 'a void base still compares cost')
+assert.deepEqual(defaultPair(real, 'S16'), { base: '0.3.3', compare: '0.3.5' })
+assert.deepEqual(defaultPair([old], 'S15-seeded'), { base: '0.3.0', compare: '0.3.0' }, 'one version: compared with itself')
+assert.equal(defaultPair(real, 'S18'), null)
+const rows = Object.fromEntries(compareRows(s15c3, s15c5).map(r => [r.label, r]))
+assert.deepEqual(Object.keys(rows), ['Score', 'Major false positives', 'Output tokens', 'Context tokens', 'Agents', 'Wall minutes', 'Tokens per agent', 'Context per agent', 'Minutes per agent'])
+assert.deepEqual(rows['Score'], { label: 'Score', base: '100', compare: '100', delta: { text: '= 0 pts', cls: '' } })
+assert.deepEqual(rows['Output tokens'], { label: 'Output tokens', base: '37.5K', compare: '39.4K', delta: { text: '▲ +5%', cls: 'bad' } })
+assert.deepEqual(rows['Context tokens'], { label: 'Context tokens', base: '–', compare: '2.74M', delta: null }, 'no context recorded on 0.3.3')
+assert.deepEqual(rows['Agents'].delta, { text: '▲ +2', cls: 'bad' })
+assert.deepEqual(rows['Tokens per agent'], { label: 'Tokens per agent', base: '2,206', compare: '2,072', delta: { text: '▼ -6%', cls: 'good' } })
+const srows = Object.fromEntries(compareRows(s17s5, s17s6).map(r => [r.label, r]))
+assert.deepEqual(Object.keys(srows), ['Score', 'Recall', 'Output tokens', 'Context tokens', 'Agents', 'Wall minutes', 'Tokens per kept seed', 'Tokens per caught seed', 'Tokens per agent', 'Context per agent', 'Minutes per agent'])
+assert.deepEqual(srows['Score'], { label: 'Score', base: 'void', compare: '50', delta: null }, 'a void run has no score to compare')
+assert.deepEqual(srows['Recall'], { label: 'Recall', base: 'void', compare: '2/4', delta: null })
+assert.deepEqual(srows['Tokens per kept seed'], { label: 'Tokens per kept seed', base: 'void', compare: '9,394', delta: null })
+assert.deepEqual(compareRows(s15s3, s15s5).find(r => r.label === 'Recall'), { label: 'Recall', base: '8/8', compare: '10/10', delta: { text: '= 0 pts', cls: '' } }, 'recall change on the shared seeds')
+// every field of a run, for the trend hover
+const fields = runFields(s17s6)
+assert.deepEqual(fields[0], [s17s6.id])
+for (const l of ['version', 'date', 'verdict', 'reason', 'score', 'seeds', 'false positives', 'output tokens', 'context tokens', 'agents', 'wall minutes', 'per kept seed', 'per caught seed', 'per agent'])
+  assert.ok(fields.some(f => f[1] === l), `runFields lacks ${l}`)
+assert.deepEqual(fields.find(f => f[1] === 'seeds'), ['2/4 caught', 'seeds'])
+assert.ok(!runFields(s16a).some(f => f[1] === 'context tokens' || f[1] === 'false positives' || f[1] === 'seeds'), 'only the fields a run has')
+
 // ---- README block ----
 assert.equal(readmeBlock(entries.map(e => ({ ...e, run: { ...e.run, demo: true } }))),
   '<!-- eval:start -->\nEval results land with the first live S15/S16 run — see [evals/](evals/).\n<!-- eval:end -->')
@@ -238,6 +333,10 @@ assert.ok(at('evals/png/scorecard.png') < at('evals/png/heatmap.png'))
 assert.ok(at('evals/png/heatmap.png') < at('<details><summary>More charts</summary>'))
 assert.ok(at('<details><summary>More charts</summary>') < at('evals/png/cost.png'))
 assert.ok(at('evals/png/pipeline.png') < at('</details>'))
+// progress first: the header, the progress chart, the scorecard, trends and run vs run, then the heatmap; cost and pipeline folded
+assert.ok(at('**Latest eval:**') < at('evals/png/summary.png') && at('evals/png/summary.png') < at('evals/png/progress.png'))
+assert.ok(at('evals/png/scorecard.png') < at('evals/png/trends.png') && at('evals/png/trends.png') < at('evals/png/compare.png') && at('evals/png/compare.png') < at('evals/png/heatmap.png'))
+assert.ok(at('evals/png/cost.png') < at('evals/png/pipeline.png'))
 at('open locally (GitHub shows source)')
 assert.ok(!/[0-9a-f]{64}/.test(live), 'README block carries no hash')
 
