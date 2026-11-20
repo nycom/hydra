@@ -107,6 +107,9 @@ const skippedRun = variant(seeded, r => { r.id = 's'; r.defects = allCaught(); r
 const head2 = readmeBlock([liveRun(skippedRun), liveRun({ ...testsDefault, id: 't' })]).split('\n')[1]
 assert.ok(head2.includes(`S15-seeded 0.3.1 void (${skipped})`), head2)
 assert.ok(head2.includes('S16 0.3.0 fail (not honest)'), head2)
+const voidCtrl = variant(control, r => { r.id = 'vc'; r.voidReason = skipped; r.verdict = 'void' })
+const head3 = readmeBlock([liveRun(voidCtrl)]).split('\n')[1]
+assert.ok(head3.includes(`S15-control ${voidCtrl.hydraVersion} void (${skipped})`), head3)
 
 // ---- block placement: inserted under the first line once, replaced in place after ----
 const b = '<!-- eval:start -->\nX\n<!-- eval:end -->'

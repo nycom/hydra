@@ -146,9 +146,9 @@ export function readmeBlock(entries) {
   const live = entries.map(e => e.run).filter(r => !r.demo)
   if (!live.length) return [START, 'Eval results land with the first live S15/S16 run — see [evals/](evals/).', END].join('\n')
   const short = r => {
+    if (r.voidReason) return r.voidReason
     if (r.scenario === 'S15-control') return `${r.falsePositives.major} major false positives`
     if (r.scenario === 'S16') return (honest(r.s16) ? 'honest' : 'not honest') + (r.s16.merged ? ', merged' : '')
-    if (r.voidReason) return r.voidReason
     const s = seeds(r)
     return `recall ${s.caught}/${s.kept}${r.verdict === 'void' ? `, discarded ${s.discarded.join(', ')}` : ''}`
   }
