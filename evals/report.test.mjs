@@ -7,7 +7,7 @@ import assert from 'node:assert'
 import { ROOT, loadRuns, validate, buildHtml, readmeBlock, snapshotFiles, shaFile, withBlock, blockOf,
   passBar, latestPerScenario, previousOf, pickPipelineRun, headline, cellState, voidTile, cellTip, recallDelta,
   runScore, combined, combinedAsOf, priorCombined, combinedDelta, versionSteps,
-  cellStatus, runOf, matrixCell, scenarioDelta, change, normCost, normMean, versionKpis, kpiDelta, scenarioVersions, defaultPair, compareRows, runFields, versionCost, sharedCostDelta } from './report.mjs'
+  cellStatus, runOf, matrixCell, scenarioDelta, change, normCost, normMean, versionKpis, kpiDelta, scenarioVersions, defaultPair, compareRows, runFields, versionCost, sharedCostDelta, voidTag } from './report.mjs'
 
 const read = f => fs.readFileSync(path.join(ROOT, f), 'utf8')
 const entries = loadRuns()
@@ -315,7 +315,12 @@ assert.deepEqual(Object.keys(srows), ['Score', 'Recall', 'Output tokens', 'Conte
 assert.deepEqual(srows['Score'], { label: 'Score', base: 'void', compare: '50', delta: null }, 'a void run has no score to compare')
 assert.deepEqual(srows['Recall'], { label: 'Recall', base: 'void', compare: '2/4', delta: null })
 assert.deepEqual(srows['Tokens per kept seed'], { label: 'Tokens per kept seed', base: 'void', compare: '9,394', delta: null })
-assert.deepEqual(srows['Output tokens'].delta, { text: '▲ +90% vs void run', cls: '' }, 'a cost change against a void run is tagged and not coloured')
+assert.deepEqual(srows['Output tokens'].delta, { text: '▲ +90% vs void', cls: '' }, 'a cost change against a void run is tagged and not coloured')
+// one rule for run vs run and the trend panels: a change with a void side is tagged, never coloured
+assert.deepEqual(voidTag(change(110, 100, -1, '%'), s17s5, s17s6), { text: '▲ +10% vs void', cls: '' })
+assert.deepEqual(voidTag(change(110, 100, -1, '%'), s17s6, s17s5), { text: '▲ +10% vs void', cls: '' })
+assert.deepEqual(voidTag(change(110, 100, -1, '%'), s15s3, s15s5), { text: '▲ +10%', cls: 'bad' })
+assert.equal(voidTag(null, s17s5, s17s6), null)
 assert.deepEqual(compareRows(seeded, ten).find(r => r.label === 'Score').delta, { text: '= 0 pts', cls: '' }, 'a seeded score change is the recall change on the shared seeds')
 assert.deepEqual(compareRows(s15s3, s15s5).find(r => r.label === 'Recall'), { label: 'Recall', base: '8/8', compare: '10/10', delta: { text: '= 0 pts', cls: '' } }, 'recall change on the shared seeds')
 // the scorecard cost row: the mean of per-run ratios over a version's scored runs; its change only over the scenarios both versions scored

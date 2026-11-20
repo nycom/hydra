@@ -58,7 +58,7 @@ rect.st-pass{fill:var(--t-pass)}rect.st-fail{fill:var(--t-fail)}rect.st-partial{
 .matrix th,.matrix td{padding:8px 10px;border-bottom:.5px solid var(--grid);white-space:nowrap}
 .matrix tbody th,.matrix thead th:first-child{position:sticky;left:0;background:var(--surface);z-index:1}.matrix thead th{text-align:center}.matrix thead th:first-child{text-align:left}
 .matrix td.cell{text-align:center;border-left:2px solid var(--surface);border-radius:6px;font-weight:600}
-.matrix td.delta{font-size:12px;color:var(--ink2)}
+.matrix td.delta{font-size:12px;color:var(--ink2)}.matrix td div:not(.pair){white-space:normal}
 .matrix tbody th{color:var(--ink);font-size:13px}.matrix tbody th>div:first-child,.matrix tbody th:not(.scn){display:flex;align-items:center;gap:6px}.matrix .vs{font-weight:400;color:var(--ink2);font-size:12px;margin-left:20px}
 .matrix tfoot th,.matrix tfoot td{font-weight:400;color:var(--ink2);font-size:12px;text-align:center;border-bottom:none}
 .matrix tfoot th{text-align:left}.matrix tfoot td.delta{white-space:normal;min-width:150px}.matrix tfoot b{color:var(--ink);font-size:13px;display:block}
@@ -248,13 +248,12 @@ function defaultPair(runs, scenario) {
   const v = scenarioVersions(runs, scenario), top = runOf(runs, scenario, v.at(-1))
   return v.length ? { base: (top && previousOf(runs, top)?.hydraVersion) ?? v.at(-2) ?? v.at(-1), compare: v.at(-1) } : null
 }
+function voidTag(d, a, b) { return d && (passBar(a) === 'void' || passBar(b) === 'void') ? { text: `${d.text} vs void`, cls: '' } : d }
 function compareRows(a, b) {
   const na = normCost(a), nb = normCost(b), va = passBar(a) === 'void', vb = passBar(b) === 'void'
   const row = (label, x, y, better, unit, f = String, q) => {
     const s = (v, isVoid) => q && isVoid ? 'void' : v == null ? '–' : f(v)
-    const d = q && (va || vb) ? null : change(y, x, better, unit)
-    // a cost change against a void run is real but not a like-for-like comparison: tagged, never coloured
-    return { label, base: s(x, va), compare: s(y, vb), delta: d && (va || vb) ? { text: `${d.text} vs void run`, cls: '' } : d }
+    return { label, base: s(x, va), compare: s(y, vb), delta: q && (va || vb) ? null : voidTag(change(y, x, better, unit), a, b) }
   }
   const sd = r => { const s = seeds(r); return `${s.caught}/${s.kept}` }, seeded = b.scenario.endsWith('-seeded'), ctl = b.scenario.endsWith('-control'), tok = v => fmt(Math.round(v))
   const recall = seeded && { label: 'Recall', base: va ? 'void' : sd(a), compare: vb ? 'void' : sd(b), delta: null }
@@ -594,7 +593,7 @@ function runFields(r) {
       // a void run is not on the value axis: quality rows mark it ⊘ at mid-row, never on the 0 baseline
       rs.forEach((r, i) => { if (vals[i] != null) mark(s, sc, X(i), Y(vals[i]), 4, isVoid(r)); else if (quality && isVoid(r)) t(s, X(i), y0 + RH / 2 + 4, '⊘', 'muted', 'middle') })
       const lv = vals.at(-1), pr = rs.at(-2), rd = seeded && !j && pr && !isVoid(lr) && !isVoid(pr) ? recallDelta(lr, pr) : null
-      const dl = rd !== null ? { text: `${arrow(rd)}${rd} pts`, cls: rd > 0 ? 'good' : rd < 0 ? 'bad' : '' } : rs.length > 1 ? change(lv, vals.at(-2), better, unit) : null
+      const dl = rd !== null ? { text: `${arrow(rd)}${rd} pts`, cls: rd > 0 ? 'good' : rd < 0 ? 'bad' : '' } : rs.length > 1 ? voidTag(change(lv, vals.at(-2), better, unit), lr, pr) : null
       t(s, W, y0 + 15, lv == null ? (quality && isVoid(lr) ? 'void' : '–') : f(lv), 'ink b', 'end')
       if (dl) t(s, W, y0 + 28, dl.text, `muted ${dl.cls}`, 'end')
     })
