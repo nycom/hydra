@@ -8,6 +8,8 @@ Seeded conditions:
 - `contract.yaml` and README are hot in alpha. Two alpha workstreams both need README changes, and one needs a contract change.
 - alpha-discount must return "the same shape as ledger.api.total". alpha-cents renames that field, so the drift only shows up once the two workstreams are integrated.
 - beta-cents depends on alpha-cents's contract change.
+- False green: alpha-discount's unit tests stub `ledger.api.total`, so its gate stays green on the drifted shape; alpha's `smoke` (or an alpha-discount `checks` entry) calls the real total endpoint and asserts `total_cents`.
+- No-commit fix: the alpha-discount brief leaves its rounding choice open, so the cycle-1 review is expected to raise a `question` the author can answer without changing code.
 
 | # | Scenario | Pass when |
 |---|----------|-----------|
@@ -23,3 +25,5 @@ Seeded conditions:
 | S10 | Hygiene | no co-authored-by / generated-with / claude / anthropic / `.claude/` in any commit message or file on feat/eval |
 | S11 | Convergence | no workstream ran past cycle 1 unless a critical/major was open; any extension is justified in the result |
 | S12 | Budget and result shape | the result reports budget use; it has the questions/notes split and per-workstream status |
+| S13 | False green is caught | the smoke or check exits non-zero through `run-cmd.mjs` while the gate is green; it is filed as critical and the workstream or repo ends fixed or not merged, never passed on the green gate alone |
+| S14 | No-commit fix round | the fixer answers the question with no new commit (returned sha = the prior head, ok:true, `ls-remote` unchanged); the validator's prompt says "No delta" and it judges the answer; the workstream merges that same SHA |

@@ -22,7 +22,8 @@ Expects `implementer`, `reviewer` and `validator` subagents in `~/.claude/agents
 ## Tests
 
 ```
-cd skills/run/tests && for f in check*.mjs; do node $f ../workflow.js; done
+(cd skills/run/tests && for f in check*.mjs; do node $f ../workflow.js; done)
+node skills/run/tests/run-cmd.test.mjs
 python3 skills/run/stale_sweep.py --self-test
 ```
 

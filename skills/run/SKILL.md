@@ -51,7 +51,10 @@ Implementation is never below Sonnet.
   them would touch; (2) boundary and coupling; (3) cross-repo contracts and the
   merge order they force (contract owner lands first, re-vendor + digest steps);
   (4) YAGNI — tasks or options nobody asked for; (5) facts read from a
-  sibling checkout instead of `git show origin/main:<path>`. Read-only: no edits,
+  sibling checkout instead of `git show origin/main:<path>`; (6) stacked runs
+  only: every slice has a `Ships:` line, a smoke or the reason it has none,
+  depends on the slice below (else make it a workstream), and keeps the full
+  gate green at its own SHA; no numeric size target. Read-only: no edits,
   no commits, never push the plan. Output: findings with severity and
   plan-section. Fold accepted findings into the plan; unresolvable ones go to
   the user's end-of-run list.
@@ -123,6 +126,7 @@ sweep has only ever killed the fakes in its `--self-test`, never a real stuck lo
 Workflow({
   scriptPath: "<skill dir>/workflow.js",
   args: {
+    skillDir: "<skill dir>",         // absolute; required when any repo has smoke or any workstream has checks
     cycles: 2,                       // or null = converge; a named count is a floor
     maxCycles: 4,                    // optional hard cap; default cycles+2, or 4 when cycles is null
     tokenBudget: 3000000,            // optional; output tokens this run may spend (budget.spent())
@@ -133,6 +137,7 @@ Workflow({
         base: "feat/x",              // base: 'feat/x' for a stacked feature branch; default main
         files: ["src/auth/", "test/auth/"],   // optional; dir/ or dir/** or exact paths
         reviewModel: "fable",        // optional; default one tier above model
+        checks: ["npm run e2e:login"], // optional; extra commands run under a 540 s cap, red = critical
         brief: "…", gate: "npm run lint && npm run typecheck && npm test && npx playwright test" },
       { id: "ui-login", repo: "~/code/ui", featureBranch: "feat/auth",
         branch: "feat/auth--ui-login", model: "sonnet", brief: "…", gate: "…" }
@@ -142,7 +147,8 @@ Workflow({
         knownRed: ["tests/test_openapi_sync.py::test_sync"],
         hot: ["**/README*", "docs/**", "openapi/**", "src/generated/**", "**/package-lock.json"],
         regen: "npm install && npm run gen:types",
-        smoke: "env -i PATH=$PATH ./scripts/boot-local.sh --h2" }
+        smoke: "env -i PATH=$PATH ./scripts/boot-local.sh --h2",
+        smokeTimeout: 300 }          // optional; seconds, default 540
     ],
     docsRepos: [                     // optional; default = every touched repo; base defaults to the repo's workstream base, else main
       { repo: "~/code/api", featureBranch: "feat/auth" },
@@ -157,15 +163,19 @@ Workflow({
 |---|---|---|
 | `cycles` | `null` | floor on review cycles; `null` = run to convergence |
 | `maxCycles` | `cycles + 2`, or 4 | hard cap on cycles per workstream (must be ≥ `cycles`) |
+| `skillDir` | none | this skill's absolute base directory (the `<skill dir>` printed when the skill loads); the script can't learn its own path, and agents run `node <skillDir>/run-cmd.mjs <seconds> '<command>'` for smoke and checks. Required when any repo has `smoke` or any workstream has `checks` |
 | `stage` | omitted | `"wholeBranch"`: skip implement/cycles/merge; re-run whole-branch review + validator, contract check, docs sync on the current feature-branch tips |
+| `wbRounds` | `2` | whole-branch fix rounds; `0` = no fix rounds (findings returned unfixed; the repo verdict is `fail` while any is critical or major); pair with `docsRepos: []` for a review-only pass |
 | `tokenBudget` | `null` | output-token cap for this run; the user's "+Nk" turn target also applies. Spend is counted from the script's start, so a `resumeFromRunId` crash recovery starts a fresh `tokenBudget` |
 | `tokenReserve` | `600000` | before each new cycle, each whole-branch fix round, the contract check and docs: if less than this is left, nothing new starts; the item is reported not merged / failed with the reason |
 | `workstreams[].files` | none | allowed paths; overlap within a repo throws; merge rejects edits outside |
+| `workstreams[].checks` | none | extra commands (an e2e login, a contract probe) the author, fixer and both workstream validators run via `run-cmd.mjs` with a 540 s cap, reporting the exit code per command; a red or timed-out check is critical. The `gate` itself never gets a deadline |
 | `workstreams[].reviewModel` | sonnet→`opus`, opus→`fable` | review model; whole-branch review uses the repo's highest |
 | `repos[].knownRed` | `[]` | exact test ids red at the base; any other failure is red |
 | `repos[].hot` | README*, CHANGELOG*, `docs/**`, `graphify-out/**`, lockfiles, `openapi*.{yaml,yml,json}`, `*.sha256` | replaces the default hot list for that repo — add generated-type and contract paths here; `[]` turns the hot-file rule off for repos whose workstreams legitimately edit docs (the `files[]` check still applies) |
 | `repos[].regen` | none | regenerates generated files: run by every agent that runs the gate on a workstream SHA (author, fixer, reviewer, validators; its diffs are never findings or commits), after each merge, and after whole-branch fixes. Set it whenever workstreams can touch dependencies or vendored contracts, or their gates go red on stale generated files |
-| `repos[].smoke` | none | the safe local boot recipe the whole-branch validator runs; none = smoke skipped |
+| `repos[].smoke` | none | the safe local boot recipe the whole-branch validator and each whole-branch recheck run via `run-cmd.mjs` (own process group, hard timeout, leftover processes killed); a failed or timed-out smoke is critical; none = smoke skipped |
+| `repos[].smokeTimeout` | `540` | smoke hard cap in seconds, an integer from 1 to 590 (stays under the agent shell's 600 s foreground limit) |
 | `docsRepos[].gate` | the repo's workstream gates | gate for a docs-only repo |
 
 `gate` is the repo's **full** gate — every suite it defines including
@@ -175,7 +185,7 @@ Repo paths are normalized (trailing slashes stripped).
 **Size:** agents ≈ per workstream (implement + 1 review per cycle + fix and
 validate per cycle with critical/major findings + 1 validator when a clean
 review lands on an unvalidated head + merge) + per repo (2, +2 per whole-branch
-fix round, max 2 rounds) + 1 contract check when 2+ repos + per docs repo (1, +1
+fix round, max `wbRounds` rounds) + 1 contract check when 2+ repos + per docs repo (1, +1
 validator when it pushed). Every dead agent can add up to 2 replacements. One
 workstream with a clean cycle 1 is ~8; two workstreams × 2 cycles is ~20. The
 runtime runs at most min(16, CPUs−2) agents at once and caps a run at 1000
@@ -200,8 +210,11 @@ The workflow returns:
 - per workstream: `{id, branch, status, sha, validatedSha, cyclesRun, extended,
   findingsFixed, open, sharedEdits, questions, notes, escalations, tests,
   gateTail, merged}` (empty list in `wholeBranch` stage)
-- per repo: `{repo, featureBranch, sha, verdict, sections, tests, fixRounds,
-  open, questions, notes, escalations, docs, finalSha}`; `docs` =
+- per repo: `{repo, featureBranch, sha, verdict, sections, seams, tests, fixRounds,
+  open, questions, notes, escalations, docs, finalSha}`; `seams` = the
+  whole-branch reviewer's seam inventory, one line per place a workstream's
+  changed signature, field, config key, default, enum value or error shape is
+  used by another workstream; `docs` =
   `{sha, files, prBody, ok, tests, notes, verdict, findings}`; a failed docs
   validation fails the repo, because the docs commit is `finalSha`; so does a
   docs agent that died 3 times (plus an escalation)
@@ -239,10 +252,57 @@ cap or budget stops, failed merges — each says NOT merged). Then:
   state per repo: branches, SHAs, test results, unresolved questions. PRs stay
   open — a human merges to `main`, especially where merge deploys.
 
+## Stacked mode (only when the user asks)
+
+Default stays one feature branch per repo; stack slices only on the user's ask.
+
+- **A slice is one ordinary run:** `featureBranch` = the slice, `base` = its
+  parent slice (`main` for slice 1). Slices run strictly in sequence: cut slice
+  N+1 from slice N's verified tip only after slice N's run returns. The review
+  range is already three-dot `origin/<parent>...origin/<slice>`. Before any
+  `wholeBranch` re-run when the parent moved, a fresh `implementer` merges the
+  parent up into the slice (merge, never rebase). Slices go bottom-first: after
+  any re-run whose `finalSha` moved, up-merge into every child.
+- **Briefs:** paste earlier slices' findings (fixed and declined) into every
+  later slice's brief. Each slice PR body carries the stack table:
+  `| # | branch | base | status | merge after #N |`.
+- **Whole-stack pass:** `stage: "wholeBranch"`, `wbRounds: 0`,
+  `docsRepos: []` (review only: no fix, no docs commit, `finalSha` stays the
+  reviewed SHA), and every workstream entry rewritten to `featureBranch` = top
+  slice and `base: "main"` (otherwise the script throws "workstreams
+  disagree"). Route each returned finding to the slice that
+  owns its lines, via a fresh `implementer` on that slice; then merge upward
+  bottom-first, each child running
+  `git -c rerere.enabled=true -c rerere.autoupdate=true merge origin/<parent>`;
+  re-run `stage: "wholeBranch"` per touched slice (`base` = its parent).
+- **Merge-settings preflight:** `gh api repos/{owner}/{repo} --jq
+  '{allow_merge_commit, allow_squash_merge, allow_rebase_merge}'`. Merge commits
+  allowed → recommend them; squash-only → warn the user, don't refuse.
+- **Hand-off recipe for the user** (merging stays theirs): merge slice N
+  WITHOUT `--delete-branch` (deleting a base closes the child PR); run
+  `gh pr edit <N+1> --base <N's base>`; delete N's branch only once
+  `gh pr list --base <N's branch>` is empty.
+- **After a squashed parent:** with `H` = the parent PR's merged head
+  (`gh pr view <N> --json headRefOid -q .headRefOid`; once its branch is
+  deleted, `git fetch origin refs/pull/<N>/head` brings the commit back), first
+  check `git merge-base --is-ancestor <H> origin/<child>`. If it fails, merge
+  `H` into the child first; otherwise "take ours" could drop parent changes.
+  Then the child merges `origin/main`. Per conflicted file: if
+  `git rev-parse origin/main:<file>` equals `git rev-parse <H>:<file>`, take
+  ours (`git checkout --ours <file>`); anything else, a file missing on either
+  side included, is a real conflict → fixer. **Supervised until the user
+  waives it:** the agent stops before pushing and leaves its worktree in place
+  for the push; you show the user each auto-resolved file with its diff, and it
+  pushes only on the user's yes.
+- **Refuse** only for GitHub-native stacks or a parent PR with no `headRefOid`.
+- **CI:** slice PRs 2..n target non-`main` bases, so workflow branch filters
+  may run no remote CI on them; say so in each PR body. The per-slice local
+  gate stays mandatory.
+
 ## Changing workflow.js
 
 `tests/` is the regression suite: a mock `agent()` harness that runs the real
 script. After any edit, run every check from `tests/`:
-`for f in check*.mjs; do node $f ../workflow.js; done` (each prints `... ok`).
+`for f in check*.mjs; do node $f ../workflow.js; done` (each prints `... ok`), plus `node run-cmd.test.mjs` after any edit to `run-cmd.mjs`.
 Add a scenario that fails before your change. `tests/fixture-scenarios.md`
 describes the live two-repo fixture eval (2026-10-29) for bigger changes.
