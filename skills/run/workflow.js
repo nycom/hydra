@@ -194,7 +194,7 @@ const PUSHED = {
   required: ['status', 'ok', 'sha', 'tests', 'gateTail', 'sharedEdits', 'decisions', 'questions', 'notes'],
 }
 // the implement step may find an earlier attempt already done; the merge always pushes, so it keeps PUSHED
-const IMPLEMENTED = { ...PUSHED, properties: { ...PUSHED.properties, ok: { type: 'boolean', description: 'gate green AND pushed AND ls-remote verified; nothing to change: gate green, no push' } } }
+const IMPLEMENTED = { ...PUSHED, properties: { ...PUSHED.properties, sha: { type: 'string', pattern: '^([0-9a-f]{40})?$', description: 'full 40-hex remote SHA verified via git ls-remote; nothing to change: the current origin branch head' }, ok: { type: 'boolean', description: 'gate green AND pushed AND ls-remote verified; nothing to change: gate green, no push' } } }
 const FIXED = {
   type: 'object',
   properties: {
