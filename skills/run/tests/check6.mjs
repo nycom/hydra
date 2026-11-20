@@ -8,7 +8,7 @@ const SHA = n => (n + '').padStart(40, 'a')
 const parallel = fs => Promise.all(fs.map(f => f().catch(() => null)))
 const budget = { total: null, spent: () => 0, remaining: () => Infinity }
 const push = { status: 'done', ok: true, tests: 't', gateTail: 'exit 0', sharedEdits: [], decisions: [], questions: [], notes: [] }
-const green = { green: true, summary: '' }
+const green = { command: 'npm test', green: true, summary: '' }
 const F = (id, severity, kind = 'bug') => ({ id, severity, kind, where: 'a:1', issue: `issue ${id}`, evidence: 'test t1 red' })
 function mock(sc = {}) {
   const prompts = {}, opts = {}

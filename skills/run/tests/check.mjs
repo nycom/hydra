@@ -15,15 +15,15 @@ function mock(sc) {
     if (o.label.endsWith('implement')) return { ...push, sha: SHA(1), sharedEdits: sc.shared || [] }
     if (/review c\d/.test(o.label)) return { headSha: sc.lieHead ? SHA(9) : head, findings: sc.review ? sc.review(o.label) : [] }
     if (/fix c(\d)/.test(o.label)) { const i = +o.label.match(/fix c(\d)/)[1]; return { ...push, sha: SHA(10 + i), answers: [] } }
-    if (/validate c\d/.test(o.label)) { const h = prompt.match(/([0-9a-f]{40})\b(?! on)?/g); return { headSha: (prompt.match(/\.\.\.?([0-9a-f]{40})/) || [])[1], gate: { green: !sc.red, summary: 's' }, verified: [], open: sc.valOpen ? sc.valOpen(o.label) : [] } }
+    if (/validate c\d/.test(o.label)) { const h = prompt.match(/([0-9a-f]{40})\b(?! on)?/g); return { headSha: (prompt.match(/\.\.\.?([0-9a-f]{40})/) || [])[1], gate: { command: 'npm test', green: !sc.red, summary: 's' }, verified: [], open: sc.valOpen ? sc.valOpen(o.label) : [] } }
     if (o.label.endsWith('merge')) return { ...push, sha: SHA(50) }
     if (o.label.endsWith(' review')) return { headSha: SHA(60), findings: sc.wbFind || [] }
-    if (o.label.endsWith(' validate') && o.phase === 'Whole-branch') return { verdict: 'pass', sections: 's', sha: SHA(60), tests: 't', gate: { green: true, summary: '' }, findings: [] }
+    if (o.label.endsWith(' validate') && o.phase === 'Whole-branch') return { verdict: 'pass', sections: 's', sha: SHA(60), tests: 't', gate: { command: 'npm test', green: true, summary: '' }, findings: [] }
     if (/fix r\d/.test(o.label)) return { ...push, sha: SHA(70), answers: [] }
-    if (/recheck r\d/.test(o.label)) return { verdict: 'pass', sections: 's', sha: SHA(70), tests: 't', gate: { green: true, summary: '' }, findings: [], verified: (sc.wbFind || []).map(f => f.id) }
+    if (/recheck r\d/.test(o.label)) return { verdict: 'pass', sections: 's', sha: SHA(70), tests: 't', gate: { command: 'npm test', green: true, summary: '' }, findings: [], verified: (sc.wbFind || []).map(f => f.id) }
     if (o.label === 'contracts') return { verdict: 'pass', sections: 's', findings: [] }
     if (o.label.endsWith(' docs')) return { baseSha: SHA(60), sha: sc.docsSha || '', files: [], prBody: false, ok: true, tests: 't', notes: [] }
-    if (o.label.endsWith('docs validate')) return { verdict: 'pass', sections: 's', sha: sc.docsSha, tests: 't', gate: { green: true, summary: '' }, findings: [] }
+    if (o.label.endsWith('docs validate')) return { verdict: 'pass', sections: 's', sha: sc.docsSha, tests: 't', gate: { command: 'npm test', green: true, summary: '' }, findings: [] }
     if (o.label.endsWith(' promote')) return { ok: true, sha: (prompt.match(/ to ([0-9a-f]{40})\./) || [])[1], notes: [] }
     throw new Error('unmocked ' + o.label)
   }

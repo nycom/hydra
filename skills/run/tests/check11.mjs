@@ -7,7 +7,7 @@ const SHA = n => (n + '').padStart(40, 'a')
 const parallel = fs => Promise.all(fs.map(f => f().catch(() => null)))
 const free = { total: null, spent: () => 0, remaining: () => Infinity }
 const push = { status: 'done', ok: true, tests: 't', gateTail: 'exit 0', sharedEdits: [], decisions: [], questions: [], notes: [] }
-const green = { green: true, summary: '', flaky: [] }
+const green = { command: 'npm test', green: true, summary: '', flaky: [] }
 const F = (id, severity = 'major', where = 'x.py:3') => ({ id, severity, kind: 'bug', where, issue: `issue ${id}`, evidence: 'test t1 red' })
 // sc[label](prompt) overrides a step (the implement step included); all[label] keeps every call in order.
 function mock(sc = {}) {
@@ -39,7 +39,7 @@ const ws = (id, extra = {}) => ({ id, repo: '/r/one', featureBranch: 'f', branch
 const go = async (args, sc) => { const m = mock(sc); const r = await Run(args, m.agent, parallel, () => {}, free); return { r, p: m.prompts, o: m.opts, all: m.all } }
 const fails = []
 const t = async (name, fn) => { try { await fn() } catch (e) { fails.push(`${name}: ${e.message.split('\n')[0]}`) } }
-const ALSO = 'An entry with `also` holds a second finding at the same line: resolve and verify both; if the `also` one still holds, return it open under its own id.'
+const ALSO = 'An entry with `also` holds a second finding at overlapping lines: resolve and verify both; if the `also` one still holds, return it open under its own id.'
 const status = (book, id) => book.find(e => e.id === id)?.status
 const after = head => p => JSON.parse(p.split(`${head}\n`)[1].split('\n')[0]) // the JSON line a prompt puts under head
 const fixFindings = after('Findings:')

@@ -73,13 +73,13 @@ const SHA = n => (n + '').padStart(40, 'a')
 const parallel = fs => Promise.all(fs.map(f => f().catch(() => null)))
 const F = (id, severity = 'major') => ({ id, severity, kind: 'bug', where: 'a:1', issue: 'x', evidence: 'e' })
 const push = { status: 'done', ok: true, tests: 't', gateTail: 'exit 0', sharedEdits: [], decisions: [], questions: [], notes: [] }
-const verdict = (sha, findings = []) => ({ verdict: 'fail', sections: 's', sha, tests: 't', gate: { green: true, summary: '', flaky: [] }, findings })
+const verdict = (sha, findings = []) => ({ verdict: 'fail', sections: 's', sha, tests: 't', gate: { command: 'npm test', green: true, summary: '', flaky: [] }, findings })
 const agent = async (p, o) => {
   const L = o.label
   if (L.endsWith('implement')) return { ...push, sha: SHA(1) }
   if (L.endsWith('review c1')) return { headSha: SHA(1), findings: [F('c1-F1')] }
   if (L.endsWith('fix c1')) return { ...push, sha: SHA(2), answers: [{ id: 'c1-F1', action: 'fixed', note: 'n' }] }
-  if (L.endsWith('validate c1')) return { headSha: SHA(2), gate: { green: true, summary: '', flaky: [] }, verified: ['c1-F1'], open: [] }
+  if (L.endsWith('validate c1')) return { headSha: SHA(2), gate: { command: 'npm test', green: true, summary: '', flaky: [] }, verified: ['c1-F1'], open: [] }
   if (L.endsWith('review c2')) return { headSha: SHA(2), findings: [] }
   if (L.endsWith('merge')) return { ...push, sha: SHA(3) }
   if (L.endsWith(' review')) return { headSha: SHA(3), seams: 'none', findings: [F('W-F1', 'critical')] }
@@ -121,7 +121,7 @@ console.log('retro checks ok')
 // a declined minor, an escalated answer stays open, a recheck-verified id, a validator re-raising a review
 // finding keeps its review stage, and a carried workstream minor reaches the repo ledger with its stage.
 {
-  const gate = green => ({ green, summary: green ? '' : 'red', flaky: [] })
+  const gate = green => ({ command: 'npm test', green, summary: green ? '' : 'red', flaky: [] })
   const head = p => (p.match(/\.\.\.?([0-9a-f]{40})/) || [])[1]
   const answers = ids => ids.map(([id, action]) => ({ id, action, note: 'n' }))
   const go = async (sc, args = {}) => {
