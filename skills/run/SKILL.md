@@ -90,19 +90,28 @@ legitimately split a chained gate, add flags or wrap it in the regen recipe,
 and a wrong rejection costs a whole opus validator rerun. Workstream validators
 also return `evidence`, one line per step with the commands run for it,
 copied into `workstreams[].evidence`.
-**Brief conflicts become questions, never fixes:** a fixer whose finding can
-only be fixed by breaking another clause of the brief, or whose substance is
-that the brief contradicts the repo, leaves the code, answers it `escalated` and
-returns a question with both options (default: keep the current behaviour and
-tests); the next validator accepts that answer when no fix keeps every clause.
-Validators (both workstream ones, the whole-branch validator, each recheck)
-return such a contradiction, or a finding that would reverse a fix verified
-earlier in the run, in their own `questions`, not as a finding; the whole-branch
-validator and rechecks get the workstream findings verified in the cycles.
+**Brief conflicts become questions, never fixes:** a real defect is always a
+finding, even in a file or test the brief protects or where its fix would
+reverse a fix verified earlier. A fixer that could only fix it by breaking a
+brief clause or reversing such a fix, or whose finding says the brief
+contradicts the repo, leaves the code, answers it `escalated` (status stays
+`done`, not `blocked`) and returns a question with both options (default: keep
+the current behaviour and tests). The next validator accepts that answer when
+no fix keeps every clause. An accepted escalation never counts in
+`findingsFixed`, and its ledger entry stays `open`. If the fixer returned no
+question, the script writes one from the finding and the fixer's note, so it
+always reaches the user. Only a contradiction between the brief and the repo
+itself (a premise the history disproves, or two clauses that cannot both hold)
+goes straight into a validator's own `questions` (both workstream validators,
+the whole-branch validator, each recheck). The fix validator sees the findings
+verified in earlier cycles. The whole-branch validator and rechecks see the
+fixes verified earlier in the run (`fixed` only, never a gate) and the
+questions already with the user, which they never re-ask.
 The fix validator and each recheck carry the brief and judge every fix against
 its hard clauses: a fix that drops a mandated call, edits or deletes a
 do-not-edit file, or deletes or weakens a test an earlier stage verified as
-guarding a fix stays open as a regression. The workstream reviewer is told the
+guarding a fix stays open as a regression unless the user answered a question
+allowing it. The workstream reviewer is told the
 author's notes and questions are not shown to it, so it never claims what they say.
 **One workstream on an untouched base skips the seam review:** the merge
 reports `preMergeSha` (the feature-branch tip its merge landed on) and
@@ -344,7 +353,10 @@ says NOT merged; unpromoted side branches). Then:
 - Read it; spot-check anything `open`, `extended`, unmerged, a non-`pass`
   verdict, `docs.ok: false`, or a `crossRepo` finding against the code (and the
   docs diffs — docs must describe what shipped, including every review-round
-  fix). Fix-ups go to a fresh `implementer`, never to you. **Every fix-up is then
+  fix). Fix-ups go to a fresh `implementer`, never to you. Before any re-run,
+  write the user's answer to each question into the affected brief: the brief is
+  the only channel by which a validator learns that "the user answered" allows a
+  change. **Every fix-up is then
   validated and docs-synced:** re-run the workflow with `stage: "wholeBranch"`
   (same args, narrowed to the affected repos' workstreams). After an
   unpromoted failure, the fix-up implementer continues from the side branch the

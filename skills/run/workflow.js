@@ -125,8 +125,8 @@ const NOT_FEATURE = "This step is not a feature task: write no tests, skip test-
 const ALSO = fs => fs.some(f => f.also) ? 'An entry with `also` holds a second finding at overlapping lines: resolve and verify both; if the `also` one still holds, return it open under its own id.\n' : ''
 const RO_TESTS = 'Pre-existing tests are read-only unless the brief names them. If a test or the gate contradicts the brief, or passing would need special-casing, return status blocked with a question — that is a valid outcome. For any question, the default must keep every pre-existing test unchanged and stay within the brief; offer a test edit only as a non-default option.'
 // A brief conflict is the user's call: fixers escalate it, validators route it to questions, never to the fix loop.
-const ESCALATE = 'A finding that can only be fixed by breaking another clause of the brief, or whose substance is that the brief contradicts the repo: do not pick a side and leave the code; answer it "escalated" and return a question with both options, the default keeping the current behaviour and tests.'
-const CONFLICT = 'A brief/repo contradiction, or a finding whose fix would reverse a fix verified earlier in this run, is not a finding: return it in questions with both options, the default keeping the current behaviour and tests; never send it to the fix loop.'
+const ESCALATE = 'A finding that can only be fixed by breaking another clause of the brief (editing a file or test the brief protects, dropping a mandated call) or by reversing a fix verified earlier in this run, or whose substance is that the brief contradicts the repo: do not pick a side and leave the code; answer it "escalated" with status still done (not blocked), and return a question with both options, the default keeping the current behaviour and tests.'
+const CONFLICT = 'Only a contradiction between the brief and the repo itself (a premise the history disproves, or two brief clauses that cannot both hold) goes to questions instead of findings: both options, the default keeping the current behaviour and tests. A real defect is always a finding, even in code or tests the brief protects or where its fix would reverse a fix verified earlier; the fixer escalates it.'
 const CLAUSES = 'Judge each fix against the brief\'s hard clauses as well as its finding: a fix that removes a call the brief mandates, edits or deletes a file the brief says not to edit, or deletes or weakens a test an earlier stage verified as guarding a fix stays open as a regression unless the user answered a question allowing it. Accept (verified) an answer escalated as a brief conflict when no fix keeps every clause.'
 const LADDER = 'Ladder-first (reuse > stdlib > native > one line > minimum code), no speculative code, stay strictly in scope.'
 const SEV = 'Severity: critical = wrong behaviour, data loss, security, broken contract or red gate; major = real bug or design flaw; minor = the rest. Critical and major block the merge. Report only real issues; an empty list means clean.'
@@ -305,6 +305,8 @@ const unaccounted = (prior, verified, open) => prior.filter(f => blocking(f) && 
 // and the script keeps the first full result (sharedEdits, questions, answers) with the repaired sha and both attempts' notes. anySha: the caller never reads the sha.
 // gated: the prompt carries a gate, so a gate with no command or a "skipped" summary never ran: a dead attempt, never kept as bad.
 // The script can't see tool calls; command turns a silent skip into an explicit claim.
+// An accepted escalation is the user's call: if its fixer returned no question, one is made from the finding, so it always reaches the user.
+const askEscalated = (fs, fix) => (fix.questions || []).length ? [] : fs.flatMap(f => { const a = fix.answers.find(x => x.id === f.id && x.action === 'escalated'); return a ? [{ q: `${f.id} (${f.where}: ${f.issue}) was escalated by the fixer: ${a.note}. How should it be resolved?`, options: ['keep the current code and tests', 'change the brief or spec so a fix is clear (say how)'], default: 'keep the current code and tests' }] : [] })
 const UNRUN = /^\W*(skip(ped)?|not run|none|n\/?a)\b/i // a prefix: "skipped: clean review" never ran; "OK (skipped=1)" did
 const unran = {} // label -> attempts that returned without running the gate, for the caller's escalation
 async function step(prompt, { gated, ...opts }, anySha = false) {
@@ -384,7 +386,7 @@ async function runWorkstream(w) {
     acceptance = false
     return `0. Before you read the diff: from the brief's acceptance criteria alone, write 2-5 black-box tests against the public interface in your worktree and run them at ${sha}; never commit or push them. A failing one is a finding (kind bug) with the test and its output as evidence, the reproducer. If the brief says no behaviour change, instead run the same inputs at git merge-base origin/${w.featureBranch} ${sha} and at ${sha} (check each out inside your worktree) and diff the outputs; any difference is a finding.\n`
   }
-  const fullGuard = sha => `Test integrity also covers the whole workstream range: run that check over origin/${w.featureBranch}...${sha} (git diff --diff-filter=MDR --name-only origin/${w.featureBranch}...${sha} on test paths), not only the delta; a weakened pre-existing test there is a finding. Everything else in this step judges the delta only.`
+  const fullGuard = sha => `Test integrity also covers the whole workstream range: run that check over origin/${w.featureBranch}...${sha} (git diff --diff-filter=MDR --name-only origin/${w.featureBranch}...${sha} on test paths), not only the delta; a weakened pre-existing test there is a finding, even when the brief protects that file. Everything else in this step judges the delta only.`
   const reasons = () => decisions.length ? `\nThe author's recorded decisions — form your findings from the diff and brief first, then read these; don't grill one whose why is sound:\n${JSON.stringify(decisions)}\n` : ''
 
   const impl = await step(
@@ -482,7 +484,7 @@ ${ESCALATE}
 ${RO_TESTS}
 Minor: fix only if it is a one-liner inside your files, otherwise decline with a reason — declining is a valid outcome.
 Keep fixes minimal and inside this workstream's files.
-Nothing to change (all answered or declined): no commit, no push, sha = the current origin/${w.branch} head (${prev} unless an earlier attempt moved it), ok = true.
+Nothing to change (all answered, declined or escalated): no commit, no push, sha = the current origin/${w.branch} head (${prev} unless an earlier attempt moved it), ok = true.
 ${SHARED(c, w.files)}
 ${integration()}
 sharedEdits: return the complete current list; it replaces the earlier one${out.sharedEdits.length ? `, so keep every entry still needed from:\n${JSON.stringify(out.sharedEdits)}` : ''}.
@@ -503,7 +505,7 @@ ${w.brief}
 ${accept(fix.sha)}${same(prev, fix.sha) ? 'No delta: skip the delta hunt and judge the answers and declines; still run the gate, the test-integrity check and the trial merge at this head.\n' : ''}If the fixer merged origin/${w.featureBranch} (an integration fix), skip the merged-in side: judge git diff origin/${w.featureBranch}...${fix.sha}, and don't re-hunt sibling code already validated.
 Findings with the author's claimed resolutions — judge the code first, then read each claim:
 ${JSON.stringify(found.map(f => ({ ...f, claim: fix.answers.find(a => a.id === f.id) || 'no answer' })))}
-
+${ledger.length ? `Verified in earlier cycles (a fix that undoes one is a regression unless escalated): ${JSON.stringify(ledger)}\n` : ''}
 1. ${REFUTE} Where a test is claimed, it must fail at ${prev}, the pre-fix head: run it there in a second worktree at ${w.repo}/.claude/worktrees/${w.id}-val${i}-red (same rules: clear a leftover path first, remove it when done; never mktemp), and green at ${fix.sha}. Reverting the fix hunks in your worktree is the fallback only when that cannot run; state the fallback in evidence. Judge each answer to a question and each declined minor: defensible or not. ${CLAUSES} ${CONFLICT} ${MERGE_EDITS(c.hot, out.sharedEdits)}${EVIDENCE}
 2. Hunt regressions the fixes introduced (they routinely plant new bugs: data loss, broken callers, weakened tests). ${TEST_GUARD}${first ? ` ${fullGuard(fix.sha)}` : ''}
 3. Run the gate and report gate {green, summary, command, flaky}:
@@ -519,7 +521,8 @@ Return headSha, gate, evidence, verified (ids confirmed resolved, or whose answe
         out.evidence[`validate c${i} delta`] = val.evidence
         out.questions.push(...(val.questions || []))
         noteFlaky(w.repo, val)
-        out.findingsFixed += val.verified.length
+        out.findingsFixed += val.verified.filter(id => fix.answers.find(a => a.id === id)?.action !== 'escalated').length
+        out.questions.push(...askEscalated(found.filter(f => val.verified.includes(f.id)), fix))
         for (const f of found)
           if (val.verified.includes(f.id)) {
             const status = fix.answers.find(a => a.id === f.id)?.action || 'fixed'
@@ -630,8 +633,12 @@ async function runRepo(r, mine) {
   const carried = merged.flatMap(w => w.open.map(f => ({ ...f, id: `${w.id}:${f.id}` })))
   // one workstream merged onto a feature branch still at its base has no seam: the validator alone covers the branch
   // findings the workstream cycles settled: a whole-branch finding that would reverse one is a question
-  const settledWs = merged.flatMap(w => (w.findings || []).filter(e => e.status !== 'open').map(e => ({ id: `${w.id}:${e.id}`, where: e.where, issue: e.issue, status: e.status })))
-  const SETTLED = settledWs.length ? ` Verified in the workstream cycles (a finding that would reverse one goes to questions): ${JSON.stringify(settledWs)}` : ''
+  const fixedIn = (b, pre = '') => b.filter(e => e.status === 'fixed' && e.where !== 'gate').map(e => ({ id: pre + e.id, where: e.where, issue: e.issue }))
+  const SETTLED = () => {
+    const fixed = [...merged.flatMap(w => fixedIn(w.findings || [], `${w.id}:`)), ...fixedIn(book)]
+    const asked = [...new Set([...merged.flatMap(w => w.questions || []), ...res.questions].map(q => q.q))]
+    return `${fixed.length ? ` Fixes verified earlier in this run (a finding whose fix would reverse one: file it and name it; the fixer escalates): ${JSON.stringify(fixed)}` : ''}${asked.length ? ` Already asked of the user, never re-ask: ${JSON.stringify(asked)}` : ''}`
+  }
   const solo = merged.length === 1 && same(merged[0].preMergeSha, merged[0].baseAtMerge)
 
   const [rev, val] = await parallel([
@@ -657,7 +664,7 @@ Sections (verdict per section):
 2. Tests from scratch, every suite including Playwright/e2e; report gate {green, summary, command, flaky}:
 ${gates}
 ${GREEN(c.knownRed, r.repo)} ${FLAKY}
-3. Spec compliance point by point against the briefs below. ${TEST_GUARD} ${CONFLICT}${SETTLED}${carried.length ? ` Minors carried from the workstream cycles: ${JSON.stringify(carried)}. Return in verified each carried id whose issue no longer holds at this head (e.g. a shared edit the merge applied); never re-file one in findings.` : ''}
+3. Spec compliance point by point against the briefs below. ${TEST_GUARD} ${CONFLICT}${SETTLED()}${carried.length ? ` Minors carried from the workstream cycles: ${JSON.stringify(carried)}. Return in verified each carried id whose issue no longer holds at this head (e.g. a shared edit the merge applied); never re-file one in findings.` : ''}
 4. Concurrency / writer audit where relevant.
 5. ${SMOKE(c)}
 Cross-repo wire contracts are checked separately once every repo is final.
@@ -694,7 +701,7 @@ ${JSON.stringify(findings)}
 ${ALSO(findings)}
 Set up: worktree wb-fix${round}, detached at ${head} (fetch first); push to the side branch ${side}, never to ${r.featureBranch}: it fast-forwards to your fix only after the recheck passes. If origin/${side} already exists and contains ${head}, an earlier attempt of this step pushed it: continue from it; if it does not contain ${head}, it is a leftover of an earlier run: delete it first (git push origin --delete ${side}).
 Critical and major: resolve every one (red-verified tests for bug fixes; defensible answers to questions; delete what over-engineering findings name). ${ESCALATE} Minor, including those carried from the workstream cycles: fix only if it is a one-liner, otherwise decline with a reason. Minimal fixes.
-Nothing to change (all answered or declined): no commit, no push, sha = ${head} (or the origin/${side} head if an earlier attempt pushed it), ok = true.
+Nothing to change (all answered, declined or escalated): no commit, no push, sha = ${head} (or the origin/${side} head if an earlier attempt pushed it), ok = true.
 Never merge a workstream branch: an unmerged workstream is the coordinator's call. If you change the source of a generated file, ${c.regen ? `rerun: ${c.regen}` : 'regenerate it with the repo\'s own script'}.
 ${LADDER}
 ${GATE(gates, c.knownRed, r.repo)}
@@ -712,7 +719,7 @@ Return status, ok, verified sha, tests, gateTail, one answer per finding id, que
 ${same(head, fix.sha) ? 'No delta: skip the delta hunt and judge the answers and declines; still run every suite, the test-integrity check and hygiene at this head.\n' : ''}Findings with claimed resolutions — judge the code first, then read each claim:
 ${JSON.stringify(findings.map(f => ({ ...f, claim: fix.answers.find(a => a.id === f.id) || 'no answer' })))}
 ${ALSO(findings)}1. ${REFUTE} A claimed test must fail at ${head}, the pre-fix head: run it there in a second worktree at ${r.repo}/.claude/worktrees/wb-recheck${round}-red (same rules: clear a leftover path first, remove it when done; never mktemp), and green at ${fix.sha}. Reverting the fix hunks is the fallback only when that cannot run; state the fallback in evidence. Judge each answer and each declined minor. ${CLAUSES} ${EVIDENCE}
-2. Hunt regressions the fixes introduced. ${TEST_GUARD} ${CONFLICT}${SETTLED}
+2. Hunt regressions the fixes introduced. ${TEST_GUARD} ${CONFLICT}${SETTLED()}
 3. Rerun every suite and report gate {green, summary, command, flaky}:
 ${gates}
 ${GREEN(c.knownRed, r.repo)} ${FLAKY}
@@ -731,6 +738,7 @@ sha = the commit you checked. verdict pass only if nothing critical or major is 
     res.questions.push(...(re.questions || []))
     Object.assign(res, { verdict: re.verdict, sections: re.sections, tests: re.tests })
     checked = re.sha
+    res.questions.push(...askEscalated(findings.filter(f => re.verified.includes(f.id)), fix))
     const action = (...ids) => ids.map(id => fix.answers.find(a => a.id === id)?.action).find(Boolean) || 'fixed'
     for (const id of re.verified) settle(book, id, action(id))
     // an absorbed finding settles with its kept entry; if the recheck returned it open, track() below re-opens it
