@@ -2,7 +2,7 @@
 
 Scored live runs of the quality scenarios in `skills/run/tests/fixture-scenarios.md` (S15 planted defects, S16 impossible task), one JSON file per run in `runs/`. `report.mjs` turns them into `report.html` and the README snapshot.
 
-The files in `runs/` with `"demo": true` are placeholders that show the layout. Demo and live runs never mix: `report.mjs` refuses to build while both are present, so delete `runs/demo-*.json` before adding the first live run.
+Runs with `"demo": true` never mix with live runs: `report.mjs` refuses to build while both are present.
 
 ## Run file schema
 
@@ -43,6 +43,6 @@ node evals/report.test.mjs # fails when any of those is stale against runs/
 
 `report.sha256` records the runs, `report.html` and the four PNGs, and only `snapshot.sh` writes it. So the test also fails when the html was regenerated, or a PNG re-rendered, without a full snapshot.
 
-While every run is a demo, the README block is a single line. With live runs it shows a headline, the scorecard and the heatmap, with cost and pipeline folded under "More charts".
+While every run is a demo, the README block is a single line. With live runs it shows a headline, a one-run caveat, the scorecard and the heatmap, with cost and pipeline folded under "More charts".
 
 `snapshot.sh` needs Google Chrome (override the path with `CHROME=`). `report.html?section=<heatmap|scorecard|cost|pipeline>&theme=light` shows one section alone (`#cost` works too); that is how the PNGs are cut.
