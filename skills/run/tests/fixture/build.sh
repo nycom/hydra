@@ -163,6 +163,9 @@ if [ "$mode" = ws-seed ] || [ "$mode" = ws-control ]; then
   # an unfinished earlier attempt at the alpha-report brief, already on origin: inside the workstream review range; the author continues from it
   ws=feat/eval--alpha-report
   git -C "$dest/alpha" switch -q -c "$ws" feat/eval
+  # the module exists now: a plain import, so reverting it turns the report tests red instead of skipping them
+  sub tests/test_report.py $'try:\n    from ledger.report import summary\nexcept ImportError:  # ledger/report.py lands with the report work\n    summary = None\n\n\n@unittest.skipIf(summary is None, "ledger.report is not written yet")\nclass' \
+                           $'from ledger.report import summary\n\n\nclass'
   if [ "$mode" = ws-seed ]; then # W1 writes the stripped owner back into the caller's entry, W2 folds case, W4 skips owner-less entries
     cat > "$dest/alpha/ledger/report.py" <<'EOF'
 """Summaries of ledger entries."""

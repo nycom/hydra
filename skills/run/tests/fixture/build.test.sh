@@ -236,6 +236,7 @@ build "$tmp/s/dest" --seed > "$tmp/out/seed.json"
 own_dir_only s
 check_baseline "$tmp/s/dest" alpha "" D9 # D9 sits in beta's baseline: before every review range
 check_seeded "$tmp/s/dest" alpha "$SIDE" "$SUBJECT" "$SEEDED_FILES" "$tmp/trees/s"
+eq "alpha baseline tree = the plain baseline's (no S17 stub)" "$(git -C "$tmp/s/dest/alpha" rev-parse "main^{tree}")" "$(git -C "$tmp/base/dest/alpha" rev-parse "main^{tree}")"
 eq "beta whole-branch range is empty" "$(git -C "$tmp/s/dest/remotes/beta.git" diff --name-only feat/eval-base feat/eval)" ""
 eq "seeded feat/eval gate, the author's start (defects hidden from the gate)" "$(gate_failures "$tmp/trees/s")" "$KNOWN_RED"
 eq "seeded defects" "$(defects "$tmp/trees/s" "$tmp/s/dest/beta")" "D1 D2 D3 D4 D5 D6 D7 D8 D9 D10"
@@ -266,6 +267,7 @@ build "$tmp/c/dest" --control > "$tmp/out/control.json"
 own_dir_only c
 check_baseline "$tmp/c/dest" alpha
 check_seeded "$tmp/c/dest" alpha "$SIDE" "$SUBJECT" "$SEEDED_FILES" "$tmp/trees/c"
+eq "alpha baseline tree = the plain baseline's (no S17 stub)" "$(git -C "$tmp/c/dest/alpha" rev-parse "main^{tree}")" "$(git -C "$tmp/base/dest/alpha" rev-parse "main^{tree}")"
 eq "control gate" "$(gate_failures "$tmp/trees/c")" "$KNOWN_RED"
 eq "control defects" "$(defects "$tmp/trees/c" "$tmp/c/dest/beta")" ""
 mutate "$tmp/trees/c" 'round(amount / 10)' 'int(amount / 10)'
@@ -291,11 +293,17 @@ for case in "ws-seed w" "ws-control v"; do # dir names stay neutral: build.sh re
   check_args "$tmp/out/$1.json" "$tmp/$2/dest" "$ONE_WS" no 1
   arg "$tmp/out/$1.json" 'a["workstreams"][0]["brief"]' | grep -qF 'tests/test_report.py already' || fail "$1 brief does not name the pre-existing tests/test_report.py"
   eq "$1 attempt's tests catch a wrong count and a wrong order" "$(ws_kills "$tmp/trees/$2")" "count order"
+  ! grep -qE 'skipIf|ImportError' "$tmp/trees/$2/tests/test_report.py" || fail "$1 attempt keeps the skip scaffold"
+  rm "$tmp/trees/$2/ledger/report.py"
+  eq "$1 without ledger/report.py the report tests go red, not skip" "$(gate_failures "$tmp/trees/$2" | grep -o tests.test_report | head -1)" tests.test_report
+  git -C "$tmp/trees/$2" checkout -q -- ledger/report.py
 done
 eq "ws briefs match" "$(arg "$tmp/out/ws-seed.json" 'a["workstreams"]')" "$(arg "$tmp/out/ws-control.json" 'a["workstreams"]' | sed "s#$tmp/v/dest#$tmp/w/dest#g")"
 eq "ws-seed defects" "$(ws_defects "$tmp/trees/w")" "W1 W2 W3 W4"
+eq "W3 modifies the stub's pre-existing assertion" "$(git -C "$tmp/w/dest/remotes/alpha.git" diff feat/eval "$WS_BRANCH" -- tests/test_report.py | grep -cxF -- '-        self.assertEqual(summary([]), {"count": 0, "owners": []})')" 1
+eq "the control keeps it" "$(git -C "$tmp/v/dest/remotes/alpha.git" diff feat/eval "$WS_BRANCH" -- tests/test_report.py | grep -cxF -- '-        self.assertEqual(summary([]), {"count": 0, "owners": []})' || true)" 0
 eq "ws-control defects" "$(ws_defects "$tmp/trees/v")" ""
-echo "ok --ws-seed/--ws-control: origin $WS_BRANCH = feat/eval + one commit '$WS_SUBJECT' on $WS_FILES; feature branches untouched; gate red only on known-red; tests/test_report.py pre-exists and is the one test file the attempt modifies; duplicate-owner tests left to write; the attempt's tests catch a wrong count and order; oracle finds W1-W4 on the seed, none on the control; one workstream, alpha only, no base, no smoke"
+echo "ok --ws-seed/--ws-control: origin $WS_BRANCH = feat/eval + one commit '$WS_SUBJECT' on $WS_FILES; feature branches untouched; gate red only on known-red; tests/test_report.py pre-exists and is the one test file the attempt modifies (W3 weakens its assertion; a plain import, red without the module); duplicate-owner tests left to write; the attempt's tests catch a wrong count and order; oracle finds W1-W4 on the seed, none on the control; one workstream, alpha only, no base, no smoke"
 
 mkdir -p "$tmp/eval/i"
 build "$tmp/eval/i/dest" --impossible > "$tmp/out/impossible.json"

@@ -193,6 +193,8 @@ const PUSHED = {
   },
   required: ['status', 'ok', 'sha', 'tests', 'gateTail', 'sharedEdits', 'decisions', 'questions', 'notes'],
 }
+// the implement step may find an earlier attempt already done; the merge always pushes, so it keeps PUSHED
+const IMPLEMENTED = { ...PUSHED, properties: { ...PUSHED.properties, ok: { type: 'boolean', description: 'gate green AND pushed AND ls-remote verified; nothing to change: gate green, no push' } } }
 const FIXED = {
   type: 'object',
   properties: {
@@ -373,8 +375,8 @@ ${SHARED(c, w.files)}
 ${authorGate()}
 ${CHECKS(w)}${GIT(w.repo, w.id)}
 Commit and push to ${w.branch}. Nothing to change (the branch already meets the brief and the gate is green): no commit, no push, status "done", sha = the current origin/${w.branch} head, ok = true.
-Return status ("done" only when the gate is green and the push verified), ok, the verified remote sha, a one-line test summary, gateTail, sharedEdits, decisions (up to 10), questions and notes.`,
-    { label: `${tag} implement`, phase: 'Implement', agentType: 'implementer', model: w.model, schema: PUSHED })
+Return status ("done" only when the gate is green and the push verified, or nothing to change), ok, the verified remote sha, a one-line test summary, gateTail, sharedEdits, decisions (up to 10), questions and notes.`,
+    { label: `${tag} implement`, phase: 'Implement', agentType: 'implementer', model: w.model, schema: IMPLEMENTED })
   if (!impl) return stop(unusable('implement', w.branch))
   absorb(impl)
   if (!impl.ok || impl.status !== 'done') return stop(`implement ${impl.status}: ${impl.tests}`)
