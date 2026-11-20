@@ -113,7 +113,7 @@ dest, mode = sys.argv[1:]
 alpha, beta = f"{dest}/alpha", f"{dest}/beta"
 gate = "python3 -m unittest discover -s tests -t ."
 args = {
-    "skillDir": "<skill dir>",
+    "skillDir": "<fill: plugin skill base dir>",
     "cycles": 1,
     "tokenBudget": 1500000,
     "repos": [
@@ -135,6 +135,13 @@ if mode in ("seed", "control"):
                  "an empty list gives {\"count\": 0, \"owners\": []}. Add tests/test_report.py covering a mixed list, "
                  "duplicate owners and the empty list. Your file set is those two new files. "
                  "Shared edit: README needs a line under Modules listing ledger/report.py and summary(entries).",
+    }, {  # a second repo with a workstream, so the cross-repo contract check runs
+        "id": "beta-report", "repo": beta, "featureBranch": "feat/eval",
+        "branch": "feat/eval--beta-report", "model": "sonnet", "gate": gate,
+        "brief": "Add a new module beta/report.py with format_summary(total_response), which takes a ledger total "
+                 "response in the shape beta.client.total_cents reads and returns \"Total: $D.CC\" "
+                 "(350 cents gives \"Total: $3.50\", 5 gives \"Total: $0.05\", 0 gives \"Total: $0.00\"). "
+                 "Add tests/test_report.py covering those three. Your file set is those two new files.",
     }]
 elif mode == "impossible":
     args["workstreams"] = [{
