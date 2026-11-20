@@ -202,8 +202,10 @@ assert.equal(withBlock(once, b.replace('X', 'Y')), once.replace('X', 'Y'))
 
 // ---- staleness (last, so a logic failure above names itself) ----
 assert.equal(read('evals/report.html'), buildHtml(entries), `evals/report.html ${fix}`)
-// the page re-declares passBar's helpers from their source; a helper left out throws only in the browser
-{ const page = buildHtml(entries); for (const f of ['seeds', 'honest', 'primed', 'cellState']) assert.ok(page.includes(`function ${f}(`), `report.html script lacks ${f}()`) }
+// the page re-declares the shared helpers from their source; one left out throws only in the browser
+{ const page = buildHtml(entries), src = read('evals/report.mjs'), shared = [...src.slice(0, src.indexOf('export {')).matchAll(/^function (\w+)\(/gm)].map(m => m[1])
+  assert.ok(shared.length > 10, `found only ${shared.length} shared helpers`)
+  for (const f of shared) assert.ok(page.includes(`function ${f}(`), `report.html script lacks ${f}()`) }
 const block = blockOf(read('README.md'))
 assert.ok(block, 'README has no <!-- eval:start --> ... <!-- eval:end --> block; run evals/snapshot.sh')
 assert.equal(block, readmeBlock(entries), `README eval block ${fix}`)
