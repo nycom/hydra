@@ -158,5 +158,19 @@ await t('5d (control) an absorbed regression re-filed open under its own id is n
   const { r } = await go({ cycles: 1, workstreams: [ws('a'), ws('b')] }, sc)
   assert.deepEqual(r.repos.find(x => x.repo === '/r/one').churn, []) })
 
+const gapSc = { 'one validate': () => ({ verdict: 'fail', findings: [F('V-F1')] }), 'one recheck r1': () => ({ verdict: 'fail', verified: [], findings: [F('V-F1')] }) }
+await t('6a known gaps: rounds out, gate green, only non-regression majors open: offer promote of the checked head, default leave', async () => {
+  const { r } = await go({ cycles: 1, wbRounds: 1, workstreams: [ws('a')] }, gapSc)
+  const q = r.questions.find(x => /Promote them as known gaps\?/.test(x.q))
+  assert(q && q.q.includes('f--wbfix1') && q.q.includes(SHA(71)) && q.default === 'leave unpromoted') })
+await t('6b known gaps: no offer when a critical or a regression is open', async () => {
+  for (const f of [F('V-F1', 'critical'), { ...F('V-F1'), kind: 'regression' }]) {
+    const { r } = await go({ cycles: 1, wbRounds: 1, workstreams: [ws('a')] }, { ...gapSc, 'one recheck r1': () => ({ verdict: 'fail', findings: [f] }) })
+    assert(!r.questions.some(x => /known gaps\?/.test(x.q))) } })
+await t('6c known gaps: no offer when the recheck died, saw another sha, or the gate was red', async () => {
+  for (const own of [() => null, () => ({ verdict: 'fail', sha: SHA(5), findings: [F('V-F1')] }), () => ({ verdict: 'fail', gate: { ...green, green: false }, findings: [F('V-F1')] })]) {
+    const { r } = await go({ cycles: 1, wbRounds: 1, workstreams: [ws('a')] }, { ...gapSc, 'one recheck r1': own })
+    assert(!r.questions.some(x => /known gaps\?/.test(x.q))) } })
+
 if (fails.length) { console.error(fails.join('\n')); process.exit(1) }
 console.log('stop-rule, acceptance, decision-log, drift, churn, known-gaps and wbReviewModel checks ok')

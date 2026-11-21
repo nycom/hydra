@@ -746,6 +746,7 @@ async function runRepo(r, mine) {
   }
   // Whole-branch fixes push to side branches; the feature branch fast-forwards to the last checked head only after a passing recheck.
   let checked = ''
+  let lastGate // the last recheck's gate, read by the known-gaps offer
   const sides = []
   const fail = why => { Object.assign(res, { verdict: 'fail', open: findings }); res.escalations.push(sides.length ? `${why}; whole-branch fixes left unpromoted on ${sides.at(-1)}, ${r.featureBranch} unchanged` : why); return res }
   const merged = mine.filter(w => w.merged)
@@ -855,6 +856,7 @@ sha = the commit you checked. verdict pass only if nothing critical or major is 
       { label: `${n} recheck r${round}`, phase: 'Whole-branch', agentType: 'validator', model: 'opus', effort: 'high', schema: RECHECK, gated: true })
     if (!re) return fail(died(`recheck r${round}`, `${n} recheck r${round}`))
     if (!same(re.sha, fix.sha)) return fail(`recheck r${round} saw ${re.sha}, the fix pushed ${fix.sha}`)
+    lastGate = re.gate
     noteFlaky(r.repo, re)
     res.questions.push(...(re.questions || []))
     Object.assign(res, { verdict: re.verdict, sections: re.sections, tests: re.tests })
@@ -880,7 +882,10 @@ sha = the commit you checked. verdict pass only if nothing critical or major is 
     }
   }
   res.open = findings
-  if (findings.some(blocking)) return fail(WB_ROUNDS ? `critical/major findings still open after ${res.fixRounds} whole-branch fix round(s)` : 'wbRounds 0: critical/major findings returned unfixed')
+  const open = findings.filter(blocking)
+  if (open.length && sides.length && lastGate?.green && !open.flatMap(f => [f, f.also || {}]).some(f => f.severity === 'critical' || f.kind === 'regression'))
+    res.questions.push({ q: `${n}: whole-branch fixes on ${sides.at(-1)} (checked head ${checked}, gate green) stay unpromoted with ${open.length} open major(s): ${open.map(f => `${f.severity} ${f.where}: ${f.issue}`).join('; ')}. Promote them as known gaps?`, options: ['leave unpromoted', `promote: fast-forward ${r.featureBranch} to ${checked} and park the open majors as known gaps`], default: 'leave unpromoted' })
+  if (open.length) return fail(WB_ROUNDS ? `critical/major findings still open after ${res.fixRounds} whole-branch fix round(s)` : 'wbRounds 0: critical/major findings returned unfixed')
   if (sides.length) {
     const why = res.verdict !== 'pass' ? `the last recheck returned ${res.verdict}` : await promote(r.repo, r.featureBranch, res.sha, checked, sides, `${n} promote`, 'Whole-branch')
     if (why) return fail(`whole-branch fixes not promoted: ${why}`)
