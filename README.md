@@ -31,6 +31,7 @@ Interactive report: [evals/report.html](evals/report.html), open locally (GitHub
 - A finding that only a brief change can settle (the brief contradicts itself or the repo, or a fix would undo an earlier verified fix) becomes a question for the user, never a fix.
 - Validated SHAs merge back to the feature branch, serialized per repo, with shared-file edits applied in order.
 - Then a whole-branch review plus an independent validator, a cross-repo contract check, and a validated docs sync. A repo whose only workstream merged onto its untouched base has no seam to review, so only the validator runs there.
+- Whole-branch fix rounds stop on churn: two rounds in a row that each bring a new regression-kind blocker in a file the round's fixer was asked to fix stop that repo's rounds with a question. Rounds that run out on a green recheck with no open critical, regression or integration finding offer to promote the checked head with its open majors parked as known gaps; the offer is skipped when `acceptance` or `stopRule` is set.
 - The mechanical part lives in `skills/run/workflow.js` (a Claude Code Workflow script); `skills/run/SKILL.md` is the coordinator's procedure.
 
 Opt-in, per run (details and every arg in `skills/run/SKILL.md`):
@@ -41,6 +42,9 @@ Opt-in, per run (details and every arg in `skills/run/SKILL.md`):
 - `workstreams[].humanCheck`: the run pauses after that workstream merges and returns what to check by eye; a re-run with `resumeFromRunId` and `humanChecks` (each answer bound to the sha the user checked) continues, and a reported problem goes back to its author.
 - `repos[].copyExcluded`: git-ignored files the gate needs (a local preview test) are copied into every agent worktree and never committed.
 - `repos[].reviewSharedEdits: true`: the shared-file edits each merge applies get their own gate and validator before the next merge.
+- `stopRule` + `acceptance`: a string of wrong actions and an approved case table; reviewers block only on those and on regressions vs the base, validators run each row black-box.
+- `decisionLog`: the user's answers become binding for every agent, and a read-only drift audit after the run turns each unlogged change into a revert-by-default question.
+- `wbReviewModel`: pick the integrated whole-branch review model (cheaper on intermediate passes, top tier on the pass expected to close clean).
 
 Stacked PRs are an opt-in mode, used only when asked for.
 
