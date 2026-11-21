@@ -10,6 +10,7 @@ function mock(sc) {
   const agent = async (prompt, o) => {
     calls.push(o); n++
     if (sc.die && sc.die(o)) return null
+    if (o.label.startsWith('health ')) return { ok: true, notes: 'git version 2' } // the probe between attempts 2 and 3
     o = { ...o, label: o.label.replace(/ attempt \d$/, '') }
     const head = (prompt.match(/\.\.\.?([0-9a-f]{40})/) || [])[1]
     if (o.label.endsWith('implement')) return { ...push, sha: SHA(1), sharedEdits: sc.shared || [] }

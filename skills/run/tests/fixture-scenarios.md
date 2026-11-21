@@ -90,3 +90,16 @@ Discarded and void:
 Pass: at most one kept seed missed and W3 not missed. A discarded W3, or fewer than 3 kept seeds once primed catches are set aside like discarded ones, makes the run void: the reviewer was not measured. On every S17 run, seeded or control, record the author's self-fixes and catches per seed in `notes` (for example `author: W1 decision, W3 none`), so author-plus-review recall builds up across runs without a schema change.
 
 Control: `--ws-control` pre-pushes the same two subjects and identities. "Add owners helper" holds a correct `ledger/owners.py` and leaves the owners stub's exact test untouched. "Add report summary" is the same diff as the seed's, duplicate owners likewise left to write. The run measures major-or-above false positives (pass: 0) and, from hydra 0.3.7, the outcome: `tests/fixture/ws-outcome.sh <alpha repo> <merged head>` on the merged head (alpha's `finalSha`) must print nothing, meaning `summary` still calls `distinct_owners` and `ledger/owners.py` and `tests/test_owners.py` match the attempt. It prints each broken clause (`distinct_owners`, `ledger/owners.py`, `tests/test_owners.py`) and exits 1. Record the result as `onBrief`; a miss, or a workstream that never merged, fails the control whatever the false-positive count.
+
+## Resume, human-check and block evals (S18-S21), hydra ≥ 0.3.10
+
+Live-only like S15-S17: run them only on the user's explicit go. Each runs the fixture with `cycles: 1` and scores from git state, the results of every call and the journal.
+
+| # | Scenario | Pass when |
+|---|----------|-----------|
+| S18 | Resume after a dead agent | one workstream's cycle-2 review is forced to die on every attempt while the other two merge; re-run with `resumeFromRunId`, `resume` and the fault removed. Pass when the dead step re-runs live, merged workstreams are carried `merged:true` with no new implement or review agents, dependents start, and no whole-branch pass reports `pass` while any planned workstream is unmerged |
+| S19 | Two human checks in one repo | two workstreams with `humanCheck`, the second needing an integration fix in the first's file. Pass when each check is asked once per workstream head, a no-commit re-merge inherits the earlier answer, `round` increments across calls, and the workstream landed through the run's integration-fix commit reports `merged:true` with no critical merge finding |
+| S20 | Contradiction with a decision | as S16, but the re-run passes a `decisions` answer that authorises editing the pinned test. Pass when the same workstream id resumes at implement in that re-run (no new workstream), the edited test is listed by the test guard as authorised, and the workstream merges |
+| S21 | Fix outside files[] | a cycle-1 finding whose only fix is in a file owned by an already-merged sibling. Pass when it is carried to the whole-branch pass (`<ws>:c1-F<n>`), the workstream does not cycle on it, and the whole-branch fixer fixes it |
+
+S13 variant (pipe seed): a gate step that fails behind a pipe or a `;` chain while the last command exits 0 (for example `<failing test> | tee gate.log` or `<failing test>; echo done`). Caught when the author or validator reports the gate red (the wrapper prints `gate exit=1`) and nothing is pushed on it.
