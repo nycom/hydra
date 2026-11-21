@@ -116,6 +116,19 @@ for (const r of REPOS)
   if (r.ws.some(w => w.featureBranch !== r.featureBranch || w.base !== r.base)) throw new Error(`${r.repo}: workstreams disagree on featureBranch/base`)
 const DOCS = (A.docsRepos || REPOS).map(d => ({ repo: d.repo && norm(d.repo), featureBranch: d.featureBranch, base: d.base || repoMap[d.repo && norm(d.repo)]?.base || 'main', gate: d.gate || '' }))
 for (const d of DOCS) if (!d.repo || !d.featureBranch) throw new Error('docsRepos items need {repo, featureBranch, base?, gate?}')
+// carryForward: what git cannot say, handed from a paused or incomplete result to its resume (findings, settled ledgers, passed whole-branch passes)
+const CF = A.carryForward || {}
+if (typeof CF !== 'object' || Array.isArray(CF)) throw new Error('carryForward must be the carryForward object of the result being resumed')
+if (A.carryForward && !A.resume) throw new Error('carryForward is only for a resume: set resume too')
+for (const [id, x] of Object.entries(CF.workstreams || {})) {
+  if (!byId[id]) throw new Error(`carryForward.workstreams.${id}: no workstream ${id}`)
+  for (const k of ['handed', 'open', 'findings']) if (x[k] != null && !Array.isArray(x[k])) throw new Error(`carryForward.workstreams.${id}.${k} must be an array`)
+}
+const CF_REPOS = Object.fromEntries(Object.entries(CF.repos || {}).map(([repo, x]) => [norm(repo), x]))
+for (const [repo, x] of Object.entries(CF_REPOS)) {
+  if (!repoMap[repo]) throw new Error(`carryForward.repos: ${repo} has no workstream in this run`)
+  if (x.shared != null && !Array.isArray(x.shared)) throw new Error(`carryForward.repos ${repo}: shared must be an array`)
+}
 const name = repo => repo.split('/').pop()
 const STALE = `Read other repos ONLY via git -C <repo> fetch ${O}, then git -C <repo> show ${O}/<featureBranch>:<path> or git -C <repo> diff ${O}/<base>...${O}/<featureBranch> — never by filesystem path: those checkouts sit on unrelated branches.`
 
@@ -157,7 +170,8 @@ const flakyOf = repo => [...(flakySeen[repo] || [])]
 const GREEN = (knownRed, repo) => `${knownRed.length ? `Green = everything passes except exactly these known-red tests (recorded at the base): ${knownRed.join(', ')}. Any other failure is red; report any known-red that now passes.` : 'Green = every test passes.'}${flakyOf(repo).length ? ` Known flaky in this run (intermittent at head and base): ${flakyOf(repo).join(', ')}. If one of these fails, rerun it once alone and skip the base rerun: green on the rerun = flaky, not red; red again = a failure.` : ''} Never invent your own allowed failures.`
 // the fixed wrapper: pipefail and errexit, so a failure behind a pipe or a ; chain is red, and the exit code is printed last
 const GATE_CMD = gate => `bash -c ${sq(`set -eo pipefail\n${gate}`)}; echo "gate exit=$?"`
-const WRAPPED = 'Run it through exactly this wrapper (pipefail, it stops at the first failing command and prints the exit code last); anything but "gate exit=0" is red, and nothing is ever pushed on a red gate'
+// a known-red or flaky failure makes the exit non-zero and stops the chain, so the rest of the gate still has to run
+const WRAPPED = 'Run it through exactly this wrapper (pipefail; it stops at the first failing command and prints the exit code last). "gate exit=0" is green. Any other exit is red unless every failure it printed is allowed by the green rules below (a known-red or known-flaky test, or one the flaky rule proves intermittent); then run each command after the failing one through the same wrapper too, so no suite stays unrun, and judge them all. Nothing is ever pushed on a red gate'
 const GATE = (gate, knownRed, repo, quick) => `${quick ? 'Quick gate, green before every push (validators, the merge, the whole-branch pass and docs run the full gate)' : 'Full gate, green before every push — every suite the repo defines (unit, typecheck, build, Playwright/e2e where present), not just "test"'}. ${WRAPPED}:\n${GATE_CMD(gate)}\n${GREEN(knownRed, repo)}\nRun gates in the foreground or with the harness's background-run. Never write pgrep -f wait loops (they match their own command line and never exit); if a wait is unavoidable, use wait $pid, kill -0 $pid, or a bracketed pattern like pgrep -f "[m]vnw".`
 const FLAKY = 'A failure outside the known-red and known-flaky lists: rerun that test alone twice and once at the base SHA. Intermittent, or red on base too -> FLAKY: a minor hygiene finding with the three outcomes. Deterministic on head and green on base -> a regression, and gate.green = false. List in gate.flaky only tests that were intermittent on head AND failed at the base (pre-existing flakiness).'
 // One regex for every no-AI-trace check, scoped to commits this run authored, never teammates'.
@@ -194,8 +208,9 @@ const LENSES = grill => `Lenses:
 ${grill ? '2. Grilling: stress-test each design decision in the diff; raise one as kind "question" only when you can name the concrete failure you fear. The author must answer it defensibly or change it.\n' : ''}${grill ? 3 : 2}. Over-engineering: reinvented stdlib/helpers, speculative abstractions, dead flexibility, options nobody asked for — say what to DELETE (kind "overengineering").`
 const asGlob = f => f.endsWith('/') ? f + '**' : f
 const pathspec = (ps, magic = 'glob') => ps.map(p => `':(${magic})${asGlob(p)}'`).join(' ')
-const SHARED = (c, files) => [
-  files && `Edit only these paths: ${files.join(', ')}. Needing anything else is status "blocked" with a question.`,
+// fixing: in a fix step a blocker whose fix lies outside files[] is answered "carried", never a block
+const SHARED = (c, files, fixing) => [
+  files && `Edit only these paths: ${files.join(', ')}. ${fixing ? 'A critical or major whose fix needs anything else is answered "carried" (see above).' : 'Needing anything else is status "blocked" with a question.'}`,
   c.hot.length && `Shared files are never yours to commit: ${c.hot.join(', ')}. Regenerate generated ones locally if the gate needs it${c.regen ? ` (${c.regen})` : ''}, but leave them out of your commits. Return every change you need in a shared file as sharedEdits [{file, intent}] (for a generated file, the intent says what to regenerate); the merge applies it on the feature-branch tip.`,
 ].filter(Boolean).join('\n') || 'No shared-file restrictions in this repo.'
 
@@ -341,7 +356,8 @@ const lock = {}
 // shortcut: prompts that list it depend on merge timing, so a resume may run those agents live instead of from cache.
 const mergedInto = {}
 const mergeShas = {} // workstream id -> the feature-branch tip its latest merge pushed, for workstreams ordered after it
-const sharedFound = {} // repo -> findings of the shared-edits checks, fixed in the whole-branch fix rounds
+const sharedFound = Object.fromEntries(Object.entries(CF_REPOS).filter(([, x]) => x.shared?.length).map(([repo, x]) => [repo, [...x.shared]])) // repo -> findings of the shared-edits checks, fixed in the whole-branch fix rounds; a resume starts from the resumed result's
+const landedHere = {} // repo -> a merge landed in this call, so a kept whole-branch pass no longer covers its tip
 // humanCheck: a repo's checks are asked together, in the one pause after its merges finish; merges never wait on a check.
 // repo -> {workstream id -> why its check is open}; an "ok" deletes the entry, and an open entry pauses the repo's whole-branch pass
 const humanOpen = {}
@@ -461,6 +477,13 @@ async function runWorkstream(w) {
   const book = out.findings
   const decisions = [] // the author's reasoning, handed to every later reviewer and fixer
   const ledger = [] // settled findings: never re-raised unless the code under them changed
+  // a resume restores what git cannot say: the ledger (settled entries stay settled for the reviewers) and the findings handed to the whole-branch pass
+  const cf = CF.workstreams?.[w.id]
+  if (cf) {
+    book.push(...(cf.findings || []))
+    ledger.push(...book.filter(e => STATUS.includes(e.status)).map(({ id, where, issue, status }) => ({ id, where, issue, status })))
+    out.handed.push(...(cf.handed || []))
+  }
   const absorb = r => {
     out.sharedEdits = r.sharedEdits // each author returns the complete current list
     out.questions.push(...r.questions)
@@ -477,7 +500,7 @@ async function runWorkstream(w) {
   }
   // a block carries its question as a decision the user answers on the re-run (decisions.<id>), which resumes this same workstream
   const blocked = (what, r) => {
-    if (r.status === 'blocked' && r.questions.length) out.decision = { questions: r.questions, answer: `re-run with the same args, resumeFromRunId = this run, resume = this run's id, and decisions.${w.id} = "<the user's answer>"` }
+    if (r.status === 'blocked' && r.questions.length) out.decision = { questions: r.questions, answer: `re-run with the same args, resumeFromRunId = this run, resume = this run's id, carryForward = this result's carryForward, and decisions.${w.id} = "<the user's answer>"` }
     return stop(`${what} ${r.status}: ${r.tests}`)
   }
   // blocked only on an optional sub-part, with a green, pushed head that takes the defaults: continue, carrying the question
@@ -489,7 +512,7 @@ async function runWorkstream(w) {
     const pending = W.filter(x => x.repo === w.repo && x !== w && !done.includes(x))
     return done.length
       ? `Integration fix: if a critical or major can only be fixed in files owned by workstreams already merged into ${w.featureBranch} — ${owners(done)} — first git merge ${O}/${w.featureBranch} into your branch, then fix those files too (the one exception to your file list; say so in notes).${pending.length ? ` Never touch files owned by workstreams not merged yet: ${owners(pending)}.` : ''}`
-      : `No workstream has merged into ${w.featureBranch} yet; a blocker outside your files is status "blocked" with a question.`
+      : `No workstream has merged into ${w.featureBranch} yet; a blocker outside your files is ${w.files ? 'answered "carried" (see above)' : 'status "blocked" with a question'}.`
   }
   const authorGate = () => w.quickGate ? GATE(w.quickGate, c.knownRed, w.repo, true) : GATE(w.gate, c.knownRed, w.repo)
   // The first validator of a workstream writes black-box acceptance tests from the brief before it reads the diff.
@@ -507,16 +530,24 @@ async function runWorkstream(w) {
   const given = [].concat(HUMAN[w.id] ?? []) // the user's answers, earliest first
   const used = new Set() // indexes of the answers applied in this call
   const told = [] // the answers applied so far, in order
+  let seeded = false
   // A check binds to this workstream's own validated head, never the feature tip, so a re-merge with no new commit and a carried merge
-  // find their answer; round counts the answers applied, across calls. True: nothing more runs here (no check, ok, or the pause).
+  // find their answer; round counts the answers applied, across calls: at this call's first check, every answer before the last one
+  // bound to the head was spent by an earlier call (all of them when none is bound to it, as on a new head). True: nothing more runs here (no check, ok, or the pause).
   // False: the user's problem goes to this workstream's fix path, like a rejected merge, then it merges and is checked again.
   const checked = at => {
     if (!w.humanCheck) return true
-    const head = out.validatedSha, n = told.length + 1, where = `${w.featureBranch} @ ${at || 'its tip'}`
+    const head = out.validatedSha, where = `${w.featureBranch} @ ${at || 'its tip'}`
+    if (!seeded) {
+      seeded = true
+      const last = given.findLastIndex(a => same(a.sha, head))
+      for (let j = 0; j < (last < 0 ? given.length : last); j++) { used.add(j); told.push({ sha: given[j].sha, answer: given[j].answer }) }
+    }
+    const n = told.length + 1
     const k = given.findIndex((a, j) => !used.has(j) && same(a.sha, head))
     if (k < 0) {
       const ask = JSON.stringify([...told, { sha: head, answer: '<ok, or the problem in words>' }])
-      humanPending.push({ id: w.id, repo: w.repo, featureBranch: w.featureBranch, sha: head, checkAt: at || `${O}/${w.featureBranch}`, check: w.humanCheck, round: n, answer: `re-run with the same args, resumeFromRunId = this run, resume = this run's id, and humanChecks.${w.id} = ${ask}` })
+      humanPending.push({ id: w.id, repo: w.repo, featureBranch: w.featureBranch, sha: head, checkAt: at || `${O}/${w.featureBranch}`, check: w.humanCheck, round: n, answer: `re-run with the same args, resumeFromRunId = this run, resume = this run's id, carryForward = this result's carryForward, and humanChecks.${w.id} = ${ask}` })
       openCheck(w, `awaiting the user's human check ${n} of ${w.id} (${where}, workstream head ${head})`)
       log(`${tag}: merged; paused for the user's human check ${n}`)
       return true
@@ -534,7 +565,7 @@ async function runWorkstream(w) {
   }
   // Already on the feature branch (the resume's git probe, or the implement step finding it merged): success, no stage re-runs.
   const carried = (head, at) => {
-    Object.assign(out, { status: 'done', sha: head, validatedSha: head, merged: true })
+    Object.assign(out, { status: 'done', sha: head, validatedSha: head, merged: true, open: [...(cf?.open || [])] }) // its carried minors ride to the whole-branch pass again
     const done = (mergedInto[w.repo] ||= [])
     if (!done.includes(w)) done.push(w)
     mergeShas[w.id] = head
@@ -645,7 +676,7 @@ ${ACC_READ}${STOP_FIX}${RO_TESTS}
 Minor: fix only if it is a one-liner inside your files, otherwise decline with a reason — declining is a valid outcome.
 Keep fixes minimal and inside this workstream's files.
 ${w.files ? 'A critical or major whose only fix lies outside the files you may edit (a pre-existing test, or a file the integration-fix exception below does not give you): change nothing for it and answer it "carried", naming that file in the note; the whole-branch pass fixes it, and it stops counting toward this workstream\'s cycles.\n' : ''}Nothing to change (all answered, declined or escalated): no commit, no push, sha = the current ${O}/${w.branch} head (${prev} unless an earlier attempt moved it), ok = true.
-${SHARED(c, w.files)}
+${SHARED(c, w.files, true)}
 ${integration()}
 sharedEdits: return the complete current list; it replaces the earlier one${out.sharedEdits.length ? `, so keep every entry still needed from:\n${JSON.stringify(out.sharedEdits)}` : ''}.
 ${authorGate()}
@@ -748,6 +779,7 @@ Push to ${w.featureBranch} (plain push; if rejected, fetch and redo every step o
       if (m?.ok && m.status === 'done') {
         if (!done.includes(w)) done.push(w)
         mergeShas[w.id] = m.sha
+        landedHere[w.repo] = true
         landings++
         if (c.reviewSharedEdits && out.sharedEdits.length) await checkShared(w, m, out.sharedEdits, landings)
       }
@@ -791,7 +823,11 @@ async function runRepo(r, mine) {
   if (!mine.some(w => w.merged)) return res
   // never a pass on a partial branch: the whole-branch pass runs once every planned workstream of the repo is on it
   const unmerged = mine.filter(w => !w.merged).map(w => w.id)
-  if (unmerged.length && STAGE !== 'wholeBranch') return { ...res, verdict: 'incomplete', sections: `not run: ${unmerged.join(', ')} not merged into ${r.featureBranch}`, open: shared, escalations: [`whole-branch pass not run: planned workstream(s) ${unmerged.join(', ')} not merged; settle them, then re-run with resumeFromRunId and resume (merged workstreams are carried from git)`] }
+  if (unmerged.length && STAGE !== 'wholeBranch') return { ...res, verdict: 'incomplete', sections: `not run: ${unmerged.join(', ')} not merged into ${r.featureBranch}`, open: shared, escalations: [`whole-branch pass not run: planned workstream(s) ${unmerged.join(', ')} not merged; settle them, then re-run with resumeFromRunId, resume and carryForward = this result's carryForward (merged workstreams are carried from git)`] }
+  // the resumed call already passed this repo's whole-branch pass and its feature branch has not moved since: keep that result
+  const kept = CF_REPOS[r.repo]?.passed
+  if (kept && STAGE !== 'wholeBranch' && !landedHere[r.repo] && same(kept.sha, featureShaOf[r.repo]))
+    return { ...kept, notes: [...(kept.notes || []), `whole-branch pass kept from the resumed run: ${r.featureBranch} is unchanged at ${kept.sha}`] }
   let findings = [...shared] // what fail() reports if the whole-branch agents die
   // A validator finding whose first path:line (or path:from-to) in where overlaps a reviewer finding's in the same file joins it:
   // the fixer and rechecks see one entry, the other finding whole under also. Both hunts stay independent; a where with no path:line never collapses.
@@ -818,6 +854,7 @@ async function runRepo(r, mine) {
   // blockers a workstream handed over because their fix lies outside its files: this pass fixes them
   const handed = merged.flatMap(w => (w.handed || []).map(f => ({ ...f, id: `${w.id}:${f.id}` })))
   track(book, 'handed', handed)
+  findings.push(...handed)
   // one workstream merged onto a feature branch still at its base has no seam: the validator alone covers the branch
   // findings the workstream cycles settled: a whole-branch finding that would reverse one is a question
   const fixedIn = (b, pre = '') => b.filter(e => e.status === 'fixed' && e.where !== 'gate').map(e => ({ id: pre + e.id, where: e.where, issue: e.issue }))
@@ -968,6 +1005,7 @@ sha = the commit you checked. verdict pass only if nothing critical or major is 
 log(`${STAGE === 'wholeBranch' ? 'whole-branch re-validation' : `${W.length} workstream(s)`} across ${REPOS.length} repo(s); cycles=${CYCLES ?? 'converge'} (hard cap ${CAP})`)
 // resume: one read-only probe per repo rebuilds each workstream's state from git before any stage; its prompt names the resumed run, so it never replays a cached state
 const RESUMED = {} // workstream id -> {head, merged, featureSha}
+const featureShaOf = {} // repo -> its feature-branch head when the probe read it
 if (A.resume && STAGE !== 'wholeBranch') {
   const states = await parallel(REPOS.map(r => () => step(
     `Resume of run ${A.resume}: read the git state of ${r.repo}; change nothing. git -C ${r.repo} fetch ${O}; featureSha = git -C ${r.repo} rev-parse ${O}/${r.featureBranch}. For each workstream branch below: head = git -C ${r.repo} rev-parse ${O}/<branch> (empty if the branch does not exist on ${O}); merged = true only if head is non-empty and git -C ${r.repo} merge-base --is-ancestor <head> ${O}/${r.featureBranch} succeeds.
@@ -975,6 +1013,7 @@ ${r.ws.map(w => `${w.id}: ${w.branch}`).join('\n')}
 No worktree, no checkout, no commits, no pushes; never touch the user's checkout. ${HARD}`,
     { label: `${name(r.repo)} state`, phase: 'Implement', model: 'sonnet', effort: 'low', schema: STATE }, true)))
   states.forEach((st, i) => {
+    if (st) featureShaOf[REPOS[i].repo] = st.featureSha
     if (!st) return log(`${name(REPOS[i].repo)}: the resume state probe died; its workstreams start from implement, which carries a merged branch as merged`)
     for (const x of st.workstreams) if (byId[x.id]?.repo === REPOS[i].repo) RESUMED[x.id] = { ...x, featureSha: st.featureSha }
   })
@@ -1114,5 +1153,10 @@ return {
   drift,
   crossRepo: crossRepo && { ...crossRepo, findings: crossRepo.findings.map(brief), ledger: asLedger('contract', crossRepo.findings) },
   ...(humanPending.length && { humanCheck: humanPending }), // the run paused: ask the user, then re-run with humanChecks
+  // a result a resume follows hands over what git cannot say; pass it back verbatim as carryForward
+  ...((paused || wsResults.some(w => w.decision)) && STAGE !== 'wholeBranch' && { carryForward: {
+    workstreams: Object.fromEntries(wsResults.map(w => [w.id, { handed: w.handed || [], open: w.open || [], findings: w.findings || [] }])),
+    repos: Object.fromEntries(repoResults.map(r => [r.repo, { shared: sharedFound[r.repo] || [], passed: r.verdict === 'pass' ? r : null }])),
+  } }),
   otherDocs: DOCS.filter(d => !repoMap[d.repo]).map(d => ({ repo: d.repo, featureBranch: d.featureBranch, docs: (x => x && { ...x, notes: [...x.notes, ...(leftovers[d.repo] || [])] })(docsOut(docsOf(d.repo))), findings: asLedger('docs', docsOf(d.repo)?.findings), flaky: flakyOf(d.repo) })),
 }

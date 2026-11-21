@@ -257,6 +257,7 @@ Workflow({
     humanChecks: { "api-auth": { sha: "<workstream head>", answer: "ok" } }, // only on the re-run after a humanCheck pause
     resume: "<id of the run being resumed>", // on every resumeFromRunId call: rebuilds workstream state from git
     decisions: { "api-auth": "edit the pinned test to half up" }, // only on the re-run after a block with a decision
+    carryForward: <the resumed result's carryForward>, // on every resume of a paused, incomplete or blocked result, verbatim
     workstreams: [
       { id: "api-auth", repo: "~/code/api", featureBranch: "feat/auth",
         branch: "feat/auth--api-auth", model: "opus",
@@ -311,6 +312,7 @@ Workflow({
 | `humanChecks` | none | the user's answers on the re-run after a `humanCheck` pause: `{"<workstream id>": {sha, answer}}` or an array of those, one per check so far; `sha` = the workstream head the check was asked about (`humanCheck[].sha`, 7-40 hex; the feature-branch commit to look at is `humanCheck[].checkAt`), `answer` = `ok` (case and trailing punctuation ignored: `OK.`, `Ok!`) or the problem in words. An answer applies only to that workstream head, once, earliest first, so a re-merge with no new workstream commit keeps it however the feature tip moved. Keys must name a workstream with a `humanCheck`. The paused result's `humanCheck[].answer` gives the exact value to pass |
 | `resume` | none | on every `resumeFromRunId` call: the id of the run being resumed. One read-only probe per repo (`<repo> state`, sonnet) reads git before any stage; its prompt names that id, so it always runs live and every later call runs live too. A workstream whose branch head is already an ancestor of the feature branch is carried `merged: true` with no agent of its own (dependents start, its human check binds to that head); any other workstream runs from implement, which continues its unmerged branch. A dead probe falls back to implement, which also reports an already-merged branch as success (`alreadyMerged`), never `blocked` |
 | `decisions` | none | the user's answers to blocked workstreams' questions, on a re-run with `resumeFromRunId` and `resume`: `{"<workstream id>": "answer in words"}`. The answer is appended to that workstream's brief, so the same workstream resumes at implement and its validators' test guard accepts a pre-existing test edit the answer authorises (the author lists each as "authorised test edit: <path>"). The blocked result's `workstreams[].decision.answer` gives the exact value to pass |
+| `carryForward` | none | on a resume (requires `resume`): the `carryForward` object of the result being resumed, passed back verbatim. It holds what git cannot say: per workstream the findings ledger (settled entries stay settled for the reviewers), the carried minors and the findings handed to the whole-branch pass; per repo the shared-edits findings and, for a repo whose whole-branch pass already passed, that result. Without it a resume would carry merged workstreams with empty ledgers, so a handed major or a shared-edits blocker would vanish into a `pass`. A kept pass is reused when the probe finds the feature branch still at its `sha` and no merge landed in this call; otherwise the pass runs again |
 | `workstreams[].after` | none | workstream ids (same repo only; unknown ids, itself and cycles throw) that must merge into the feature branch before this one starts implementing; it branches from the head that carries them. A predecessor that does not merge leaves it NOT started. Workstreams without `after` run in parallel as before |
 | `workstreams[].lite` | `false` | for small pure files: implement, then the clean-review validator alone (acceptance tests, full-range test guard, gate, trial merge); no reviewer ever runs. A critical or major it files gets a fix and a delta validation per cycle, capped by `maxCycles` as usual. Still merged, and covered by the whole-branch pass. A lite workstream alone on its untouched base gets no reviewer at all: the integrated review is skipped too, so only validators see it |
 | `workstreams[].humanCheck` | none | instructions for the user's by-eye check. Once this workstream merges, its repo's whole-branch pass waits for the answer; other merges do not (see Human checks) |
@@ -394,15 +396,18 @@ own validated head (what the answer binds to), `checkAt` the feature-branch
 commit to look at (a worktree on it; in local-only mode fetch `hydra-local`
 first). Ask the user per `check`, then re-run with the same args plus
 `humanChecks.<id>` set to the value `answer` spells out (`[{sha, answer: "ok"
-or the problem}]`, earlier answers first), `resumeFromRunId` = the paused run
-and `resume` = its id. Between the pause and the resume change nothing but
+or the problem}]`, earlier answers first), `resumeFromRunId` = the paused run,
+`resume` = its id and `carryForward` = its `carryForward`. Between the pause and the resume change nothing but
 `humanChecks`: no hand fixes, no brief edits. Hold the paused result's
 `questions` and ask them with the final return's. The resume's git probe
 carries every merged workstream, so nothing is re-implemented and an answer
 reaches its workstream without any replay. An answer binds to the workstream
 head, never the feature tip: a re-merge with no new workstream commit, or a
 tip moved by a sibling's merge, keeps it; a new commit is a new head and is
-asked again. `round` counts the answers applied, across calls. A problem
+asked again. `round` counts the answers applied, across calls: at a call's
+first check of a workstream, every answer before the last one bound to its head
+counts as spent (all of them when none is bound to it, as on a new head), so a
+carried head applies its latest answer, never a problem an earlier call fixed. A problem
 becomes a critical (`H<round>-F1`, stage `human`) for that workstream's fix
 path: fix, delta validation, a second merge (with its own shared-edits check,
 ids `S-<id>-m2-…`), and a new check on the new head. Answers are used once
@@ -419,13 +424,13 @@ that is already an ancestor of the feature branch ("Already up to date") is
 **Whole-branch pass only on a whole branch:** a repo with any planned
 workstream unmerged gets no whole-branch pass (`verdict: "incomplete"`,
 `sections` names them), and contracts, docs and the drift audit wait, as for
-`paused`. Settle the unmerged workstreams, then re-run with `resumeFromRunId`
-and `resume`. `stage: "wholeBranch"` is unaffected.
+`paused`. Settle the unmerged workstreams, then re-run with `resumeFromRunId`,
+`resume` and `carryForward`. `stage: "wholeBranch"` is unaffected.
 
 **A block the user can answer resumes in place:** an author or fixer that
 returns `blocked` with questions leaves `workstreams[].decision: {questions,
 answer}`; ask the user and re-run with `decisions.<id>` (see the args table),
-`resumeFromRunId` and `resume`: that same workstream resumes at implement on its
+`resumeFromRunId`, `resume` and `carryForward`: that same workstream resumes at implement on its
 branch, never a new fix-up workstream. An author blocked only on an optional
 sub-part, with every other part done, the gate green, the head pushed and each
 question's default implemented, returns `blocked` with `ok: true`: the run
@@ -434,7 +439,10 @@ continues to review and merge with the defaults and carries the questions.
 **Fixes outside `files[]` go to the whole-branch pass:** when a workstream has
 `files[]`, its fixer answers a critical or major whose only fix lies outside the
 files it may edit (a pre-existing test, a file the integration-fix exception
-does not give it) `"carried"`. The finding leaves the workstream's cycles (ledger
+does not give it, which includes any file before a sibling has merged)
+`"carried"`; for such a workstream the fix prompt never also tells it to block.
+Code in an already-merged sibling's files stays the fixer's through the
+integration-fix exception. The finding leaves the workstream's cycles (ledger
 status `carried`, listed in `workstreams[].handed`) and joins its repo's
 whole-branch findings as `<ws id>:<id>`, where the whole-branch fixer fixes it;
 that fixer's notes name the run's workstreams whose briefs read the files it
@@ -442,14 +450,17 @@ changed.
 
 **Gate wrapper:** every gate an agent runs goes through one fixed wrapper,
 `bash -c 'set -eo pipefail\n<gate>'; echo "gate exit=$?"`, so a failure behind a
-pipe or a `;` chain is red, and only `gate exit=0` is green; nothing is pushed on
-a red gate.
+pipe or a `;` chain is red, and only `gate exit=0` is green. A non-zero exit
+whose every failure is allowed by the green rules (known-red, known-flaky, or
+proven flaky by the rerun rule) is not red, but the wrapper stopped there, so the
+agent runs each later command through the wrapper too and judges them all.
+Nothing is pushed on a red gate.
 
 ## 4. Final call (coordinator)
 
 The workflow returns:
 
-- top level: `{stage, budget, cycles, maxCycles, questions, workstreams, repos, drift, crossRepo, otherDocs}`, plus `humanCheck` only when the run paused for one (see Human checks);
+- top level: `{stage, budget, cycles, maxCycles, questions, workstreams, repos, drift, crossRepo, otherDocs}`, plus `humanCheck` only when the run paused for one (see Human checks), and `carryForward` when a resume is expected (a paused or incomplete repo, or a workstream `decision`): pass it back verbatim on that resume;
   `questions` collects every question of the run: first one entry when `crossRepo` has an open critical or major,
   whatever its verdict says (contracts have no fix loop, so it carries the contract
   check's recipe, its `sections`, else the findings' issues, and the user decides),
@@ -534,7 +545,12 @@ says NOT merged; unpromoted side branches). Then:
   comes from git, not from the cache: merged workstreams are carried and never
   re-implemented, a workstream whose agent died re-runs from implement on its
   branch instead of replaying the failure, and no whole-branch pass reports
-  `pass` while a planned workstream is unmerged. Never resume after a hand fix
+  `pass` while a planned workstream is unmerged. Pass the resumed result's
+  `carryForward` too (see the args table). The cost of a live resume: every
+  stage not settled in git or in `carryForward` runs again. An unmerged
+  workstream restarts at review c1 (its settled ledger comes back, so settled
+  findings are not re-raised), and a repo's whole-branch pass runs again unless
+  `carryForward` holds its passed result and its feature branch has not moved. Never resume after a hand fix
   to a workstream branch; re-run `stage: "wholeBranch"` instead. A `failed`
   infra escalation (the health probe failed) is resumable once auth or tool
   access is fixed.

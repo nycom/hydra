@@ -273,11 +273,11 @@ await t('6e a problem whose fix cannot merge keeps the repo paused and the escal
 await t('6f (control) answering does not change any earlier prompt, so a resume replays everything up to the check', async () => {
   const paused = await go(human(), dirtyB), ok = await go(human({ a: A(paused.r.humanCheck[0].sha, 'ok') }), dirtyB)
   for (const [L, ps] of Object.entries(paused.all)) assert.deepEqual(ok.all[L]?.slice(0, ps.length), ps, `${L} differs`) })
-await t('6h an answer for another sha is not applied: the run pauses again on a\'s head, round 1', async () => {
+await t('6h an answer for another sha is not applied: the run pauses again on a\'s head, the older answer counted as spent (round 2)', async () => {
   const { r, order } = await go(human({ a: A(SHA(777), 'ok') }), dirtyB)
   const a = r.workstreams.find(w => w.id === 'a')
   assert(!order.includes('one validate') && r.repos[0].verdict === 'paused', order.join())
-  assert(r.humanCheck?.[0]?.sha === a.validatedSha && r.humanCheck[0].round === 1, JSON.stringify(r.humanCheck)) })
+  assert(r.humanCheck?.[0]?.sha === a.validatedSha && r.humanCheck[0].round === 2 && r.humanCheck[0].answer.includes(`[{"sha":"${SHA(777)}","answer":"ok"},{"sha":"${a.validatedSha}"`), JSON.stringify(r.humanCheck)) })
 await t('6i a crash in the fix of a check keeps the repo paused with the reason instead of hanging the run', async () => {
   const S1 = await pausedAt(undefined, dirtyB)
   const { r } = await go(human({ a: A(S1, 'the button is grey') }), { ...dirtyB, 'a fix c2': () => { throw new Error('boom') } })
