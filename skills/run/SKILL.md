@@ -296,7 +296,7 @@ Workflow({
 | `cycles` | `null` | floor on review cycles; `null` = run to convergence |
 | `maxCycles` | `cycles + 2`, or 4 | hard cap on cycles per workstream (must be ≥ `cycles`) |
 | `skillDir` | none | this skill's absolute base directory (the `<skill dir>` printed when the skill loads); the script can't learn its own path, and agents run `node <skillDir>/run-cmd.mjs <seconds> '<command>'` for smoke and checks. Required when any repo has `smoke` or any workstream has `checks` |
-| `stage` | omitted | `"wholeBranch"`: skip implement/cycles/merge; re-run whole-branch review + validator, contract check, docs sync on the current feature-branch tips |
+| `stage` | omitted | `"wholeBranch"`: skip implement/cycles/merge; re-run whole-branch review + validator, contract check, docs sync on the current feature-branch tips, and the drift audit when `decisionLog` is set |
 | `wbRounds` | `2` | whole-branch fix rounds, each pushed to a side branch `<featureBranch>--wbfix<round>` and promoted onto the feature branch only after a passing recheck; `0` = no fix rounds (findings returned unfixed; the repo verdict is `fail` while any is critical or major); pair with `docsRepos: []` for a review-only pass (a failing repo skips docs regardless) |
 | `stopRule` | none | non-empty string naming the wrong actions. A blocker is a regression vs the base or one of these; a miss the base also has is a known gap and minor. It reshapes the severity text for every reviewer and validator, and fixers decline known gaps |
 | `acceptance` | none | absolute path to the approved case table. Validators run each row this change touches black-box at their sha; reviewers block only on a broken row or a regression vs the base, and a failing row blocks even when the base fails it. Security, data loss and a red gate stay critical. A missing file is a critical finding from validators and `blocked` for authors and fixers; reviewers get no missing-file instruction |
@@ -332,7 +332,7 @@ review lands on an unvalidated head + merge; a rejected merge that returns to it
 author adds fix + validate + merge, +3 once the named cycle count is reached, +4
 otherwise and in converge mode, where a review of the fixed head follows) + per repo (2, +2 per whole-branch fix round, max `wbRounds`
 rounds, +1 promote when a round pushed) + 1 contract check when 2+ repos + per
-docs repo (1, +1 validator when it pushed, +1 promote when that passed); a repo whose one workstream merged onto its untouched base starts at 1, not 2. Every
+docs repo (1, +1 validator when it pushed, +1 promote when that passed) +1 fable drift audit when decisionLog is set; a repo whose one workstream merged onto its untouched base starts at 1, not 2. Every
 dead agent can add up to 2 replacements; a push step that reports done without a full 40-hex SHA gets a cheap repair call instead (it keeps the result and only re-reads the SHA). One workstream with a clean cycle 1 is
 ~9 (~8 when it merged onto its untouched base and the integrated review is skipped); two workstreams × 2 cycles is ~21.
 A `lite` workstream drops the reviewer from every cycle: clean, it is implement + 1 validator + merge (3 agents instead of 4, and
@@ -472,9 +472,9 @@ says NOT merged; unpromoted side branches). Then:
   verdict, `docs.ok: false`, or a `crossRepo` finding against the code (and the
   docs diffs — docs must describe what shipped, including every review-round
   fix). Fix-ups go to a fresh `implementer`, never to you (in local-only mode it pushes to `hydra-local` only and never touches `origin`). Before any re-run,
-  write the user's answer to each question into the affected brief: the brief is
-  the only channel by which a validator learns that "the user answered" allows a
-  change. **Every fix-up is then
+  write the user's answer to each question into the affected brief: decisions
+  reach agents through the brief, or through the `decisionLog` when set, and that
+  is how a validator learns that "the user answered" allows a change. **Every fix-up is then
   validated and docs-synced:** re-run the workflow with `stage: "wholeBranch"`
   (same args, narrowed to the affected repos' workstreams). After an
   unpromoted failure, the fix-up implementer continues from the side branch the
@@ -503,9 +503,13 @@ says NOT merged; unpromoted side branches). Then:
 - **Known-gaps promote:** when the rounds run out with the last recheck green
   and only non-regression, non-critical majors open, a question offers to
   fast-forward the feature branch to the checked head; the default is leave
-  unpromoted. If the user picks it: `git push origin <sha>:refs/heads/<featureBranch>`
-  (`hydra-local` in local-only mode; explicit refspec, no force), verify with
-  `ls-remote`, park the open majors, re-run `stage: "wholeBranch"` for that repo
+  unpromoted. The offer is skipped when `acceptance` is set (a failing row is
+  filed as a plain major, so it can't be told apart). If the user picks it:
+  `git push origin <sha>:refs/heads/<featureBranch>` (`hydra-local` in
+  local-only mode; explicit refspec, no force), verify with `ls-remote`, append
+  the parked majors to the `decisionLog` as accepted known gaps, or to the briefs
+  when there is no log (otherwise the re-run re-files them and docs never sync),
+  re-run `stage: "wholeBranch"` for that repo
   (it re-validates, docs-syncs and drift-audits the promoted head), and delete the
   stale `<featureBranch>--wbfix*` refs.
 - **Reviewer tiering:** intermediate `wholeBranch` passes run with

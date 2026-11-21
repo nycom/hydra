@@ -58,7 +58,7 @@ for (const [id, a] of Object.entries(HUMAN)) {
 }
 if (new Set(W.map(w => w.repo + ' ' + w.branch)).size !== W.length) throw new Error('workstream branches must be unique per repo')
 if (A.cycles != null && !(Number.isInteger(A.cycles) && A.cycles >= 1)) throw new Error('cycles must be a positive integer or null')
-if (A.stopRule != null && !(typeof A.stopRule === 'string' && A.stopRule.trim())) throw new Error('stopRule must be a non-empty string naming the wrong actions that block, e.g. "wrong play or volume, lost speech, a crash"')
+if (A.stopRule != null && !(typeof A.stopRule === 'string' && A.stopRule.trim())) throw new Error('stopRule must be a non-empty string naming the wrong actions that block, e.g. "wrong output for a listed case, lost user data, a crash"')
 const absArg = k => { if (A[k] != null && !(typeof A[k] === 'string' && /^\//.test(A[k]))) throw new Error(`${k} must be an absolute path`) }
 absArg('acceptance')
 absArg('decisionLog')
@@ -166,10 +166,10 @@ const CONFLICT = 'Only a contradiction between the brief and the repo itself (a 
 const CLAUSES = 'Judge each fix against the brief\'s hard clauses as well as its finding: a fix that removes a call the brief mandates, edits or deletes a file the brief says not to edit, or deletes or weakens a test an earlier stage verified as guarding a fix stays open as a regression unless the user answered a question allowing it. Accept (verified) an answer escalated as a brief conflict when no fix keeps every clause.'
 const LADDER = 'Ladder-first (reuse > stdlib > native > one line > minimum code), no speculative code, stay strictly in scope.'
 const SEV_038 = 'Severity: critical = wrong behaviour, data loss, security, broken contract or red gate; major = real bug or design flaw; minor = the rest. Critical and major block the merge. Report only real issues; an empty list means clean.'
-const SEV = A.stopRule ? `Stop rule: critical or major only for a regression vs the base branch (behaviour that works at the base and breaks at this head) or a wrong action: ${A.stopRule}. Security and data loss stay critical. A miss the base also has is a known gap: minor, whatever its kind. Critical and major block the merge. Report only real issues; an empty list means clean.` : SEV_038
+const SEV = A.stopRule ? `Stop rule: critical or major only for a regression vs the base branch (behaviour that works at the base and breaks at this head) or a wrong action: ${A.stopRule}. Security and data loss stay critical. Checks these instructions rate explicitly (hygiene, test integrity, smoke, checks) keep that severity, and a broken wire contract between repos stays critical. A miss the base also has is a known gap: minor, whatever its kind. Critical and major block the merge. Report only real issues; an empty list means clean.` : SEV_038
 const STOP_FIX = A.stopRule ? 'Stop rule in force: a minor that is a known gap (the base has the same miss): decline it as "known gap"; never add a word list, pattern or matcher branch for it.\n' : ''
 const ACC_READ = A.acceptance ? `Acceptance table (user-approved, binding): ${A.acceptance}. Read it before you change code; your change must satisfy every row that touches it. File missing or unreadable: stop with status "blocked" and say so in notes.\n` : ''
-const ACC_REVIEW = A.acceptance ? `Acceptance table: ${A.acceptance} (read it). Rate a finding critical or major only if it breaks a row of the acceptance table or is a regression vs the base branch; anything else is minor. The known-gap exemption never covers a row. Security, data loss and a red gate stay critical.\n` : ''
+const ACC_REVIEW = A.acceptance ? `Acceptance table: ${A.acceptance} (read it). Rate a finding critical or major only if it breaks a row of the acceptance table or is a regression vs the base branch${A.stopRule ? ' or is a wrong action under the stop rule' : ''}; anything else is minor. The known-gap exemption never covers a row. Security, data loss and a red gate stay critical.\n` : ''
 const ACC_RUN = sha => A.acceptance ? `Acceptance table: ${A.acceptance}. Before judging anything else, run every row of the acceptance table that this change touches, black-box, at ${sha}: the row's input against the public interface, compared to its expected action. A failing row is a finding (kind bug, severity major, evidence = the row and the output). A failing row is major even when the base fails it too. The known-gap exemption never covers a row. File missing or unreadable: a critical finding (kind question).\n` : ''
 const DROP = 'Drop (do not downgrade): issues that predate the diff and are not made worse by it, anything the repo\'s linter/formatter catches, code the plan or brief explicitly allows, pure style with no correctness, safety or maintainability cost. A comment added in this diff is a claim to grill, never a reason to drop a finding; do not flag `shortcut:` comments themselves.'
 const EVIDENCE = 'A critical or major of kind bug, regression or integration with evidence "none" and not resolved at this head: reproduce it here. Reproduced: keep it blocking with your evidence; otherwise return it still open with the same id, demoted to minor. Design, question and overengineering kinds are exempt.'
@@ -878,14 +878,15 @@ sha = the commit you checked. verdict pass only if nothing critical or major is 
     // stops after findings are rebuilt, so fail() reports this recheck's open set
     if (hit.length && res.churn.at(-2)?.round === round - 1) {
       const stop = 'stop and simplify: one predicate with one owner, re-run stage wholeBranch'
-      res.questions.push({ q: `heuristic churn in ${n}: fix rounds ${round - 1} and ${round} each broke ${hit.join(', ')} again`, options: [stop, 'accept the open findings as known gaps', 'run more fix rounds'], default: stop })
+      res.questions.push({ q: `heuristic churn in ${n}: fix rounds ${round - 1} and ${round} each broke ${hit.join(', ')} again`, options: [stop, 'run more fix rounds'], default: stop })
       return fail(`heuristic churn: rounds ${round - 1}-${round} re-broke ${hit.join(', ')}`)
     }
   }
   res.open = findings
   const open = findings.filter(blocking)
-  if (open.length && sides.length && lastGate?.green && !open.flatMap(f => [f, f.also || {}]).some(f => f.severity === 'critical' || f.kind === 'regression'))
-    res.questions.push({ q: `${n}: whole-branch fixes on ${sides.at(-1)} (checked head ${checked}, gate green) stay unpromoted with ${open.length} open major(s): ${open.map(f => `${f.severity} ${f.where}: ${f.issue}`).join('; ')}. Promote them as known gaps?`, options: ['leave unpromoted', `promote: fast-forward ${r.featureBranch} to ${checked} and park the open majors as known gaps`], default: 'leave unpromoted' })
+  // no offer with an acceptance table: a failing row is filed as a plain major
+  if (open.length && sides.length && lastGate?.green && !A.acceptance && !open.flatMap(f => [f, f.also || {}]).some(f => f.severity === 'critical' || f.kind === 'regression'))
+    res.questions.push({ q: `whole-branch fixes on ${sides.at(-1)} (checked head ${checked}, gate green) stay unpromoted with ${open.length} open major(s): ${open.map(f => `${f.severity} ${f.where}: ${f.issue}`).join('; ')}. Promote them as known gaps?`, options: ['leave unpromoted', `promote: fast-forward ${r.featureBranch} to ${checked} and park the open majors as known gaps`], default: 'leave unpromoted' })
   if (open.length) return fail(WB_ROUNDS ? `critical/major findings still open after ${res.fixRounds} whole-branch fix round(s)` : 'wbRounds 0: critical/major findings returned unfixed')
   if (sides.length) {
     const why = res.verdict !== 'pass' ? `the last recheck returned ${res.verdict}` : await promote(r.repo, r.featureBranch, res.sha, checked, sides, `${n} promote`, 'Whole-branch')

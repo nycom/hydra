@@ -62,7 +62,7 @@ const t = async (name, fn) => { try { await fn() } catch (e) { fails.push(`${nam
 const idx = (order, L) => order.indexOf(L)
 const dirtyB = { 'b review c1': () => ({ findings: [F('c1-F1')] }), 'b validate c1': () => ({ verified: ['c1-F1'] }) } // b merges after a
 
-const SR = 'wrong play or volume, lost speech, a crash'
+const SR = 'wrong output for a listed case, lost user data, a crash'
 await t('1a stopRule: every prompt that carried SEV carries the stop rule with the wrong-action list, and the 0.3.8 definition is gone', async () => {
   const { all } = await go({ cycles: 1, stopRule: SR, workstreams: [ws('a'), ws('b')] }, { 'a review c1': () => ({ findings: [F('c1-F1')] }), 'a validate c1': () => ({ verified: ['c1-F1'] }) })
   const ps = Object.values(all).flat()
@@ -111,13 +111,13 @@ await t('3c (control) no decision text without the arg; a relative path throws',
   await throwsOn({ decisionLog: 'd.md', workstreams: [ws('a')] }, /decisionLog must be an absolute path/) })
 
 await t('4a drift: one fable agent after every repo is final, with the log, the briefs and each repo pin; an item becomes result.drift and a revert-by-default question', async () => {
-  const item = { repo: '/r/one', where: 'a/x.py:9', change: 'default station changed' }
+  const item = { repo: '/r/one', where: 'a/x.py:9', change: 'default greeting text changed' }
   const { r, order, prompts, opts } = await go({ cycles: 1, decisionLog: LOG, workstreams: [ws('a')] }, { drift: () => ({ drift: [item] }) })
   assert(idx(order, 'drift') > idx(order, 'one validate') && opts.drift.model === 'fable' && opts.drift.phase === 'Drift audit')
   assert(prompts.drift.includes(LOG) && prompts.drift.includes('brief a') && /\/r\/one @ f = /.test(prompts.drift) && prompts.drift.includes('/r/one: base origin/main'))
   assert.deepEqual(r.drift, { verdict: 'drift', items: [item] })
-  assert(r.questions.some(q => q.q === 'drift: /r/one a/x.py:9: default station changed' && q.default.startsWith('revert'))) })
-await t('4b drift: a dead drift agent is verdict died with an escalation-style note, never a silent pass', async () => {
+  assert(r.questions.some(q => q.q === 'drift: /r/one a/x.py:9: default greeting text changed' && q.default.startsWith('revert'))) })
+await t('4b drift: a dead drift agent is verdict died, never a silent pass', async () => {
   const { r } = await go({ cycles: 1, decisionLog: LOG, workstreams: [ws('a')] }, { drift: () => null })
   assert.equal(r.drift.verdict, 'died') })
 await t('4c drift: runs on stage wholeBranch; never while a humanCheck pause holds a repo', async () => {
@@ -162,7 +162,7 @@ const gapSc = { 'one validate': () => ({ verdict: 'fail', findings: [F('V-F1')] 
 await t('6a known gaps: rounds out, gate green, only non-regression majors open: offer promote of the checked head, default leave', async () => {
   const { r } = await go({ cycles: 1, wbRounds: 1, workstreams: [ws('a')] }, gapSc)
   const q = r.questions.find(x => /Promote them as known gaps\?/.test(x.q))
-  assert(q && q.q.includes('f--wbfix1') && q.q.includes(SHA(71)) && q.default === 'leave unpromoted') })
+  assert(q && q.q.includes('f--wbfix1') && q.q.includes(SHA(71)) && q.default === 'leave unpromoted' && q.q.startsWith('one: ') && !q.q.includes('one: one:'), q?.q) })
 await t('6b known gaps: no offer when a critical or a regression is open', async () => {
   for (const f of [F('V-F1', 'critical'), { ...F('V-F1'), kind: 'regression' }]) {
     const { r } = await go({ cycles: 1, wbRounds: 1, workstreams: [ws('a')] }, { ...gapSc, 'one recheck r1': () => ({ verdict: 'fail', findings: [f] }) })
@@ -179,6 +179,27 @@ await t('7b (control) default stays the repo top reviewModel; an unknown model t
   const { opts } = await go({ cycles: 1, workstreams: [ws('a', { model: 'opus' }), ws('b', { files: ['b/'] })] }, {})
   assert(opts['one review'].model === 'fable')
   await throwsOn({ wbReviewModel: 'haiku', workstreams: [ws('a')] }, /wbReviewModel must be sonnet\|opus\|fable/) })
+
+const EXPLICIT = 'Checks these instructions rate explicitly (hygiene, test integrity, smoke, checks) keep that severity, and a broken wire contract between repos stays critical.'
+await t('9a stopRule: explicit severities survive it in the contracts and whole-branch validate prompts', async () => {
+  const { prompts } = await go({ cycles: 1, stopRule: SR, workstreams: [ws('a'), ws('c', { repo: '/r/two' })] }, {})
+  for (const L of ['contracts', 'one validate']) assert(prompts[L].includes(`Security and data loss stay critical. ${EXPLICIT}`), L) })
+await t('9b known gaps: no offer when an acceptance table is set', async () => {
+  const { r } = await go({ cycles: 1, wbRounds: 1, acceptance: TBL, workstreams: [ws('a')] }, gapSc)
+  assert(!r.questions.some(x => /known gaps\?/.test(x.q))) })
+await t('9c churn: the question offers stop-and-simplify or more rounds only, default stop', async () => {
+  const { r } = await go({ cycles: 1, wbRounds: 3, workstreams: [ws('a')] }, churnSc([1, 2]))
+  const q = r.questions.find(q => /heuristic churn/.test(q.q))
+  assert.deepEqual(q.options, ['stop and simplify: one predicate with one owner, re-run stage wholeBranch', 'run more fix rounds'])
+  assert.equal(q.default, q.options[0]) })
+await t('9d acceptance + stopRule: reviewers may also block on a wrong action; acceptance alone keeps the old clause', async () => {
+  const both = await go({ cycles: 1, acceptance: TBL, stopRule: SR, workstreams: [ws('a')] }, {})
+  assert(both.prompts['a review c1'].includes('or is a regression vs the base branch or is a wrong action under the stop rule; anything else is minor'))
+  const acc = await go({ cycles: 1, acceptance: TBL, workstreams: [ws('a')] }, {})
+  assert(acc.prompts['a review c1'].includes('or is a regression vs the base branch; anything else is minor') && !acc.prompts['a review c1'].includes('wrong action under the stop rule')) })
+await t('9e stopRule example names no domain', async () => {
+  let e = null; try { await go({ stopRule: '', workstreams: [ws('a')] }, {}) } catch (x) { e = x }
+  assert(e.message.includes('"wrong output for a listed case, lost user data, a crash"'), e.message) })
 
 if (fails.length) { console.error(fails.join('\n')); process.exit(1) }
 console.log('stop-rule, acceptance, decision-log, drift, churn, known-gaps and wbReviewModel checks ok')
