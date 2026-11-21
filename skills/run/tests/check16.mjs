@@ -134,5 +134,23 @@ await t('4d (control) without decisionLog no drift agent and drift is skipped', 
   const { r, order } = await go({ cycles: 1, workstreams: [ws('a')] }, {})
   assert(!order.includes('drift') && r.drift.verdict === 'skipped') })
 
+const churnSc = (rounds, file = 'x.py') => ({ 'one validate': () => ({ verdict: 'fail', findings: [F('V-F1', 'major', `${file}:3`)] }),
+  ...Object.fromEntries(rounds.map(k => [`one recheck r${k}`, () => ({ verdict: 'fail', verified: [], findings: [{ ...F(`R${k}-F1`, 'major', `${file}:${10 + k}`), kind: 'regression' }] })])) })
+await t('5a churn: a regression in a file the fix touched, two rounds in a row, stops before round 3 with a question', async () => {
+  const { r, order } = await go({ cycles: 1, wbRounds: 3, workstreams: [ws('a')] }, churnSc([1, 2]))
+  const one = r.repos.find(x => x.repo === '/r/one')
+  assert(!order.includes('one fix r3') && one.verdict === 'fail' && /heuristic churn/.test(one.escalations.join(' ')))
+  assert.deepEqual(one.churn, [{ round: 1, files: ['x.py'] }, { round: 2, files: ['x.py'] }])
+  assert(one.open.some(o => o.includes('x.py:12')), 'the stopping round\'s regression is reported open')
+  assert(r.questions.some(q => /heuristic churn/.test(q.q) && q.default.startsWith('stop and simplify'))) })
+await t('5b churn: a single churn round is recorded and the loop continues', async () => {
+  const sc = churnSc([1]); sc['one recheck r2'] = () => ({ verified: ['R1-F1'] })
+  const { r, order } = await go({ cycles: 1, wbRounds: 3, workstreams: [ws('a')] }, sc)
+  assert(order.includes('one fix r2') && r.repos[0].churn.length === 1) })
+await t('5c (control) a regression in an untouched file, or at a where without path:line, never counts', async () => {
+  const sc = churnSc([1, 2]); for (const k of [1, 2]) sc[`one recheck r${k}`] = () => ({ verdict: 'fail', findings: [{ ...F(`R${k}-F1`, 'major', k === 1 ? 'other.py:4' : 'gate'), kind: 'regression' }] })
+  const { r, order } = await go({ cycles: 1, wbRounds: 3, workstreams: [ws('a')] }, sc)
+  assert(order.includes('one fix r3') && r.repos[0].churn.length === 0) })
+
 if (fails.length) { console.error(fails.join('\n')); process.exit(1) }
 console.log('stop-rule, acceptance, decision-log, drift, churn, known-gaps and wbReviewModel checks ok')

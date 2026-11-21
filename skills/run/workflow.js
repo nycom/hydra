@@ -349,6 +349,8 @@ const redGate = (r, id) => r.gate.green ? [] : [{ id, severity: 'critical', kind
 // A blocker the validator neither verified nor re-opened stays open: silence is not a resolution.
 // Gate findings are rebuilt by redGate from each gate run, so they are never kept here.
 const unaccounted = (prior, verified, open) => prior.filter(f => blocking(f) && f.where !== 'gate' && !verified.includes(f.id) && !open.some(o => o.id === f.id))
+// the file of a where that starts path:line; '' for 'gate', 'merge' and other non-file wheres (churn ignores those)
+const fileOf = where => (where.match(/^([^\s:]+):\d/) || [])[1] || ''
 // A dead agent is replaced by a fresh one of the same role that redoes the whole step, up to 2 replacements.
 // The attempt number changes the prompt, so a resume can never hand back the dead attempt's cached result.
 // A done+ok result without a full 40-hex sha would orphan a correct push: the next attempt only repairs the sha,
@@ -719,7 +721,7 @@ async function runRepo(r, mine) {
   const briefs = r.ws.map(w => `## ${w.id}\n${w.brief}`).join('\n\n')
   const range = `${O}/${r.base}...${O}/${r.featureBranch}`
   const top = ms => MODELS[Math.max(...ms.map(m => MODELS.indexOf(m)))]
-  const res = { repo: r.repo, featureBranch: r.featureBranch, sha: '', verdict: 'skipped', sections: 'no workstream merged', seams: '', tests: '', fixRounds: 0, open: [], questions: [], notes: [], escalations: [], findings: [] }
+  const res = { repo: r.repo, featureBranch: r.featureBranch, sha: '', verdict: 'skipped', sections: 'no workstream merged', seams: '', tests: '', fixRounds: 0, churn: [], open: [], questions: [], notes: [], escalations: [], findings: [] }
   const book = res.findings
   const shared = sharedFound[r.repo] || []
   track(book, 'shared-edits', shared)
@@ -813,6 +815,7 @@ sha = the ${O}/${r.featureBranch} commit you validated. Ids: V-F1, V-F2, ...; qu
     res.fixRounds = round
     const head = checked
     const side = `${r.featureBranch}--wbfix${round}`
+    const asked = new Set(findings.map(f => fileOf(f.where)).filter(Boolean)) // files this round's fix is asked to touch
     const fix = await step(
       `Whole-branch fix round ${round} on ${r.repo}, feature branch ${r.featureBranch}. Findings:
 ${JSON.stringify(findings)}
@@ -857,6 +860,9 @@ sha = the commit you checked. verdict pass only if nothing critical or major is 
     Object.assign(res, { verdict: re.verdict, sections: re.sections, tests: re.tests })
     checked = re.sha
     res.questions.push(...askEscalated(findings.filter(f => re.verified.includes(f.id)), fix))
+    // churn: a new regression blocker in a file the fix was asked to touch; two rounds in a row stop the loop
+    const hit = [...new Set(re.findings.filter(f => blocking(f) && f.kind === 'regression' && !findings.some(g => g.id === f.id) && asked.has(fileOf(f.where))).map(f => fileOf(f.where)))]
+    if (hit.length) res.churn.push({ round, files: hit })
     const action = (...ids) => ids.map(id => fix.answers.find(a => a.id === id)?.action).find(Boolean) || 'fixed'
     for (const id of re.verified) settle(book, id, action(id))
     // an absorbed finding settles with its kept entry; if the recheck returned it open, track() below re-opens it
@@ -866,6 +872,12 @@ sha = the commit you checked. verdict pass only if nothing critical or major is 
     // a kept entry re-filed without its also gets it back while the absorbed one is open and not its own entry
     findings = findings.map(f => alsoOf[f.id] && !f.also && !findings.some(g => g.id === alsoOf[f.id].id) && book.find(e => e.id === alsoOf[f.id].id)?.status === 'open' ? { ...f, also: alsoOf[f.id] } : f)
     track(book, 'recheck', findings)
+    // stops after findings are rebuilt, so fail() reports this recheck's open set
+    if (hit.length && res.churn.at(-2)?.round === round - 1) {
+      const stop = 'stop and simplify: one predicate with one owner, re-run stage wholeBranch'
+      res.questions.push({ q: `heuristic churn in ${n}: fix rounds ${round - 1} and ${round} each broke ${hit.join(', ')} again`, options: [stop, 'accept the open findings as known gaps', 'run more fix rounds'], default: stop })
+      return fail(`heuristic churn: rounds ${round - 1}-${round} re-broke ${hit.join(', ')}`)
+    }
   }
   res.open = findings
   if (findings.some(blocking)) return fail(WB_ROUNDS ? `critical/major findings still open after ${res.fixRounds} whole-branch fix round(s)` : 'wbRounds 0: critical/major findings returned unfixed')
@@ -891,7 +903,7 @@ const wsPromises = STAGE === 'wholeBranch'
 // Each repo's whole-branch pass starts as soon as ITS workstreams finish (no global barrier).
 const repoResults = await parallel(REPOS.map(r => async () => {
   const mine = await Promise.all(wsPromises.filter((_, i) => W[i].repo === r.repo))
-  return runRepo(r, mine).catch(e => ({ repo: r.repo, featureBranch: r.featureBranch, sha: '', verdict: 'fail', sections: 'crashed', tests: '', fixRounds: 0, open: [], questions: [], notes: [], escalations: [`crashed: ${e}`], findings: [] }))
+  return runRepo(r, mine).catch(e => ({ repo: r.repo, featureBranch: r.featureBranch, sha: '', verdict: 'fail', sections: 'crashed', tests: '', fixRounds: 0, churn: [], open: [], questions: [], notes: [], escalations: [`crashed: ${e}`], findings: [] }))
 }))
 const wsResults = await Promise.all(wsPromises)
 
