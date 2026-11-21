@@ -900,7 +900,7 @@ const skipped = new Set(repoResults.filter(r => r.verdict === 'skipped').map(r =
 const shipped = skipped.size < REPOS.length
 const paused = repoResults.some(r => r.verdict === 'paused') // contracts, docs and the drift audit wait for the user's human check
 const PINS = repoResults.map(r => `${r.repo} @ ${r.featureBranch} = ${r.sha || `${O}/${repoMap[r.repo].base} (nothing merged)`}`).join('\n') + '\n' + STALE
-const driftRan = !!A.decisionLog && shipped && !paused
+const driftRan = !!A.decisionLog && shipped && !paused && !short('drift audit') // short last: it records a stop only when the audit would run
 const [crossRepo, docs, driftOut] = await parallel([
   async () => REPOS.length < 2 || !shipped || paused ? null : short('contracts') ? { verdict: 'fail', sections: 'skipped: token budget below the reserve', findings: [] } : step(
     `Cross-repo wire-contract check, run once every repo is final. Pinned heads:
@@ -961,6 +961,7 @@ sha = the commit you validated. Ids: D-F1, D-F2, ...`,
   })),
   async () => driftRan ? step(
     `${PINS}
+${REPOS.map(r => `${r.repo}: base ${O}/${r.base}`).join('\n')}
 ${W.map(w => `## ${w.id}\n${w.brief}`).join('\n\n')}
 Read the decision log ${A.decisionLog}. For each repo, list every user-visible change in ${O}/<base>...<pinned sha> (copy, spoken or printed lines, defaults, prompts, thresholds, UI, removed hints or options). Map each one to a decision-log line or a brief clause. Return in drift only the changes with neither.
 ${RO(REPOS[0].repo, 'drift')}`,

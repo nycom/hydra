@@ -49,11 +49,11 @@ function mock(args, sc = {}) {
 }
 const ws = (id, extra = {}) => ({ id, repo: '/r/one', featureBranch: 'f', branch: `f--${id}`, model: 'sonnet', brief: `brief ${id}`, gate: 'npm test', files: [`${id}/`], ...extra })
 // a run that never settles (a hold nobody releases) fails instead of hanging the suite
-const go = async (args, sc) => {
+const go = async (args, sc, b = free) => {
   const m = mock(args, sc)
   let timer
   const hung = new Promise((_, no) => { timer = setTimeout(() => no(new Error('the run hung')), 2000) })
-  const r = await Promise.race([Run(args, m.agent, parallel, () => {}, free), hung]).finally(() => clearTimeout(timer))
+  const r = await Promise.race([Run(args, m.agent, parallel, () => {}, b), hung]).finally(() => clearTimeout(timer))
   return { r, ...m }
 }
 const throwsOn = async (args, re) => { let e = null; try { await go(args, {}) } catch (x) { e = x } assert(e && re.test(e.message), `expected ${re}, got ${e?.message}`) }
@@ -114,7 +114,7 @@ await t('4a drift: one fable agent after every repo is final, with the log, the 
   const item = { repo: '/r/one', where: 'a/x.py:9', change: 'default station changed' }
   const { r, order, prompts, opts } = await go({ cycles: 1, decisionLog: LOG, workstreams: [ws('a')] }, { drift: () => ({ drift: [item] }) })
   assert(idx(order, 'drift') > idx(order, 'one validate') && opts.drift.model === 'fable' && opts.drift.phase === 'Drift audit')
-  assert(prompts.drift.includes(LOG) && prompts.drift.includes('brief a') && /\/r\/one @ f = /.test(prompts.drift))
+  assert(prompts.drift.includes(LOG) && prompts.drift.includes('brief a') && /\/r\/one @ f = /.test(prompts.drift) && prompts.drift.includes('/r/one: base origin/main'))
   assert.deepEqual(r.drift, { verdict: 'drift', items: [item] })
   assert(r.questions.some(q => q.q === 'drift: /r/one a/x.py:9: default station changed' && q.default.startsWith('revert'))) })
 await t('4b drift: a dead drift agent is verdict died with an escalation-style note, never a silent pass', async () => {
@@ -125,6 +125,11 @@ await t('4c drift: runs on stage wholeBranch; never while a humanCheck pause hol
   assert(wb.order.includes('drift'))
   const held = await go({ cycles: 1, decisionLog: LOG, workstreams: [ws('a', { humanCheck: 'look at it' })] }, {})
   assert(!held.order.includes('drift') && held.r.drift.verdict === 'skipped') })
+await t('4e drift: a budget below the reserve keeps the audit from starting, reads as skipped and names the stop', async () => {
+  let spent = 0
+  const b = { total: null, spent: () => spent, remaining: () => Infinity }
+  const { r, order } = await go({ cycles: 1, decisionLog: LOG, tokenBudget: 1e8, workstreams: [ws('a')] }, { 'one validate': () => { spent = 1e9; return {} } }, b)
+  assert(order.includes('one validate') && !order.includes('drift') && r.drift.verdict === 'skipped' && r.budget.stoppedBy.includes('drift audit'), JSON.stringify(r.budget)) })
 await t('4d (control) without decisionLog no drift agent and drift is skipped', async () => {
   const { r, order } = await go({ cycles: 1, workstreams: [ws('a')] }, {})
   assert(!order.includes('drift') && r.drift.verdict === 'skipped') })
