@@ -79,5 +79,22 @@ await t('1c (control) without stopRule SEV is the 0.3.8 text; a non-string or bl
   await throwsOn({ stopRule: true, workstreams: [ws('a')] }, /stopRule must be a non-empty string/)
   await throwsOn({ stopRule: ' ', workstreams: [ws('a')] }, /stopRule must be a non-empty string/) })
 
+const TBL = '/tmp/acc.md'
+const busyAcc = { 'a review c1': () => ({ findings: [F('c1-F1')] }), 'a validate c1': () => ({ verified: ['c1-F1'] }), 'one validate': () => ({ verdict: 'fail', findings: [F('V-F1')] }), 'one recheck r1': () => ({ verified: ['V-F1'] }) }
+await t('2a acceptance: authors and fixers read the table, a missing file blocks them', async () => {
+  const { prompts } = await go({ cycles: 1, acceptance: TBL, workstreams: [ws('a')] }, busyAcc)
+  for (const L of ['a implement', 'a fix c1', 'one fix r1']) assert(prompts[L].includes(`Acceptance table (user-approved, binding): ${TBL}`) && /missing or unreadable: stop with status "blocked"/.test(prompts[L]), L) })
+await t('2b acceptance: every validator runs every row black-box at its sha; reviewers may block only on a broken row or a regression', async () => {
+  const { prompts } = await go({ cycles: 1, acceptance: TBL, workstreams: [ws('a'), ws('b')] }, busyAcc) // two workstreams, so the integrated review runs
+  for (const L of ['a validate c1', 'one validate', 'one recheck r1']) assert(/run every row of the acceptance table that this change touches, black-box/.test(prompts[L]) && prompts[L].includes(TBL), L)
+  for (const L of ['a review c1', 'one review']) assert(/critical or major only if it breaks a row of the acceptance table or is a regression vs the base branch/.test(prompts[L]), L) })
+await t('2c acceptance + stopRule: a failing row blocks even when the base fails it too', async () => {
+  const { prompts } = await go({ cycles: 1, acceptance: TBL, stopRule: SR, workstreams: [ws('a')] }, {})
+  assert(/A failing row is major even when the base fails it too/.test(prompts['a validate c1'])) })
+await t('2d (control) no acceptance text without the arg; a relative path throws', async () => {
+  const { all } = await go({ cycles: 1, workstreams: [ws('a')] }, busyAcc)
+  assert(!Object.values(all).flat().some(p => /Acceptance table|acceptance table/.test(p)))
+  await throwsOn({ acceptance: 'acc.md', workstreams: [ws('a')] }, /acceptance must be an absolute path/) })
+
 if (fails.length) { console.error(fails.join('\n')); process.exit(1) }
 console.log('stop-rule, acceptance, decision-log, drift, churn, known-gaps and wbReviewModel checks ok')
