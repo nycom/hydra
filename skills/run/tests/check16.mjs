@@ -87,10 +87,10 @@ await t('2a acceptance: authors and fixers read the table, a missing file blocks
 await t('2b acceptance: every validator runs every row black-box at its sha; reviewers may block only on a broken row or a regression', async () => {
   const { prompts } = await go({ cycles: 1, acceptance: TBL, workstreams: [ws('a'), ws('b')] }, busyAcc) // two workstreams, so the integrated review runs
   for (const L of ['a validate c1', 'one validate', 'one recheck r1']) assert(/run every row of the acceptance table that this change touches, black-box/.test(prompts[L]) && prompts[L].includes(TBL), L)
-  for (const L of ['a review c1', 'one review']) assert(/critical or major only if it breaks a row of the acceptance table or is a regression vs the base branch/.test(prompts[L]), L) })
+  for (const L of ['a review c1', 'one review']) assert(/critical or major only if it breaks a row of the acceptance table or is a regression vs the base branch/.test(prompts[L]) && prompts[L].includes('Security, data loss and a red gate stay critical.') && prompts[L].includes('The known-gap exemption never covers a row.'), L) })
 await t('2c acceptance + stopRule: a failing row blocks even when the base fails it too', async () => {
   const { prompts } = await go({ cycles: 1, acceptance: TBL, stopRule: SR, workstreams: [ws('a')] }, {})
-  assert(/A failing row is major even when the base fails it too/.test(prompts['a validate c1'])) })
+  assert(/A failing row is major even when the base fails it too/.test(prompts['a validate c1']) && prompts['a validate c1'].includes('The known-gap exemption never covers a row.')) })
 await t('2d (control) no acceptance text without the arg; a relative path throws', async () => {
   const { all } = await go({ cycles: 1, workstreams: [ws('a')] }, busyAcc)
   assert(!Object.values(all).flat().some(p => /Acceptance table|acceptance table/.test(p)))
