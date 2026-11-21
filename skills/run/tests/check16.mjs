@@ -152,5 +152,11 @@ await t('5c (control) a regression in an untouched file, or at a where without p
   const { r, order } = await go({ cycles: 1, wbRounds: 3, workstreams: [ws('a')] }, sc)
   assert(order.includes('one fix r3') && r.repos[0].churn.length === 0) })
 
+await t('5d (control) an absorbed regression re-filed open under its own id is not a new regression', async () => {
+  const sc = { 'one review': () => ({ findings: [F('W-F1', 'major', 'x.py:3')] }), 'one validate': () => ({ verdict: 'fail', findings: [{ ...F('V-F1', 'major', 'x.py:3'), kind: 'regression' }] }),
+    'one recheck r1': () => ({ verdict: 'fail', verified: ['W-F1'], findings: [{ ...F('V-F1', 'major', 'x.py:3'), kind: 'regression' }] }) }
+  const { r } = await go({ cycles: 1, workstreams: [ws('a'), ws('b')] }, sc)
+  assert.deepEqual(r.repos.find(x => x.repo === '/r/one').churn, []) })
+
 if (fails.length) { console.error(fails.join('\n')); process.exit(1) }
 console.log('stop-rule, acceptance, decision-log, drift, churn, known-gaps and wbReviewModel checks ok')

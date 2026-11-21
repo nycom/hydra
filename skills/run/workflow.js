@@ -861,7 +861,7 @@ sha = the commit you checked. verdict pass only if nothing critical or major is 
     checked = re.sha
     res.questions.push(...askEscalated(findings.filter(f => re.verified.includes(f.id)), fix))
     // churn: a new regression blocker in a file the fix was asked to touch; two rounds in a row stop the loop
-    const hit = [...new Set(re.findings.filter(f => blocking(f) && f.kind === 'regression' && !findings.some(g => g.id === f.id) && asked.has(fileOf(f.where))).map(f => fileOf(f.where)))]
+    const hit = [...new Set(re.findings.filter(f => blocking(f) && f.kind === 'regression' && !findings.some(g => g.id === f.id || g.also?.id === f.id) && asked.has(fileOf(f.where))).map(f => fileOf(f.where)))]
     if (hit.length) res.churn.push({ round, files: hit })
     const action = (...ids) => ids.map(id => fix.answers.find(a => a.id === id)?.action).find(Boolean) || 'fixed'
     for (const id of re.verified) settle(book, id, action(id))
