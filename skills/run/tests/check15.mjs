@@ -231,17 +231,16 @@ const human = answers => ({ cycles: 1, workstreams: [ws('a', { humanCheck: CHECK
 const heldB = { ...dirtyB, 'a validate c2': () => ({ verified: ['H1-F1'] }) } // the fix of a's human-check problem holds
 const A = (sha, answer) => ({ sha, answer })
 const pausedAt = async (answers, sc) => (await go(human(answers), sc)).r.humanCheck?.[0]?.sha // the sha the next check asks about
-await t('6a unanswered: a merges, b is held before its merge, the whole-branch pass, contracts and docs wait, and the result asks', async () => {
+await t('6a unanswered: a and b both merge (checks never hold a merge), the whole-branch pass, contracts and docs wait, and the result asks about a\'s own head', async () => {
   const { r, order, merges } = await go(human(), dirtyB)
   const a = r.workstreams.find(w => w.id === 'a'), b = r.workstreams.find(w => w.id === 'b')
-  assert(a.merged && !b.merged && !order.includes('b merge'), order.join())
-  assert(b.escalations.some(e => /awaiting the user's human check 1 of a/.test(e)), JSON.stringify(b.escalations))
+  assert(a.merged && b.merged && order.includes('b merge'), order.join())
   assert(!order.includes('one validate') && !order.includes('one docs'), 'no whole-branch pass, no docs')
-  assert.equal(r.repos[0].verdict, 'paused')
+  assert(r.repos[0].verdict === 'paused' && /awaiting the user's human check 1 of a/.test(r.repos[0].sections), r.repos[0].sections)
   assert.equal(r.humanCheck?.length, 1)
   const h = r.humanCheck[0]
-  assert(h.id === 'a' && h.sha === merges.a[0] && h.featureBranch === 'f' && h.check === CHECK && h.round === 1 && /resumeFromRunId/.test(h.answer), JSON.stringify(h))
-  assert(h.answer.includes(`humanChecks.a = [{"sha":"${merges.a[0]}","answer":"<ok, or the problem in words>"}]`), h.answer) })
+  assert(h.id === 'a' && h.sha === a.validatedSha && h.checkAt === merges.a[0] && h.featureBranch === 'f' && h.check === CHECK && h.round === 1 && /resumeFromRunId/.test(h.answer), JSON.stringify(h))
+  assert(h.answer.includes(`humanChecks.a = [{"sha":"${a.validatedSha}","answer":"<ok, or the problem in words>"}]`), h.answer) })
 await t('6b (control: 0.3.7 ignores humanCheck) "ok" on the checked sha: b merges after a, the whole-branch pass runs, no humanCheck block', async () => {
   const S1 = await pausedAt(undefined, dirtyB)
   for (const ok of ['ok', 'OK.', ' Ok! ']) {
@@ -249,43 +248,40 @@ await t('6b (control: 0.3.7 ignores humanCheck) "ok" on the checked sha: b merge
     assert(r.workstreams.every(w => w.merged) && idx(order, 'a merge') < idx(order, 'b merge') && order.includes('one validate'), `${ok}: ${order.join()}`)
     assert(r.repos[0].verdict === 'pass' && !('humanCheck' in r), ok)
   } })
-await t('6c a problem becomes a critical for a\'s fix path; b stays held until a re-merges and is checked again', async () => {
+await t('6c a problem becomes a critical for a\'s fix path; a re-merges and is checked again on its new head', async () => {
   const S1 = await pausedAt(undefined, heldB)
-  const { r, order, all, merges } = await go({ ...human({ a: A(S1, 'the button is grey') }), repos: [{ repo: '/r/one', reviewSharedEdits: false }] }, { ...heldB, 'a implement': () => ({ sharedEdits: EDITS }), 'a fix c2': () => ({ sharedEdits: EDITS }) })
+  const { r, all, merges } = await go({ ...human({ a: A(S1, 'the button is grey') }), repos: [{ repo: '/r/one', reviewSharedEdits: false }] }, { ...heldB, 'a implement': () => ({ sharedEdits: EDITS }), 'a fix c2': () => ({ sharedEdits: EDITS }) })
   const fixL = Object.keys(all).find(L => /^a fix c/.test(L))
   assert(fixL && all[fixL][0].includes('"H1-F1"') && all[fixL][0].includes('reports: the button is grey') && all[fixL][0].includes(CHECK), fixL)
   assert.equal(all['a merge'].length, 2, 'a merged again after the fix')
   assert(!/this workstream merged before/.test(all['a merge'][0]) && /this workstream merged before: skip an edit the branch already carries/.test(all['a merge'][1]), 're-merge is told')
-  assert(!order.includes('b merge'), 'b still held: check 2 is pending')
-  const h = r.humanCheck?.[0]
-  assert(h && h.round === 2 && h.sha === merges.a[1] && h.answer.includes(`humanChecks.a = [{"sha":"${S1}","answer":"the button is grey"},{"sha":"${merges.a[1]}","answer":"<ok, or the problem in words>"}]`), JSON.stringify(r.humanCheck))
-  assert(r.workstreams.find(w => w.id === 'a').findings.some(e => e.id === 'H1-F1' && e.stage === 'human')) })
-await t('6d (control: 0.3.7 ignores humanCheck) problem then ok: a re-merges, b merges after it, the repo passes', async () => {
+  assert(r.workstreams.find(w => w.id === 'b').merged && r.repos[0].verdict === 'paused', 'b merged; the repo waits for check 2')
+  const a = r.workstreams.find(w => w.id === 'a'), h = r.humanCheck?.[0]
+  assert(h && h.round === 2 && h.sha === a.validatedSha && h.sha !== S1 && h.checkAt === merges.a[1] && h.answer.includes(`humanChecks.a = [{"sha":"${S1}","answer":"the button is grey"},{"sha":"${a.validatedSha}","answer":"<ok, or the problem in words>"}]`), JSON.stringify(r.humanCheck))
+  assert(a.findings.some(e => e.id === 'H1-F1' && e.stage === 'human')) })
+await t('6d (control) problem then ok: a re-merges, b merged too, the repo passes', async () => {
   const S1 = await pausedAt(undefined, heldB), S2 = await pausedAt({ a: A(S1, 'the button is grey') }, heldB)
-  const { r, order } = await go(human({ a: [A(S1, 'the button is grey'), A(S2, 'ok')] }), heldB)
-  const second = order.lastIndexOf('a merge')
-  assert(idx(order, 'b merge') > second && r.workstreams.every(w => w.merged) && r.repos[0].verdict === 'pass', order.join())
+  const { r, all } = await go(human({ a: [A(S1, 'the button is grey'), A(S2, 'ok')] }), heldB)
+  assert(all['a merge'].length === 2 && r.workstreams.every(w => w.merged) && r.repos[0].verdict === 'pass', Object.keys(all).join())
   assert(!('humanCheck' in r)) })
-await t('6e a problem whose fix cannot merge releases b as stopped and keeps the escalation honest', async () => {
+await t('6e a problem whose fix cannot merge keeps the repo paused and the escalation honest', async () => {
   const S1 = await pausedAt(undefined, dirtyB)
-  const { r, order } = await go({ ...human({ a: A(S1, 'the button is grey') }), maxCycles: 1 }, dirtyB)
-  const a = r.workstreams.find(w => w.id === 'a'), b = r.workstreams.find(w => w.id === 'b')
+  const { r } = await go({ ...human({ a: A(S1, 'the button is grey') }), maxCycles: 1 }, dirtyB)
+  const a = r.workstreams.find(w => w.id === 'a')
   assert(a.merged && a.escalations.some(e => /the fix NOT merged \(its earlier merge is on f\)/.test(e)), JSON.stringify(a.escalations))
-  assert(!b.merged && b.escalations.some(e => /a stopped before its human check passed/.test(e)) && !order.includes('b merge'), JSON.stringify(b.escalations))
-  assert.equal(r.repos[0].verdict, 'paused') })
+  assert(r.repos[0].verdict === 'paused' && /a stopped before its human check passed/.test(r.repos[0].sections), r.repos[0].sections) })
 await t('6f (control) answering does not change any earlier prompt, so a resume replays everything up to the check', async () => {
   const paused = await go(human(), dirtyB), ok = await go(human({ a: A(paused.r.humanCheck[0].sha, 'ok') }), dirtyB)
   for (const [L, ps] of Object.entries(paused.all)) assert.deepEqual(ok.all[L]?.slice(0, ps.length), ps, `${L} differs`) })
-await t('6h an answer for another sha is not applied: a cache miss that merged a new commit pauses again on the new sha', async () => {
-  const { r, order, merges } = await go(human({ a: A(SHA(777), 'ok') }), dirtyB)
-  assert(!order.includes('b merge') && r.repos[0].verdict === 'paused', order.join())
-  assert(r.humanCheck?.[0]?.sha === merges.a[0] && r.humanCheck[0].round === 1, JSON.stringify(r.humanCheck)) })
-await t('6i a crash while holding releases the held merges instead of hanging the run', async () => {
+await t('6h an answer for another sha is not applied: the run pauses again on a\'s head, the older answer counted as spent (round 2)', async () => {
+  const { r, order } = await go(human({ a: A(SHA(777), 'ok') }), dirtyB)
+  const a = r.workstreams.find(w => w.id === 'a')
+  assert(!order.includes('one validate') && r.repos[0].verdict === 'paused', order.join())
+  assert(r.humanCheck?.[0]?.sha === a.validatedSha && r.humanCheck[0].round === 2 && r.humanCheck[0].answer.includes(`[{"sha":"${SHA(777)}","answer":"ok"},{"sha":"${a.validatedSha}"`), JSON.stringify(r.humanCheck)) })
+await t('6i a crash in the fix of a check keeps the repo paused with the reason instead of hanging the run', async () => {
   const S1 = await pausedAt(undefined, dirtyB)
-  const { r, order } = await go(human({ a: A(S1, 'the button is grey') }), { ...dirtyB, 'a fix c2': () => { throw new Error('boom') } })
-  const b = r.workstreams.find(w => w.id === 'b')
-  assert(!b.merged && b.escalations.some(e => /a crashed/.test(e)) && !order.includes('b merge'), JSON.stringify(b.escalations))
-  assert.equal(r.repos[0].verdict, 'paused') })
+  const { r } = await go(human({ a: A(S1, 'the button is grey') }), { ...dirtyB, 'a fix c2': () => { throw new Error('boom') } })
+  assert(r.repos[0].verdict === 'paused' && /a crashed/.test(r.repos[0].sections), r.repos[0].sections) })
 await t('6j a paused repo holds the cross-repo contract check too', async () => {
   const { r, order } = await go({ cycles: 1, workstreams: [ws('a', { humanCheck: CHECK }), ws('c', { repo: '/r/two' })] }, {})
   assert(r.repos.find(x => x.repo === '/r/two').verdict === 'pass' && !order.includes('contracts') && r.crossRepo === null, order.join()) })
