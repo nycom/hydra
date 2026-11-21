@@ -129,7 +129,7 @@ for (const [repo, x] of Object.entries(CF_REPOS)) {
   if (!repoMap[repo]) throw new Error(`carryForward.repos: ${repo} has no workstream in this run`)
   if (x.shared != null && !Array.isArray(x.shared)) throw new Error(`carryForward.repos ${repo}: shared must be an array`)
   const k = x.passed && ['open', 'findings', 'questions', 'notes', 'escalations', 'churn'].find(f => !Array.isArray(x.passed[f]))
-  if (x.passed != null && !(x.passed.verdict === 'pass' && /^[0-9a-f]{40}$/.test(x.passed.sha || '') && !k)) throw new Error(`carryForward.repos ${repo}: passed must be the repo result of a passed whole-branch pass (verdict pass, a full sha${k ? `, ${k} an array` : ''})`)
+  if (x.passed != null && !(x.passed.verdict === 'pass' && /^[0-9a-f]{7,40}$/.test(x.passed.sha || '') && !k)) throw new Error(`carryForward.repos ${repo}: passed must be the repo result of a passed whole-branch pass (verdict pass, a 7-40 hex sha${k ? `, ${k} an array` : ''})`)
 }
 // restored ids get a p: prefix, so a restarted review's new c1-F1 (or a re-merge's S-<id>-m1-F1) never collides with the earlier call's
 const prior = f => ({ ...f, id: `p:${f.id}` })
@@ -489,6 +489,8 @@ async function runWorkstream(w) {
     ledger.push(...book.filter(e => STATUS.includes(e.status)).map(({ id, where, issue, status }) => ({ id, where, issue, status })))
     out.handed.push(...cf.handed)
   }
+  // blockers open when the resumed call stopped: a restarted review re-checks them, and only a validator clears them
+  const reopened = (cf?.findings || []).filter(e => e.status === 'open' && e.severity !== 'minor').map(({ id, severity, kind, where, issue }) => ({ id, severity, kind, where, issue, evidence: 'open when the resumed run stopped' }))
   const absorb = r => {
     out.sharedEdits = r.sharedEdits // each author returns the complete current list
     out.questions.push(...r.questions)
@@ -600,7 +602,7 @@ Return status ("done" only when the gate is green and the push verified, or noth
   absorb(impl)
   if (!pushed(impl, 'implement')) return blocked('implement', impl)
   if (impl.alreadyMerged) { if (carried(impl.sha, '')) return out }
-  else out.sha = impl.sha
+  else { out.sha = impl.sha; carry = reopened }
   }
 
   const tries = [] // blockers that survived a fix round: {id, where, rounds, answers}
@@ -1161,7 +1163,10 @@ return {
   ...(humanPending.length && { humanCheck: humanPending }), // the run paused: ask the user, then re-run with humanChecks
   // every full-stage result hands over what git cannot say, since any of them may be resumed; pass it back verbatim as carryForward
   ...(STAGE !== 'wholeBranch' && { carryForward: {
-    workstreams: Object.fromEntries(wsResults.map(w => [w.id, { handed: w.handed || [], open: w.open || [], findings: w.findings || [] }])),
+    workstreams: Object.fromEntries(wsResults.map(w => {
+      const settled = repoResults.find(r => r.repo === byId[w.id].repo)?.findings || [] // a handed finding the whole-branch pass settled leaves
+      return [w.id, { handed: (w.handed || []).filter(f => !settled.some(e => e.id === `${w.id}:${f.id}` && STATUS.includes(e.status) && e.status !== 'carried')), open: w.open || [], findings: w.findings || [] }]
+    })),
     repos: Object.fromEntries(repoResults.map(r => [r.repo, { shared: sharedFound[r.repo] || [], passed: r.verdict === 'pass' ? r : null }])),
   } }),
   otherDocs: DOCS.filter(d => !repoMap[d.repo]).map(d => ({ repo: d.repo, featureBranch: d.featureBranch, docs: (x => x && { ...x, notes: [...x.notes, ...(leftovers[d.repo] || [])] })(docsOut(docsOf(d.repo))), findings: asLedger('docs', docsOf(d.repo)?.findings), flaky: flakyOf(d.repo) })),

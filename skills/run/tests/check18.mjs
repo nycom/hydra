@@ -234,11 +234,32 @@ await t('8d a malformed carryForward passed result throws at the args check', as
   let e = null; try { await go({ resume: 'r', carryForward: { repos: { '/r/one': { passed: { verdict: 'pass', sha: SHA(1) } } } }, workstreams: [ws('a')] }, {}) } catch (y) { e = y }
   assert(e && /passed must be the repo result of a passed whole-branch pass/.test(e.message), e?.message) })
 
+// ---- 9. carryForward round-trips cleanly ----
+await t('9a a pass on a 12-hex whole-branch sha emits a carryForward its resume accepts', async () => {
+  const short12 = SHA(4000).slice(0, 12)
+  const args = x => ({ cycles: 1, workstreams: [ws('a', { humanCheck: look }), ws('c', { repo: '/r/two' })], ...x })
+  const sc = { 'two validate': () => ({ sha: short12 }), 'two review': () => ({ headSha: short12 }) }
+  const { r: r1 } = await go(args(), sc)
+  assert.equal(r1.carryForward.repos['/r/two'].passed?.sha, short12)
+  const { r } = await go(args({ resume: 'run-14', carryForward: r1.carryForward }), { ...sc, ...state({ id: 'a', head: r1.humanCheck[0].sha, merged: true }) })
+  assert(r.repos.length === 2, 'the resume ran instead of throwing on its own carryForward') })
+await t('9b a handed finding the resumed whole-branch pass fixed leaves the next carryForward', async () => {
+  const args = x => ({ cycles: null, workstreams: [ws('a'), ws('b')], ...x })
+  const { r: r1 } = await go(args(), { ...outside, 'one validate': () => null, 'health one validate': () => null })
+  const { r } = await go(args({ resume: 'run-15', carryForward: r1.carryForward }), { ...state({ id: 'a', head: W(r1, 'a').validatedSha, merged: true }, { id: 'b', head: W(r1, 'b').validatedSha, merged: true }), 'one recheck r1': () => ({ verified: ['a:p:c1-F1'] }) })
+  assert(r.repos[0].verdict === 'pass' && r.carryForward.workstreams.a.handed.length === 0, JSON.stringify(r.carryForward.workstreams.a)) })
+await t('9c a blocker open when the resumed call stopped goes to the restarted review as carried, and only a validator clears it', async () => {
+  const carryForward = { workstreams: { a: { handed: [], open: [], findings: [{ ...F('c1-F2', 'major', 'a/core.js:7'), stage: 'review', status: 'open' }] } }, repos: {} }
+  const { r, prompts } = await go({ cycles: 1, resume: 'run-16', carryForward, workstreams: [ws('a')] }, { ...state({ id: 'a', head: HA, merged: false }), 'a validate c1': () => ({ verified: ['p:c1-F2'] }) })
+  assert(/The last validation left these open[^\n]*\n[^\n]*"p:c1-F2"/.test(prompts['a review c1']), 'shown to the restarted review')
+  assert(prompts['a fix c1']?.includes('"p:c1-F2"'), 'a silent review does not clear it')
+  assert(W(r, 'a').merged && W(r, 'a').findings.find(e => e.id === 'p:c1-F2')?.status === 'fixed', JSON.stringify(W(r, 'a').findings)) })
+
 // ---- docs and version ----
 await t('6a SKILL.md documents resume, decisions, the head-bound checks and the handed findings; plugin.json is 0.3.10', async () => {
   const s = readFileSync(new URL('../SKILL.md', import.meta.url), 'utf8')
   for (const k of ['resume', 'decisions', 'carryForward']) assert(new RegExp('\\| `' + k + '` \\|').test(s), k)
-  assert(/`checkAt`/.test(s) && /"carried"/.test(s) && /`incomplete`/.test(s) && /health probe/.test(s) && /gate exit=/.test(s))
+  assert(/one `p:` fewer than the workstream ledgers/.test(s) && /`checkAt`/.test(s) && /"carried"/.test(s) && /`incomplete`/.test(s) && /health probe/.test(s) && /gate exit=/.test(s))
   assert.equal(JSON.parse(readFileSync(new URL('../../../.claude-plugin/plugin.json', import.meta.url), 'utf8')).version, '0.3.10') })
 await t('6b fixture-scenarios.md carries S18-S21 and the S13 pipe seed', async () => {
   const s = readFileSync(new URL('./fixture-scenarios.md', import.meta.url), 'utf8')
