@@ -172,5 +172,13 @@ await t('6c known gaps: no offer when the recheck died, saw another sha, or the 
     const { r } = await go({ cycles: 1, wbRounds: 1, workstreams: [ws('a')] }, { ...gapSc, 'one recheck r1': own })
     assert(!r.questions.some(x => /known gaps\?/.test(x.q))) } })
 
+await t('7a wbReviewModel overrides the whole-branch review model only', async () => {
+  const { opts } = await go({ cycles: 1, wbReviewModel: 'opus', workstreams: [ws('a', { model: 'opus' }), ws('b', { files: ['b/'] })] }, {})
+  assert(opts['one review'].model === 'opus' && opts['a review c1'].model === 'fable') })
+await t('7b (control) default stays the repo top reviewModel; an unknown model throws', async () => {
+  const { opts } = await go({ cycles: 1, workstreams: [ws('a', { model: 'opus' }), ws('b', { files: ['b/'] })] }, {})
+  assert(opts['one review'].model === 'fable')
+  await throwsOn({ wbReviewModel: 'haiku', workstreams: [ws('a')] }, /wbReviewModel must be sonnet\|opus\|fable/) })
+
 if (fails.length) { console.error(fails.join('\n')); process.exit(1) }
 console.log('stop-rule, acceptance, decision-log, drift, churn, known-gaps and wbReviewModel checks ok')

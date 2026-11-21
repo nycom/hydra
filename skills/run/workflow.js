@@ -19,6 +19,7 @@ const W = A.workstreams || []
 if (!W.length) throw new Error('args.workstreams is empty')
 const norm = repo => repo.replace(/\/+$/, '') // one key per repo, however the path was typed
 const MODELS = ['sonnet', 'opus', 'fable'] // tier order; never below sonnet
+if (A.wbReviewModel != null && !MODELS.includes(A.wbReviewModel)) throw new Error('wbReviewModel must be sonnet|opus|fable')
 for (const w of W) {
   for (const k of ['id', 'repo', 'featureBranch', 'branch', 'model', 'brief', 'gate'])
     if (!w[k]) throw new Error(`workstream ${w.id || '?'}: missing ${k}`)
@@ -776,7 +777,7 @@ ${LENSES(false)}
 ${ACC_REVIEW}${DROP}
 ${SEV}
 headSha = the ${O}/${r.featureBranch} commit you reviewed. Ids: W-F1, W-F2, ...`,
-      { label: `${n} review`, phase: 'Whole-branch', agentType: 'reviewer', model: top(r.ws.map(w => w.reviewModel)), schema: SEAMS }),
+      { label: `${n} review`, phase: 'Whole-branch', agentType: 'reviewer', model: A.wbReviewModel || top(r.ws.map(w => w.reviewModel)), schema: SEAMS }),
     () => step(
       `Independent whole-branch validation of ${r.repo}, feature branch ${r.featureBranch} vs ${O}/${r.base}. Trust nothing; re-derive everything yourself. ${REFUTE}
 ${ACC_RUN(`the head of ${O}/${r.featureBranch}`)}${RO(r.repo, 'wb-val')}
