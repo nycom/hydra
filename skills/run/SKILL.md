@@ -216,7 +216,8 @@ Implementation is never below Sonnet.
 - When `acceptance` or `decisionLog` is used, check the files exist (absolute
   paths). A missing `acceptance` file is a critical finding from validators and
   `blocked` for authors and fixers (reviewers get no instruction for it); a
-  missing `decisionLog` is critical, or `blocked` for authors and fixers.
+  missing `decisionLog` is critical, or `blocked` (or `ok=false` with notes) for
+  any agent that pushes.
 - One **feature branch per touched repo** (e.g. `feat/<topic>`), cut from
   `origin/main` (or the stacked `base`) with `git branch` + `git push origin <branch>` (`hydra-local` in local-only mode) — never
   checkout-switch. Every workstream branches off it and merges back into it.
@@ -298,9 +299,9 @@ Workflow({
 | `skillDir` | none | this skill's absolute base directory (the `<skill dir>` printed when the skill loads); the script can't learn its own path, and agents run `node <skillDir>/run-cmd.mjs <seconds> '<command>'` for smoke and checks. Required when any repo has `smoke` or any workstream has `checks` |
 | `stage` | omitted | `"wholeBranch"`: skip implement/cycles/merge; re-run whole-branch review + validator, contract check, docs sync on the current feature-branch tips, and the drift audit when `decisionLog` is set |
 | `wbRounds` | `2` | whole-branch fix rounds, each pushed to a side branch `<featureBranch>--wbfix<round>` and promoted onto the feature branch only after a passing recheck; `0` = no fix rounds (findings returned unfixed; the repo verdict is `fail` while any is critical or major); pair with `docsRepos: []` for a review-only pass (a failing repo skips docs regardless) |
-| `stopRule` | none | non-empty string naming the wrong actions. A blocker is a regression vs the base or one of these; a miss the base also has is a known gap and minor. It reshapes the severity text for every reviewer and validator, and fixers decline known gaps |
+| `stopRule` | none | non-empty string naming the wrong actions. A blocker is a regression vs the base or one of these; a miss the base also has is a known gap and minor. It reshapes the severity text for every reviewer and validator, and fixers decline known gaps. It applies run-wide (every workstream, the shared-edits check, docs validate): in a mixed run, name "an unmet brief criterion" in the rule, or split the run |
 | `acceptance` | none | absolute path to the approved case table. Validators run each row this change touches black-box at their sha; reviewers block only on a broken row or a regression vs the base, and a failing row blocks even when the base fails it. Security, data loss and a red gate stay critical. A missing file is a critical finding from validators and `blocked` for authors and fixers; reviewers get no missing-file instruction |
-| `decisionLog` | none | absolute path to the log of the user's answers; binding for every agent through the hard rules (a missing file is critical, or `blocked` for authors and fixers). Setting it also turns on the drift audit: one read-only `fable` agent after the repos are final, skipped when nothing shipped, during a `humanCheck` pause, or when the token reserve is short. Result `drift: {verdict: pass\|drift\|died\|skipped, items: [{repo, where, change}]}`; each item becomes a revert-by-default question |
+| `decisionLog` | none | absolute path to the log of the user's answers; binding for every agent through the hard rules (a missing file is critical, or `blocked` (or `ok=false` with notes) for any agent that pushes). Setting it also turns on the drift audit: one read-only `fable` agent after the repos are final, skipped when nothing shipped, during a `humanCheck` pause, or when the token reserve is short. Result `drift: {verdict: pass\|drift\|failed\|died\|skipped, items: [{repo, where, change}], sections, notes}` (`failed` = the agent could not read the log or a repo; its items are dropped); each item becomes a revert-by-default question, and a `died`, `failed` or reserve-`skipped` audit adds one question whose default re-runs `stage: "wholeBranch"` to audit drift |
 | `wbReviewModel` | repo's highest `reviewModel` | `sonnet`, `opus` or `fable`; overrides only the integrated whole-branch review model, not the workstream reviews |
 | `tokenBudget` | `null` | output-token cap for this run; the user's "+Nk" turn target also applies. Spend is counted from the script's start, so a `resumeFromRunId` crash recovery starts a fresh `tokenBudget` |
 | `tokenReserve` | `600000` | before each new cycle, each whole-branch fix round, the contract check and docs: if less than this is left, nothing new starts; the item is reported not merged / failed with the reason |
@@ -410,11 +411,12 @@ whole-branch pass stay stopped and the escalation says so.
 
 The workflow returns:
 
-- top level: `{stage, budget, cycles, maxCycles, questions, workstreams, repos, crossRepo, otherDocs}`, plus `humanCheck` only when the run paused for one (see Human checks);
+- top level: `{stage, budget, cycles, maxCycles, questions, workstreams, repos, drift, crossRepo, otherDocs}`, plus `humanCheck` only when the run paused for one (see Human checks);
   `questions` collects every question of the run: first one entry when `crossRepo` has an open critical or major,
   whatever its verdict says (contracts have no fix loop, so it carries the contract
   check's recipe, its `sections`, else the findings' issues, and the user decides),
-  then each workstream's and each repo's `questions`, with `q` prefixed `<workstream id>: ` or `<repo name>: `
+  then each workstream's and each repo's `questions`, with `q` prefixed `<workstream id>: ` or `<repo name>: `,
+  then one per drift item and the drift-audit question (see `drift`)
 - `budget`: `{spent, tokenBudget, turnTotal, reserve, stoppedBy}`. `spent` is the
   output tokens this run spent since its own start; `turnTotal` is the user's
   "+Nk" target or `null`; `stoppedBy` lists what the reserve kept from starting
@@ -446,8 +448,10 @@ The workflow returns:
   `escalations` and `docs.notes`; so does a docs agent that died 3 times (plus
   an escalation). Docs are skipped (`docs.notes`: `skipped: …`) when the repo's
   whole-branch pass failed
-- `drift`: `{verdict: pass|drift|died|skipped, items: [{repo, where, change}]}`,
-  always present (`{verdict: 'skipped', items: []}` without `decisionLog`; see its args row); each item is also a question, revert by default
+- `drift`: `{verdict: pass|drift|failed|died|skipped, items: [{repo, where, change}], sections, notes}`,
+  always present (`{verdict: 'skipped', items: [], sections: '', notes: []}` without `decisionLog`; see its args row); each item is also a question, revert by default;
+  with `decisionLog` set, a `died`, `failed` or reserve-`skipped` audit adds the question
+  `drift audit <verdict>: <why>` (default: re-run stage wholeBranch to audit drift)
 - `crossRepo`: `{verdict, sections, findings, ledger}` when 2+ repos, else `null`
 - `otherDocs`: `[{repo, featureBranch, docs, findings, flaky}]` for docs-only repos
 - `findings` (and `crossRepo.ledger`): the structured ledger next to the
@@ -494,18 +498,22 @@ says NOT merged; unpromoted side branches). Then:
 - **Batch fix-ups:** collect the decisions, run one fix-up per repo, then one
   `stage: "wholeBranch"` run, never one pass per fix-up. Append every answered
   question to the `decisionLog`, and check each new brief against it before
-  sending it.
+  sending it. To accept a failing `acceptance` row, change the table; never log
+  it as a decision (validators never waive a row from the log).
 - **Cross-run churn:** if two consecutive `wholeBranch` runs return a non-empty
   `churn` for the same repo, ask the heuristic churn question (the rules are
   likely the wrong shape, not the code) before another run.
 - **Drift items:** revert by default; keep one only on the user's word, then
   log it.
 - **Known-gaps promote:** when the rounds run out with the last recheck green
-  and only non-regression, non-critical majors open, a question offers to
+  and only non-regression, non-integration, non-critical majors open, a question offers to
   fast-forward the feature branch to the checked head; the default is leave
-  unpromoted. The offer is skipped when `acceptance` is set (a failing row is
-  filed as a plain major, so it can't be told apart). If the user picks it:
-  `git push origin <sha>:refs/heads/<featureBranch>` (`hydra-local` in
+  unpromoted. The offer is skipped when `acceptance` or `stopRule` is set (a
+  failing row is filed as a plain major, and under a stop rule every open major
+  is a regression, a wrong action or an explicitly rated check, so neither can
+  be a known gap). If the user picks it: first
+  `git -C <repo> fetch <remote> <featureBranch>--wbfix<n>` (the side branch the
+  question names), then `git push origin <sha>:refs/heads/<featureBranch>` (`hydra-local` in
   local-only mode; explicit refspec, no force), verify with `ls-remote`, append
   the parked majors to the `decisionLog` as accepted known gaps, or to the briefs
   when there is no log (otherwise the re-run re-files them and docs never sync),

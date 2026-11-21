@@ -19,7 +19,8 @@ await t('8b SKILL.md: wholeBranch re-run drift audit, drift in the size count, d
   assert(!/the only channel by which/.test(s) && /through the brief, or through the `decisionLog` when set/.test(s), 'channel')
   const kg = s.slice(s.indexOf('**Known-gaps promote:**'), s.indexOf('**Reviewer tiering:**')).replace(/\s+/g, ' ')
   assert(/append the parked majors to the `decisionLog` as accepted known gaps, or to the briefs when there is no log/.test(kg) && kg.indexOf('decisionLog') < kg.indexOf('re-run `stage: "wholeBranch"`'), 'promote log')
-  assert(/skipped when `acceptance` is set/.test(kg), 'acceptance skip') })
+  assert(/skipped when `acceptance` or `stopRule` is set/.test(kg), 'acceptance/stopRule skip')
+  assert(/git -C <repo> fetch <remote> <featureBranch>--wbfix<n>/.test(kg), 'promote fetches first') })
 
 if (fails.length) { console.error(fails.join('\n')); process.exit(1) }
 console.log('0.3.9 docs checks ok')
