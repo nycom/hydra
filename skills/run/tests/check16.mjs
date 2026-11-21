@@ -110,5 +110,24 @@ await t('3c (control) no decision text without the arg; a relative path throws',
   assert(!Object.values(all).flat().some(p => p.includes('Binding decisions')))
   await throwsOn({ decisionLog: 'd.md', workstreams: [ws('a')] }, /decisionLog must be an absolute path/) })
 
+await t('4a drift: one fable agent after every repo is final, with the log, the briefs and each repo pin; an item becomes result.drift and a revert-by-default question', async () => {
+  const item = { repo: '/r/one', where: 'a/x.py:9', change: 'default station changed' }
+  const { r, order, prompts, opts } = await go({ cycles: 1, decisionLog: LOG, workstreams: [ws('a')] }, { drift: () => ({ drift: [item] }) })
+  assert(idx(order, 'drift') > idx(order, 'one validate') && opts.drift.model === 'fable' && opts.drift.phase === 'Drift audit')
+  assert(prompts.drift.includes(LOG) && prompts.drift.includes('brief a') && /\/r\/one @ f = /.test(prompts.drift))
+  assert.deepEqual(r.drift, { verdict: 'drift', items: [item] })
+  assert(r.questions.some(q => q.q === 'drift: /r/one a/x.py:9: default station changed' && q.default.startsWith('revert'))) })
+await t('4b drift: a dead drift agent is verdict died with an escalation-style note, never a silent pass', async () => {
+  const { r } = await go({ cycles: 1, decisionLog: LOG, workstreams: [ws('a')] }, { drift: () => null })
+  assert.equal(r.drift.verdict, 'died') })
+await t('4c drift: runs on stage wholeBranch; never while a humanCheck pause holds a repo', async () => {
+  const wb = await go({ stage: 'wholeBranch', decisionLog: LOG, workstreams: [ws('a')] }, {})
+  assert(wb.order.includes('drift'))
+  const held = await go({ cycles: 1, decisionLog: LOG, workstreams: [ws('a', { humanCheck: 'look at it' })] }, {})
+  assert(!held.order.includes('drift') && held.r.drift.verdict === 'skipped') })
+await t('4d (control) without decisionLog no drift agent and drift is skipped', async () => {
+  const { r, order } = await go({ cycles: 1, workstreams: [ws('a')] }, {})
+  assert(!order.includes('drift') && r.drift.verdict === 'skipped') })
+
 if (fails.length) { console.error(fails.join('\n')); process.exit(1) }
 console.log('stop-rule, acceptance, decision-log, drift, churn, known-gaps and wbReviewModel checks ok')

@@ -8,6 +8,7 @@ export const meta = {
     { title: 'Merge', detail: 'validated SHA -> feature branch, then the workstream shared-file edits and regen, serialized per repo; a rejected merge returns to its author once' },
     { title: 'Whole-branch', detail: 'integrated review with seam inventory + independent opus validator per repo, up to wbRounds (default 2) fix rounds on side branches, fast-forwarded onto the feature branch once a recheck passes' },
     { title: 'Contracts', detail: 'one opus cross-repo wire-contract check once every repo is final (2+ repos)' },
+    { title: 'Drift audit', detail: 'one read-only fable agent maps every user-visible change to a decision-log line or brief clause' },
     { title: 'Docs sync', detail: 'one sonnet docs agent (plus graph refresh when graphify-out exists) per docs repo on a side branch, then an opus validator on its commit, fast-forwarded onto the feature branch on a pass' },
   ],
 }
@@ -291,6 +292,7 @@ const CONTRACT = {
   properties: { verdict: { enum: ['pass', 'fail'] }, sections: { type: 'string', description: 'one short line per section' }, findings: { type: 'array', items: FINDING } },
   required: ['verdict', 'sections', 'findings'],
 }
+const DRIFT_OUT = { type: 'object', properties: { sections: { type: 'string' }, drift: { type: 'array', items: { type: 'object', properties: { repo: { type: 'string' }, where: { type: 'string' }, change: { type: 'string' } }, required: ['repo', 'where', 'change'] } } }, required: ['sections', 'drift'] }
 const PROMOTED = {
   type: 'object',
   properties: {
@@ -896,9 +898,10 @@ const wsResults = await Promise.all(wsPromises)
 // Barrier: the contract check and docs need every repo final.
 const skipped = new Set(repoResults.filter(r => r.verdict === 'skipped').map(r => r.repo))
 const shipped = skipped.size < REPOS.length
-const paused = repoResults.some(r => r.verdict === 'paused') // contracts and docs wait for the user's human check
+const paused = repoResults.some(r => r.verdict === 'paused') // contracts, docs and the drift audit wait for the user's human check
 const PINS = repoResults.map(r => `${r.repo} @ ${r.featureBranch} = ${r.sha || `${O}/${repoMap[r.repo].base} (nothing merged)`}`).join('\n') + '\n' + STALE
-const [crossRepo, docs] = await parallel([
+const driftRan = !!A.decisionLog && shipped && !paused
+const [crossRepo, docs, driftOut] = await parallel([
   async () => REPOS.length < 2 || !shipped || paused ? null : short('contracts') ? { verdict: 'fail', sections: 'skipped: token budget below the reserve', findings: [] } : step(
     `Cross-repo wire-contract check, run once every repo is final. Pinned heads:
 ${PINS}
@@ -956,7 +959,14 @@ sha = the commit you validated. Ids: D-F1, D-F2, ...`,
     const why = await promote(d.repo, d.featureBranch, o.baseSha, o.sha, [side], `${name(d.repo)} docs promote`, 'Docs sync')
     return { ...o, verdict: why ? 'fail' : 'pass', findings: why ? [...findings, { id: 'D-P', severity: 'critical', kind: 'docs', where: side, issue: `validated docs not promoted to ${d.featureBranch}: ${why}`, evidence: 'the promote step' }] : findings }
   })),
+  async () => driftRan ? step(
+    `${PINS}
+${W.map(w => `## ${w.id}\n${w.brief}`).join('\n\n')}
+Read the decision log ${A.decisionLog}. For each repo, list every user-visible change in ${O}/<base>...<pinned sha> (copy, spoken or printed lines, defaults, prompts, thresholds, UI, removed hints or options). Map each one to a decision-log line or a brief clause. Return in drift only the changes with neither.
+${RO(REPOS[0].repo, 'drift')}`,
+    { label: 'drift', phase: 'Drift audit', agentType: 'reviewer', model: 'fable', schema: DRIFT_OUT }) : null,
 ])
+const drift = !driftRan ? { verdict: 'skipped', items: [] } : driftOut ? { verdict: driftOut.drift.length ? 'drift' : 'pass', items: driftOut.drift } : { verdict: 'died', items: [] }
 
 const brief = f => `${f.severity} ${f.where}: ${f.issue}${f.also ? ` (+ ${f.also.severity} ${f.also.id} at ${f.also.where})` : ""}`
 const uniq = xs => [...new Set(xs)]
@@ -976,6 +986,8 @@ const contractQ = xBlockers.length ? [{ q: `The cross-repo contract check left t
 // the coordinator asks once from here: every workstream and repo question, tagged with where it came from
 const tagged = (who, qs) => uniqQ(qs).map(q => ({ ...q, q: `${who}: ${q.q}` }))
 const questions = [...contractQ, ...wsResults.flatMap(w => tagged(w.id, w.questions || [])), ...repoResults.flatMap(r => tagged(name(r.repo), r.questions || []))]
+const revert = 'revert it: no decision or brief clause covers it'
+questions.push(...drift.items.map(({ repo, where, change }) => ({ q: `drift: ${repo} ${where}: ${change}`, options: [revert, 'keep it and add it to the decision log'], default: revert })))
 return {
   stage: STAGE,
   budget: { spent: budget.spent() - SPENT0, tokenBudget: A.tokenBudget ?? null, turnTotal: budget.total, reserve: RESERVE, stoppedBy },
@@ -990,6 +1002,7 @@ return {
     return { ...r, verdict: docsFailed ? 'fail' : r.verdict, escalations: [...r.escalations, ...(docsFailed ? [d.sha ? `docs commit ${d.sha} left unpromoted on ${r.featureBranch}--docs` : 'docs agent died 3 times; docs not synced'] : [])], open: [...r.open, ...(d?.findings || [])].map(brief), questions: uniqQ(r.questions), notes: uniq([...r.notes, ...(leftovers[r.repo] || [])]), findings: [...r.findings, ...asLedger('docs', d?.findings)], docs: docsOut(d), finalSha: (d?.verdict === 'pass' && d.sha) || r.sha, flaky: flakyOf(r.repo) }
   }),
   // crossRepo.ledger is the result key, not the prompt-side ledger of settled findings inside runWorkstream
+  drift,
   crossRepo: crossRepo && { ...crossRepo, findings: crossRepo.findings.map(brief), ledger: asLedger('contract', crossRepo.findings) },
   ...(humanPending.length && { humanCheck: humanPending }), // the run paused: ask the user, then re-run with humanChecks
   otherDocs: DOCS.filter(d => !repoMap[d.repo]).map(d => ({ repo: d.repo, featureBranch: d.featureBranch, docs: (x => x && { ...x, notes: [...x.notes, ...(leftovers[d.repo] || [])] })(docsOut(docsOf(d.repo))), findings: asLedger('docs', docsOf(d.repo)?.findings), flaky: flakyOf(d.repo) })),

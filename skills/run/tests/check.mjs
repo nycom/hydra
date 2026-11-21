@@ -33,7 +33,7 @@ const budget = (total = null, spent = 0) => ({ total, spent: () => spent, remain
 const run = (args, sc = {}, b = budget()) => { const m = mock(sc); return Run(args, m.agent, parallel, () => {}, b).then(r => ({ r, calls: m.calls })) }
 const F = (id, severity) => ({ id, severity, kind: 'bug', where: 'a:1', issue: 'x' })
 
-assert.deepEqual(meta.phases.map(p => p.title), ['Implement', 'Review cycles', 'Merge', 'Whole-branch', 'Contracts', 'Docs sync'])
+assert.deepEqual(meta.phases.map(p => p.title), ['Implement', 'Review cycles', 'Merge', 'Whole-branch', 'Contracts', 'Drift audit', 'Docs sync'])
 // 1. clean c1 -> one validator, merge validated sha, docs commit validated
 { const { r, calls } = await run({ cycles: null, workstreams: [ws('a', '/r/one/')] }, { docsSha: SHA(80) })
   const w = r.workstreams[0]; assert(w.merged && w.cyclesRun === 1 && w.validatedSha === SHA(1), JSON.stringify(w))
