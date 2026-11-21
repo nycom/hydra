@@ -96,5 +96,19 @@ await t('2d (control) no acceptance text without the arg; a relative path throws
   assert(!Object.values(all).flat().some(p => /Acceptance table|acceptance table/.test(p)))
   await throwsOn({ acceptance: 'acc.md', workstreams: [ws('a')] }, /acceptance must be an absolute path/) })
 
+const LOG = '/tmp/decisions.md'
+await t('3a decisionLog: every prompt carries the binding-decisions clause with the path and the missing-file rule', async () => {
+  const { all } = await go({ cycles: 1, decisionLog: LOG, workstreams: [ws('a'), ws('c', { repo: '/r/two' })] }, busyAcc)
+  const ps = Object.values(all).flat()
+  assert(ps.length > 8 && ps.every(p => p.includes(`Binding decisions (user-approved): ${LOG}`) && /missing or unreadable: a critical finding/.test(p))) })
+await t('3b decisionLog: a finding that asks for what a decision rules out is dropped; a brief that contradicts one goes to questions, default keeps the decision', async () => {
+  const { prompts } = await go({ cycles: 1, decisionLog: LOG, workstreams: [ws('a')] }, {})
+  assert(/A finding that asks for what a decision rules out is dropped/.test(prompts['a review c1']))
+  assert(/a brief clause that contradicts a decision goes to questions, the default keeping the decision/.test(prompts['a implement'])) })
+await t('3c (control) no decision text without the arg; a relative path throws', async () => {
+  const { all } = await go({ cycles: 1, workstreams: [ws('a')] }, {})
+  assert(!Object.values(all).flat().some(p => p.includes('Binding decisions')))
+  await throwsOn({ decisionLog: 'd.md', workstreams: [ws('a')] }, /decisionLog must be an absolute path/) })
+
 if (fails.length) { console.error(fails.join('\n')); process.exit(1) }
 console.log('stop-rule, acceptance, decision-log, drift, churn, known-gaps and wbReviewModel checks ok')

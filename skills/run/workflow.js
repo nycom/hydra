@@ -59,6 +59,7 @@ if (A.cycles != null && !(Number.isInteger(A.cycles) && A.cycles >= 1)) throw ne
 if (A.stopRule != null && !(typeof A.stopRule === 'string' && A.stopRule.trim())) throw new Error('stopRule must be a non-empty string naming the wrong actions that block, e.g. "wrong play or volume, lost speech, a crash"')
 const absArg = k => { if (A[k] != null && !(typeof A[k] === 'string' && /^\//.test(A[k]))) throw new Error(`${k} must be an absolute path`) }
 absArg('acceptance')
+absArg('decisionLog')
 if (A.maxCycles != null && !(Number.isInteger(A.maxCycles) && A.maxCycles >= (A.cycles ?? 1))) throw new Error('maxCycles must be an integer >= cycles')
 if (A.stage != null && A.stage !== 'wholeBranch') throw new Error('stage must be "wholeBranch" or omitted')
 for (const k of ['tokenBudget', 'tokenReserve', 'wbRounds'])
@@ -118,7 +119,8 @@ const short = what => { const s = left() < RESERVE; if (s) stoppedBy.push(what);
 // ---- shared prompt text --------------------------------------------------
 // Workstreams never commit generated files, so whoever runs the gate on a workstream SHA regenerates them first.
 const REGEN = regen => `Before running the gate or any test, run the repo's regen recipe in your worktree: ${regen}\nDiffs it produces are expected (generated files are rebuilt at merge): they are not findings and are never committed.`
-const HARD = `Hard rules: no deploys, no ssh or rsync to hosts, no cloud or prod actions (prod data and prod endpoints included); never gh run rerun or gh pr merge; never create or push a plan/spec doc (plannings/, docs/*plan*) unless that file already exists on the ${O} branch.${A.localOnly ? ` Local-only run: nothing may reach the network. ${O} is a bare repo on local disk and the only remote you may fetch from, push to or ls-remote; never fetch from or push to origin or any other remote, and run no gh command.` : ''}`
+const DECIDED = A.decisionLog ? ` Binding decisions (user-approved): ${A.decisionLog}. Read it first; never act against a line of it. A finding that asks for what a decision rules out is dropped; a brief clause that contradicts a decision goes to questions, the default keeping the decision. File missing or unreadable: a critical finding (kind question), or status "blocked" if you push.` : ''
+const HARD = `Hard rules: no deploys, no ssh or rsync to hosts, no cloud or prod actions (prod data and prod endpoints included); never gh run rerun or gh pr merge; never create or push a plan/spec doc (plannings/, docs/*plan*) unless that file already exists on the ${O} branch.${A.localOnly ? ` Local-only run: nothing may reach the network. ${O} is a bare repo on local disk and the only remote you may fetch from, push to or ls-remote; never fetch from or push to origin or any other remote, and run no gh command.` : ''}${DECIDED}`
 const sq = s => `'${s.replace(/'/g, `'\\''`)}'` // POSIX single-quoting for a shell argument
 const RUN = (secs, cmd) => `node ${sq(`${A.skillDir}/run-cmd.mjs`)} ${secs} ${sq(cmd)}`
 const SHELL_CAP = 'give the shell call a timeout above the cap (foreground max is 600 s), or run it in the background and wait'
