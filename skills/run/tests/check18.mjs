@@ -167,8 +167,8 @@ await t('7a a finding handed over in call 1 reaches the whole-branch fixer in th
   const { r: r1 } = await go(args(), { ...outside, 'b review c1': () => null })
   assert(r1.repos[0].verdict === 'incomplete' && r1.carryForward?.workstreams?.a?.handed?.length === 1, JSON.stringify(r1.carryForward))
   const { r, prompts } = await go(args({ resume: 'run-5', carryForward: r1.carryForward }), state({ id: 'a', head: W(r1, 'a').validatedSha, merged: true }))
-  assert(W(r, 'a').merged && W(r, 'b').merged && (prompts['one fix r1'] || '').includes('"a:c1-F1"'), Object.keys(prompts).join())
-  assert(r.repos[0].findings.some(e => e.id === 'a:c1-F1' && e.stage === 'handed'), JSON.stringify(r.repos[0].findings)) })
+  assert(W(r, 'a').merged && W(r, 'b').merged && (prompts['one fix r1'] || '').includes('"a:p:c1-F1"'), Object.keys(prompts).join())
+  assert(r.repos[0].findings.some(e => e.id === 'a:p:c1-F1' && e.stage === 'handed'), JSON.stringify(r.repos[0].findings)) })
 await t('7b a shared-edits blocker from the paused call reaches the whole-branch fixer after a human-check resume', async () => {
   const EDITS = [{ file: 'README.md', intent: 'add a row' }]
   const args = x => ({ cycles: 1, workstreams: [ws('a', { humanCheck: look })], repos: [{ repo: '/r/one', reviewSharedEdits: true }], ...x })
@@ -176,7 +176,7 @@ await t('7b a shared-edits blocker from the paused call reaches the whole-branch
   const { r: r1 } = await go(args(), sc)
   const H = r1.humanCheck[0].sha
   const { prompts } = await go(args({ resume: 'run-6', carryForward: r1.carryForward, humanChecks: { a: { sha: H, answer: 'ok' } } }), state({ id: 'a', head: H, merged: true }))
-  assert((prompts['one fix r1'] || '').includes('"S-a-m1-F1"'), Object.keys(prompts).join()) })
+  assert((prompts['one fix r1'] || '').includes('"p:S-a-m1-F1"'), Object.keys(prompts).join()) })
 await t('7c a whole-branch pass that passed in the paused call is kept when its feature branch has not moved', async () => {
   const args = x => ({ cycles: 1, workstreams: [ws('a', { humanCheck: look }), ws('c', { repo: '/r/two' })], ...x })
   const { r: r1 } = await go(args(), {})
@@ -205,6 +205,34 @@ await t('7g carryForward without resume, or naming an unknown workstream, throws
     let e = null; try { await go({ workstreams: [ws('a')], ...x }, {}) } catch (y) { e = y }
     assert(e && re.test(e.message), e?.message)
   } })
+
+// ---- 8. restored ids never collide; every result can be resumed ----
+await t('8a a restarted workstream whose new c1-F1 shares an id with a restored handed finding stays open and does not merge', async () => {
+  const old = F('c1-F1', 'major', 'a/old.test.js:2')
+  const carryForward = { workstreams: { a: { handed: [old], open: [], findings: [{ ...old, stage: 'review', status: 'carried' }] } }, repos: {} }
+  const { r, prompts } = await go({ cycles: 1, maxCycles: 1, resume: 'run-11', carryForward, workstreams: [ws('a')] },
+    { ...state({ id: 'a', head: HA, merged: false }), 'a review c1': () => ({ findings: [F('c1-F1', 'critical', 'a/core.js:5')] }), 'a fix c1': () => ({ answers: [{ id: 'c1-F1', action: 'fixed', note: 'n' }] }), 'a validate c1': () => ({ open: [F('c1-F1', 'critical', 'a/core.js:5')] }) })
+  assert(!W(r, 'a').merged && W(r, 'a').open.some(x => /a\/core\.js:5/.test(x)), JSON.stringify(W(r, 'a')))
+  assert(/Handed to the whole-branch pass .*: p:c1-F1\n/.test(prompts['a validate c1']), 'the validator is told only about the restored id')
+  assert(W(r, 'a').findings.some(e => e.id === 'p:c1-F1' && e.status === 'carried') && W(r, 'a').findings.some(e => e.id === 'c1-F1' && e.status === 'open')) })
+await t('8b a whole-branch fail the escalation calls resumable carries the handed finding into that resume', async () => {
+  const args = x => ({ cycles: null, workstreams: [ws('a'), ws('b')], ...x })
+  const { r: r1 } = await go(args(), { ...outside, 'one validate': () => null, 'health one validate': () => null })
+  assert(r1.repos[0].verdict === 'fail' && r1.repos[0].escalations.some(e => /carryForward = this result's carryForward/.test(e)) && r1.carryForward?.workstreams?.a?.handed?.length === 1, JSON.stringify(r1.repos[0].escalations))
+  const { r, prompts } = await go(args({ resume: 'run-12', carryForward: r1.carryForward }), { ...state({ id: 'a', head: W(r1, 'a').validatedSha, merged: true }, { id: 'b', head: W(r1, 'b').validatedSha, merged: true }), 'one recheck r1': () => ({ verified: ['a:p:c1-F1'] }) })
+  assert((prompts['one fix r1'] || '').includes('"a:p:c1-F1"') && r.repos[0].verdict === 'pass', Object.keys(prompts).join()) })
+await t('8c a re-merge\'s shared check in the resume files its own S-a-m1-F1 next to the restored one, under a different id', async () => {
+  const EDITS = [{ file: 'README.md', intent: 'add a row' }]
+  const args = x => ({ cycles: 1, workstreams: [ws('a', { humanCheck: look })], repos: [{ repo: '/r/one', reviewSharedEdits: true }], ...x })
+  const sc = { 'a implement': () => ({ sharedEdits: EDITS }), 'a fix c1': () => ({ sharedEdits: EDITS }), 'a validate c1': () => ({ verified: ['H1-F1'] }), 'a shared check m1': () => ({ verdict: 'fail', findings: [F('S-a-m1-F1', 'major', 'README.md:4')] }) }
+  const { r: r1 } = await go(args(), sc)
+  const H = r1.humanCheck[0].sha
+  const { r } = await go(args({ resume: 'run-13', carryForward: r1.carryForward, humanChecks: { a: { sha: H, answer: 'grey' } } }), { ...sc, ...state({ id: 'a', head: H, merged: true }) })
+  const ids = r.repos[0].findings.map(e => e.id)
+  assert(ids.includes('p:S-a-m1-F1') && ids.includes('S-a-m1-F1') && new Set(ids).size === ids.length, ids.join()) })
+await t('8d a malformed carryForward passed result throws at the args check', async () => {
+  let e = null; try { await go({ resume: 'r', carryForward: { repos: { '/r/one': { passed: { verdict: 'pass', sha: SHA(1) } } } }, workstreams: [ws('a')] }, {}) } catch (y) { e = y }
+  assert(e && /passed must be the repo result of a passed whole-branch pass/.test(e.message), e?.message) })
 
 // ---- docs and version ----
 await t('6a SKILL.md documents resume, decisions, the head-bound checks and the handed findings; plugin.json is 0.3.10', async () => {

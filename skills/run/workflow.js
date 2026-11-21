@@ -128,7 +128,12 @@ const CF_REPOS = Object.fromEntries(Object.entries(CF.repos || {}).map(([repo, x
 for (const [repo, x] of Object.entries(CF_REPOS)) {
   if (!repoMap[repo]) throw new Error(`carryForward.repos: ${repo} has no workstream in this run`)
   if (x.shared != null && !Array.isArray(x.shared)) throw new Error(`carryForward.repos ${repo}: shared must be an array`)
+  const k = x.passed && ['open', 'findings', 'questions', 'notes', 'escalations', 'churn'].find(f => !Array.isArray(x.passed[f]))
+  if (x.passed != null && !(x.passed.verdict === 'pass' && /^[0-9a-f]{40}$/.test(x.passed.sha || '') && !k)) throw new Error(`carryForward.repos ${repo}: passed must be the repo result of a passed whole-branch pass (verdict pass, a full sha${k ? `, ${k} an array` : ''})`)
 }
+// restored ids get a p: prefix, so a restarted review's new c1-F1 (or a re-merge's S-<id>-m1-F1) never collides with the earlier call's
+const prior = f => ({ ...f, id: `p:${f.id}` })
+const CF_WS = Object.fromEntries(Object.entries(CF.workstreams || {}).map(([id, x]) => [id, Object.fromEntries(['handed', 'open', 'findings'].map(k => [k, (x[k] || []).map(prior)]))]))
 const name = repo => repo.split('/').pop()
 const STALE = `Read other repos ONLY via git -C <repo> fetch ${O}, then git -C <repo> show ${O}/<featureBranch>:<path> or git -C <repo> diff ${O}/<base>...${O}/<featureBranch> — never by filesystem path: those checkouts sit on unrelated branches.`
 
@@ -356,7 +361,7 @@ const lock = {}
 // shortcut: prompts that list it depend on merge timing, so a resume may run those agents live instead of from cache.
 const mergedInto = {}
 const mergeShas = {} // workstream id -> the feature-branch tip its latest merge pushed, for workstreams ordered after it
-const sharedFound = Object.fromEntries(Object.entries(CF_REPOS).filter(([, x]) => x.shared?.length).map(([repo, x]) => [repo, [...x.shared]])) // repo -> findings of the shared-edits checks, fixed in the whole-branch fix rounds; a resume starts from the resumed result's
+const sharedFound = Object.fromEntries(Object.entries(CF_REPOS).filter(([, x]) => x.shared?.length).map(([repo, x]) => [repo, x.shared.map(prior)])) // repo -> findings of the shared-edits checks, fixed in the whole-branch fix rounds; a resume starts from the resumed result's
 const landedHere = {} // repo -> a merge landed in this call, so a kept whole-branch pass no longer covers its tip
 // humanCheck: a repo's checks are asked together, in the one pause after its merges finish; merges never wait on a check.
 // repo -> {workstream id -> why its check is open}; an "ok" deletes the entry, and an open entry pauses the repo's whole-branch pass
@@ -423,7 +428,7 @@ async function step(prompt, { gated, ...opts }, anySha = false) {
   return null
 }
 // why a gated step returned null, for its escalation
-const INFRA = what => `${what} died twice and the health probe failed (auth or tool access): an infra fault, not the work; fix it, then re-run with resumeFromRunId and resume`
+const INFRA = what => `${what} died twice and the health probe failed (auth or tool access): an infra fault, not the work; fix it, then re-run with resumeFromRunId, resume and carryForward = this result's carryForward`
 const died = (what, label) => infra[label] ? INFRA(what) : !unran[label] ? `${what} died 3 times` : `${what} ${unran[label] === 3 ? 'never ran its gate' : 'died or never ran its gate'} in 3 attempts`
 const unusable = (what, branch, label) => infra[label] ? `${INFRA(what)}; check ${O}/${branch} for an unvalidated push` : `${what} returned no usable result 3 times (died or malformed sha); check ${O}/${branch} for an unvalidated push`
 // Whole-branch fixes and docs land on side branches; a feature branch only fast-forwards to a SHA a validator passed.
@@ -478,11 +483,11 @@ async function runWorkstream(w) {
   const decisions = [] // the author's reasoning, handed to every later reviewer and fixer
   const ledger = [] // settled findings: never re-raised unless the code under them changed
   // a resume restores what git cannot say: the ledger (settled entries stay settled for the reviewers) and the findings handed to the whole-branch pass
-  const cf = CF.workstreams?.[w.id]
+  const cf = CF_WS[w.id]
   if (cf) {
-    book.push(...(cf.findings || []))
+    book.push(...cf.findings)
     ledger.push(...book.filter(e => STATUS.includes(e.status)).map(({ id, where, issue, status }) => ({ id, where, issue, status })))
-    out.handed.push(...(cf.handed || []))
+    out.handed.push(...cf.handed)
   }
   const absorb = r => {
     out.sharedEdits = r.sharedEdits // each author returns the complete current list
@@ -607,7 +612,7 @@ Return status ("done" only when the gate is green and the push verified, or noth
   const readsMergeSha = !!(c.reviewSharedEdits || w.humanCheck || W.some(x => x.after?.includes(w.id)))
   for (let from = 1; ; from = out.cyclesRun + 1) {
     for (let i = from; i <= CAP; i++) {
-      if (short(`${tag} cycle ${i}`)) return stop(`token budget below the ${RESERVE} reserve before cycle ${i}`)
+      if (short(`${tag} cycle ${i}`)) return stop(`token budget below the ${RESERVE} reserve before cycle ${i}; resume with resumeFromRunId, resume and carryForward = this result's carryForward`)
       // a merge rejection goes straight to the fix: the head under it is unchanged and already reviewed
       // lite: no reviews; the clean-review validator below is the one check, and its blockers go straight to the fix
       const rev = (rejected && i === from) || w.lite ? { headSha: out.sha, findings: carry } : await step(
@@ -915,7 +920,7 @@ sha = the ${O}/${r.featureBranch} commit you validated. Ids: V-F1, V-F2, ...; qu
   findings = [...collapse(rev.findings, val.findings), ...redGate(val, 'V-G'), ...carried.filter(f => !resolved(f)), ...shared, ...handed]
 
   for (let round = 1; round <= WB_ROUNDS && findings.some(blocking); round++) {
-    if (short(`${n} whole-branch fix round ${round}`)) return fail(`token budget below the ${RESERVE} reserve before whole-branch fix round ${round}`)
+    if (short(`${n} whole-branch fix round ${round}`)) return fail(`token budget below the ${RESERVE} reserve before whole-branch fix round ${round}; resume with resumeFromRunId, resume and carryForward = this result's carryForward`)
     res.fixRounds = round
     const head = checked
     const side = `${r.featureBranch}--wbfix${round}`
@@ -1007,6 +1012,7 @@ log(`${STAGE === 'wholeBranch' ? 'whole-branch re-validation' : `${W.length} wor
 const RESUMED = {} // workstream id -> {head, merged, featureSha}
 const featureShaOf = {} // repo -> its feature-branch head when the probe read it
 if (A.resume && STAGE !== 'wholeBranch') {
+  if (!A.carryForward) log(`resume of ${A.resume} without carryForward: ledgers, handed and shared-edits findings and passed whole-branch passes of the resumed run are not restored`)
   const states = await parallel(REPOS.map(r => () => step(
     `Resume of run ${A.resume}: read the git state of ${r.repo}; change nothing. git -C ${r.repo} fetch ${O}; featureSha = git -C ${r.repo} rev-parse ${O}/${r.featureBranch}. For each workstream branch below: head = git -C ${r.repo} rev-parse ${O}/<branch> (empty if the branch does not exist on ${O}); merged = true only if head is non-empty and git -C ${r.repo} merge-base --is-ancestor <head> ${O}/${r.featureBranch} succeeds.
 ${r.ws.map(w => `${w.id}: ${w.branch}`).join('\n')}
@@ -1153,8 +1159,8 @@ return {
   drift,
   crossRepo: crossRepo && { ...crossRepo, findings: crossRepo.findings.map(brief), ledger: asLedger('contract', crossRepo.findings) },
   ...(humanPending.length && { humanCheck: humanPending }), // the run paused: ask the user, then re-run with humanChecks
-  // a result a resume follows hands over what git cannot say; pass it back verbatim as carryForward
-  ...((paused || wsResults.some(w => w.decision)) && STAGE !== 'wholeBranch' && { carryForward: {
+  // every full-stage result hands over what git cannot say, since any of them may be resumed; pass it back verbatim as carryForward
+  ...(STAGE !== 'wholeBranch' && { carryForward: {
     workstreams: Object.fromEntries(wsResults.map(w => [w.id, { handed: w.handed || [], open: w.open || [], findings: w.findings || [] }])),
     repos: Object.fromEntries(repoResults.map(r => [r.repo, { shared: sharedFound[r.repo] || [], passed: r.verdict === 'pass' ? r : null }])),
   } }),
