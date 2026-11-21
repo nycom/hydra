@@ -185,6 +185,14 @@ Implementation is never below Sonnet.
   Never below Sonnet. Fable implements only in VERY complex cases — and then
   outside the workflow. Reviews run one tier above the author (sonnet → opus,
   opus → fable; `reviewModel` overrides per workstream). Validators stay on opus.
+- **Heuristic-heavy builds** (language matching, guards, classifiers): before
+  Run 1, write a case table, the field inputs plus about 40 negatives, each
+  mapped to its expected action; the user approves it during grilling and it
+  goes in as `acceptance`. Put the `stopRule` in the first brief. Freeze scope
+  after grilling: a new ask mid-run becomes a parked follow-up unless it is a
+  regression. Slice the ship, so the smallest user-facing fix ships the same
+  day. Prefer structural signals (did the tool call succeed?) over parsing
+  model text; where text must be read, use one predicate with one owner.
 
 ## 2. Set up
 
@@ -199,6 +207,14 @@ Implementation is never below Sonnet.
   `git -C <repo> check-ignore -v <path>` must name an ignore source and the
   file must exist in the user's checkout; otherwise drop it (agents refuse it
   too).
+- **Run-local script:** copy `<skill dir>/workflow.js` into the run's working
+  folder (`<run dir>`) once at the start and pass that copy as `scriptPath`.
+  The Workflow tool refuses plugin and skills paths, and the copy pins the
+  version for every re-run. No plugin upgrades mid-run.
+- The known-red baseline agent also reports the full gate's wall time;
+  over 2 min with no `quickGate`, propose one to the user before the run.
+- When `acceptance` or `decisionLog` is used, check the files exist (absolute
+  paths); a missing or unreadable one is a critical finding for every agent.
 - One **feature branch per touched repo** (e.g. `feat/<topic>`), cut from
   `origin/main` (or the stacked `base`) with `git branch` + `git push origin <branch>` (`hydra-local` in local-only mode) — never
   checkout-switch. Every workstream branches off it and merges back into it.
@@ -223,13 +239,17 @@ sweep has only ever killed the fakes in its `--self-test`, never a real stuck lo
 
 ```
 Workflow({
-  scriptPath: "<skill dir>/workflow.js",
+  scriptPath: "<run dir>/workflow.js",
   args: {
     skillDir: "<skill dir>",         // absolute; required when any repo has smoke or any workstream has checks
     cycles: 2,                       // or null = converge; a named count is a floor
     maxCycles: 4,                    // optional hard cap; default cycles+2, or 4 when cycles is null
     tokenBudget: 3000000,            // optional; output tokens this run may spend (budget.spent())
     tokenReserve: 600000,            // optional; default 600000
+    stopRule: "keeps the user's own words; never rewrites a quoted name", // optional; the wrong actions, as one string
+    acceptance: "<run dir>/cases.md",       // optional; absolute path to the approved case table
+    decisionLog: "<run dir>/decisions.md",  // optional; absolute path; binding for every agent, turns on the drift audit
+    wbReviewModel: "opus",           // optional; sonnet | opus | fable; integrated whole-branch review only
     localOnly: false,                // optional; true = nothing reaches the network (see Local-only mode)
     humanChecks: { "api-auth": { sha: "<checked sha>", answer: "ok" } }, // only on the re-run after a humanCheck pause
     workstreams: [
@@ -276,6 +296,10 @@ Workflow({
 | `skillDir` | none | this skill's absolute base directory (the `<skill dir>` printed when the skill loads); the script can't learn its own path, and agents run `node <skillDir>/run-cmd.mjs <seconds> '<command>'` for smoke and checks. Required when any repo has `smoke` or any workstream has `checks` |
 | `stage` | omitted | `"wholeBranch"`: skip implement/cycles/merge; re-run whole-branch review + validator, contract check, docs sync on the current feature-branch tips |
 | `wbRounds` | `2` | whole-branch fix rounds, each pushed to a side branch `<featureBranch>--wbfix<round>` and promoted onto the feature branch only after a passing recheck; `0` = no fix rounds (findings returned unfixed; the repo verdict is `fail` while any is critical or major); pair with `docsRepos: []` for a review-only pass (a failing repo skips docs regardless) |
+| `stopRule` | none | non-empty string naming the wrong actions. A blocker is a regression vs the base or one of these; a miss the base also has is a known gap and minor. It reshapes the severity text for every reviewer and validator, and fixers decline known gaps |
+| `acceptance` | none | absolute path to the approved case table. Validators run each row black-box at their sha; reviewers block only on a broken row or a regression vs the base, and a failing row blocks even when the base fails it. Security, data loss and a red gate stay critical. A missing file is a critical finding |
+| `decisionLog` | none | absolute path to the log of the user's answers; binding for every agent through the hard rules (a missing file is critical, or `blocked` for authors and fixers). Setting it also turns on the drift audit: one read-only `fable` agent after the repos are final, skipped when nothing shipped, during a `humanCheck` pause, or when the token reserve is short. Result `drift: {verdict: pass\|drift\|died\|skipped, items: [{repo, where, change}]}`; each item becomes a revert-by-default question |
+| `wbReviewModel` | repo's highest `reviewModel` | `sonnet`, `opus` or `fable`; overrides only the integrated whole-branch review model, not the workstream reviews |
 | `tokenBudget` | `null` | output-token cap for this run; the user's "+Nk" turn target also applies. Spend is counted from the script's start, so a `resumeFromRunId` crash recovery starts a fresh `tokenBudget` |
 | `tokenReserve` | `600000` | before each new cycle, each whole-branch fix round, the contract check and docs: if less than this is left, nothing new starts; the item is reported not merged / failed with the reason |
 | `localOnly` | `false` | every fetch, push and `ls-remote` targets the remote `hydra-local`, a bare repo on local disk you set up (see Local-only mode); agents are told never to touch `origin` or any other remote and to run no `gh`; every hygiene section also checks that no run branch has a remote-tracking ref on any other remote; the docs step skips its PR-body update |
@@ -314,6 +338,12 @@ the dropped one is the review a tier above the author, opus or fable); each bloc
 no review of the fixed head). `reviewSharedEdits` adds 1 opus validator per merge that applied shared edits. The
 runtime runs at most min(16, CPUs−2) agents at once and caps a run at 1000
 `agent()` calls (cached replays count).
+
+**Time estimate:** wall time ≈ the longest workstream chain + the whole-branch
+pass. Each agent on the chain ≈ its gate minutes (validators run new tests 3×)
++ ~5 min of agent time. One whole-branch pass measured 50-68 min with 13-15
+agents on 3-5 min gates. Estimate ×3 when the exit is "no reviewer finds a
+major" on language or heuristic rules.
 
 **Progress panel** (when `mcp__savvy-progress__*` exists; skip silently
 otherwise): before the call, `progress` with `title`, `total` = workstreams,
@@ -393,7 +423,10 @@ The workflow returns:
   `evidence` maps each workstream validator step (`validate c1`, `validate c1 delta`, …) to the
   commands it says it ran per step
 - per repo: `{repo, featureBranch, sha, verdict, sections, seams, tests, fixRounds,
-  open, questions, notes, escalations, findings, docs, finalSha, flaky}`; `sha` and
+  open, questions, notes, escalations, findings, docs, finalSha, flaky, churn}`; `churn` =
+  `[{round, files}]`, one entry per whole-branch round that brought a new regression-kind
+  blocker in a file that round's fixer was asked to fix; two consecutive such rounds stop
+  the run with a heuristic churn question. `sha` and
   `finalSha` are always validated SHAs on the feature branch (unpromoted
   whole-branch fixes or docs stay on their side branch, named in `escalations`);
   `notes` also lists what a successful promote left undone (e.g. a side-branch
@@ -410,6 +443,8 @@ The workflow returns:
   `escalations` and `docs.notes`; so does a docs agent that died 3 times (plus
   an escalation). Docs are skipped (`docs.notes`: `skipped: …`) when the repo's
   whole-branch pass failed
+- `drift`: `{verdict: pass|drift|died|skipped, items: [{repo, where, change}]}`
+  when `decisionLog` is set (see its args row); each item is also a question, revert by default
 - `crossRepo`: `{verdict, sections, findings, ledger}` when 2+ repos, else `null`
 - `otherDocs`: `[{repo, featureBranch, docs, findings, flaky}]` for docs-only repos
 - `findings` (and `crossRepo.ledger`): the structured ledger next to the
@@ -453,6 +488,22 @@ says NOT merged; unpromoted side branches). Then:
   `stage: "wholeBranch"` instead. Gate prompts list the run-wide flaky registry, so
   a replay can see a different registry, run those agents live and end in a
   false "not promoted" fail: safe (nothing unvalidated lands), but re-check it.
+- **Batch fix-ups:** collect the decisions, run one fix-up per repo, then one
+  `stage: "wholeBranch"` run, never one pass per fix-up. Append every answered
+  question to the `decisionLog`, and check each new brief against it before
+  sending it.
+- **Cross-run churn:** if two consecutive `wholeBranch` runs return a non-empty
+  `churn` for the same repo, ask the heuristic churn question (the rules are
+  likely the wrong shape, not the code) before another run.
+- **Drift items:** revert by default; keep one only on the user's word, then
+  log it.
+- **Known-gaps promote:** when the rounds run out with the last recheck green
+  and only non-regression, non-critical majors open, a question offers to
+  fast-forward the feature branch to the checked head; the default is leave
+  unpromoted. If the user picks it: `git push <remote> <sha>:refs/heads/<featureBranch>`
+  (explicit refspec, no force), verify with `ls-remote`, and park the open majors.
+- **Reviewer tiering:** intermediate `wholeBranch` passes run with
+  `wbReviewModel: "opus"`; the top reviewer runs only on the final pass.
 - Escalate to the user **only** the top-level `questions` (it already holds every workstream and repo question; plus anything else code, spec or
   plan can't resolve) — collected and asked **once**, at the end; the retro's
   ranked list (§5) joins that same ask, after the questions.

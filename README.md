@@ -41,6 +41,10 @@ Opt-in, per run (details and every arg in `skills/run/SKILL.md`):
 - `workstreams[].humanCheck`: the run pauses after that workstream merges and returns what to check by eye; a re-run with `resumeFromRunId` and `humanChecks` (each answer bound to the sha the user checked) continues, and a reported problem goes back to its author.
 - `repos[].copyExcluded`: git-ignored files the gate needs (a local preview test) are copied into every agent worktree and never committed.
 - `repos[].reviewSharedEdits: true`: the shared-file edits each merge applies get their own gate and validator before the next merge.
+- `stopRule` + `acceptance`: a string of wrong actions and an approved case table; reviewers block only on those and on regressions vs the base, validators run each row black-box.
+- `decisionLog`: the user's answers become binding for every agent, and a read-only drift audit after the run turns each unlogged change into a revert-by-default question.
+- Churn stop and known-gaps offer: two whole-branch rounds in a row that each bring a new regression in a file the fixer touched stop the run with a question; rounds that run out on a green recheck offer to promote the checked head with its open majors parked.
+- `wbReviewModel`: pick the integrated whole-branch review model (cheaper on intermediate passes, top tier on the final one).
 
 Stacked PRs are an opt-in mode, used only when asked for.
 
