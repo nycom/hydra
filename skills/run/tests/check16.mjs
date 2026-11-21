@@ -1,0 +1,83 @@
+// Stop rule, acceptance table, decision log + drift audit, churn detector, known-gaps offer, wbReviewModel. Every scenario fails against the 0.3.8 script except the ones marked (control).
+import { Run } from './run.mjs'
+import assert from 'node:assert'
+import { readFileSync } from 'node:fs'
+const SHA = n => (n + '').padStart(40, 'a')
+const parallel = fs => Promise.all(fs.map(f => f().catch(() => null)))
+const free = { total: null, spent: () => 0, remaining: () => Infinity }
+const push = { status: 'done', ok: true, tests: 't', gateTail: 'exit 0', sharedEdits: [], decisions: [], questions: [], notes: [] }
+const green = { green: true, summary: '12 passed', command: 'npm test', flaky: [] }
+const F = (id, severity = 'major', where = 'x.py:3') => ({ id, severity, kind: 'bug', where, issue: `issue ${id}`, evidence: 'test t1 red' })
+const Q = q => ({ q, options: ['keep', 'change'], default: 'keep' })
+function mock(args, sc = {}) {
+  const prompts = {}, opts = {}, all = {}, order = [], merges = {}, events = []
+  const head = {}
+  let n = 0
+  const repoOf = L => { const w = args.workstreams.find(w => L.startsWith(`${w.id} `)); return w ? w.repo : `/r/${L.split(' ')[0]}` }
+  const agent = async (p, o) => {
+    const L = o.label.replace(/ attempt \d$/, '')
+    events.push(`start ${L}`)
+    if (sc.__delay?.[L]) await new Promise(r => setTimeout(r, sc.__delay[L]))
+    const res = await reply(p, o, L)
+    events.push(`end ${L}`)
+    return res
+  }
+  const reply = async (p, o, L) => {
+    prompts[L] = p; opts[L] = o; (all[L] ||= []).push(p); order.push(L)
+    const id = L.split(' ')[0]
+    const repo = repoOf(L)
+    const own = sc[L]?.(p, all[L].length)
+    if (own === null) return null
+    if (L.endsWith('implement')) return (head[id] = SHA(id.length), { ...push, sha: head[id], ...own })
+    if (/fix c(\d)/.test(L)) { const r = { ...push, sha: SHA(200 + ++n), answers: [], ...own }; head[id] = r.sha; return r }
+    if (/review c\d/.test(L)) return { headSha: head[id], findings: [], ...own }
+    if (/validate c\d/.test(L)) return { headSha: head[id], gate: green, evidence: 'e', verified: [], open: [], ...own }
+    if (L.endsWith('merge')) { const pre = head[repo] || SHA(40); head[repo] = SHA(500 + ++n); (merges[id] ||= []).push(head[repo]); return { ...push, sha: head[repo], preMergeSha: pre, baseAtMerge: SHA(40), ...own } }
+    if (/ shared check m\d+$/.test(L)) return { verdict: 'pass', sections: 's', sha: head[repo], tests: 't', gate: green, findings: [], ...own }
+    if (L.endsWith(' review')) return { headSha: head[repo], findings: [], seams: 'none', ...own }
+    if (L.endsWith(' docs validate')) return { verdict: 'pass', sections: 's', sha: SHA(900), tests: 't', gate: green, findings: [], ...own }
+    if (L.endsWith(' validate')) return { verdict: 'pass', sections: 's', sha: head[repo], tests: 't', gate: green, findings: [], verified: [], ...own }
+    if (/fix r(\d)/.test(L)) { const r = { ...push, sha: SHA(70 + +L.at(-1)), answers: [], ...own }; head[repo] = r.sha; return r }
+    if (/recheck r\d/.test(L)) return { verdict: 'pass', sections: 's', sha: head[repo], tests: 't', gate: green, findings: [], verified: [], ...own }
+    if (L.endsWith(' docs')) return { baseSha: head[repo], sha: '', files: [], prBody: false, ok: true, tests: 't', notes: [], ...own }
+    if (L.endsWith(' promote')) return { ok: true, sha: (p.match(/ to ([0-9a-f]{40})\./) || [])[1], notes: [], ...own }
+    if (L === 'contracts') return { verdict: 'pass', sections: 's', findings: [], ...own }
+    if (L === 'drift') return { sections: 's', drift: [], ...own }
+    throw new Error('unmocked ' + L)
+  }
+  return { agent, prompts, opts, all, order, merges, events }
+}
+const ws = (id, extra = {}) => ({ id, repo: '/r/one', featureBranch: 'f', branch: `f--${id}`, model: 'sonnet', brief: `brief ${id}`, gate: 'npm test', files: [`${id}/`], ...extra })
+// a run that never settles (a hold nobody releases) fails instead of hanging the suite
+const go = async (args, sc) => {
+  const m = mock(args, sc)
+  let timer
+  const hung = new Promise((_, no) => { timer = setTimeout(() => no(new Error('the run hung')), 2000) })
+  const r = await Promise.race([Run(args, m.agent, parallel, () => {}, free), hung]).finally(() => clearTimeout(timer))
+  return { r, ...m }
+}
+const throwsOn = async (args, re) => { let e = null; try { await go(args, {}) } catch (x) { e = x } assert(e && re.test(e.message), `expected ${re}, got ${e?.message}`) }
+const fails = []
+const t = async (name, fn) => { try { await fn() } catch (e) { fails.push(`${name}: ${e.message.split('\n')[0]}`) } }
+const idx = (order, L) => order.indexOf(L)
+const dirtyB = { 'b review c1': () => ({ findings: [F('c1-F1')] }), 'b validate c1': () => ({ verified: ['c1-F1'] }) } // b merges after a
+
+const SR = 'wrong play or volume, lost speech, a crash'
+await t('1a stopRule: every prompt that carried SEV carries the stop rule with the wrong-action list, and the 0.3.8 definition is gone', async () => {
+  const { all } = await go({ cycles: 1, stopRule: SR, workstreams: [ws('a'), ws('b')] }, { 'a review c1': () => ({ findings: [F('c1-F1')] }), 'a validate c1': () => ({ verified: ['c1-F1'] }) })
+  const ps = Object.values(all).flat()
+  const judged = ps.filter(p => /Critical and major block the merge/.test(p))
+  assert(judged.length >= 4)
+  assert(judged.every(p => p.includes(`a wrong action: ${SR}`) && /A miss the base also has is a known gap: minor/.test(p)))
+  assert(!ps.some(p => p.includes('major = real bug or design flaw'))) })
+await t('1b stopRule: both fixer prompts tell the fixer to decline known gaps instead of adding a word list', async () => {
+  const { prompts } = await go({ cycles: 1, stopRule: SR, workstreams: [ws('a')] }, { 'a review c1': () => ({ findings: [F('c1-F1')] }), 'a validate c1': () => ({ verified: ['c1-F1'] }), 'one validate': () => ({ verdict: 'fail', findings: [F('V-F1')] }), 'one recheck r1': () => ({ verified: ['V-F1'] }) })
+  for (const L of ['a fix c1', 'one fix r1']) assert(/decline it as "known gap"; never add a word list, pattern or matcher branch for it/.test(prompts[L]), L) })
+await t('1c (control) without stopRule SEV is the 0.3.8 text; a non-string or blank stopRule throws', async () => {
+  const { all } = await go({ cycles: 1, workstreams: [ws('a')] }, {})
+  assert(Object.values(all).flat().some(p => p.includes('major = real bug or design flaw')))
+  await throwsOn({ stopRule: true, workstreams: [ws('a')] }, /stopRule must be a non-empty string/)
+  await throwsOn({ stopRule: ' ', workstreams: [ws('a')] }, /stopRule must be a non-empty string/) })
+
+if (fails.length) { console.error(fails.join('\n')); process.exit(1) }
+console.log('stop-rule, acceptance, decision-log, drift, churn, known-gaps and wbReviewModel checks ok')
