@@ -121,7 +121,7 @@ const short = what => { const s = left() < RESERVE; if (s) stoppedBy.push(what);
 // ---- shared prompt text --------------------------------------------------
 // Workstreams never commit generated files, so whoever runs the gate on a workstream SHA regenerates them first.
 const REGEN = regen => `Before running the gate or any test, run the repo's regen recipe in your worktree: ${regen}\nDiffs it produces are expected (generated files are rebuilt at merge): they are not findings and are never committed.`
-const DECIDED = A.decisionLog ? ` Binding decisions (user-approved): ${A.decisionLog}. Read it first; never act against a line of it. A finding that asks for what a decision rules out is dropped; a brief clause that contradicts a decision goes to questions, the default keeping the decision. File missing or unreadable: a critical finding (kind question), or status "blocked" if you push.` : ''
+const DECIDED = A.decisionLog ? ` Binding decisions (user-approved): ${A.decisionLog}. Read it first; never act against a line of it. A finding that asks for what a decision rules out is dropped; a brief clause that contradicts a decision goes to questions, the default keeping the decision. File missing or unreadable: a critical finding (kind question), or, if you push, stop and report it (status "blocked", or ok=false with the reason in notes).` : ''
 const HARD = `Hard rules: no deploys, no ssh or rsync to hosts, no cloud or prod actions (prod data and prod endpoints included); never gh run rerun or gh pr merge; never create or push a plan/spec doc (plannings/, docs/*plan*) unless that file already exists on the ${O} branch.${A.localOnly ? ` Local-only run: nothing may reach the network. ${O} is a bare repo on local disk and the only remote you may fetch from, push to or ls-remote; never fetch from or push to origin or any other remote, and run no gh command.` : ''}${DECIDED}`
 const sq = s => `'${s.replace(/'/g, `'\\''`)}'` // POSIX single-quoting for a shell argument
 const RUN = (secs, cmd) => `node ${sq(`${A.skillDir}/run-cmd.mjs`)} ${secs} ${sq(cmd)}`
@@ -166,11 +166,13 @@ const CONFLICT = 'Only a contradiction between the brief and the repo itself (a 
 const CLAUSES = 'Judge each fix against the brief\'s hard clauses as well as its finding: a fix that removes a call the brief mandates, edits or deletes a file the brief says not to edit, or deletes or weakens a test an earlier stage verified as guarding a fix stays open as a regression unless the user answered a question allowing it. Accept (verified) an answer escalated as a brief conflict when no fix keeps every clause.'
 const LADDER = 'Ladder-first (reuse > stdlib > native > one line > minimum code), no speculative code, stay strictly in scope.'
 const SEV_038 = 'Severity: critical = wrong behaviour, data loss, security, broken contract or red gate; major = real bug or design flaw; minor = the rest. Critical and major block the merge. Report only real issues; an empty list means clean.'
-const SEV = A.stopRule ? `Stop rule: critical or major only for a regression vs the base branch (behaviour that works at the base and breaks at this head) or a wrong action: ${A.stopRule}. Security and data loss stay critical. Checks these instructions rate explicitly (hygiene, test integrity, smoke, checks) keep that severity, and a broken wire contract between repos stays critical. A miss the base also has is a known gap: minor, whatever its kind. Critical and major block the merge. Report only real issues; an empty list means clean.` : SEV_038
+// explicit severities no stop rule or acceptance table lowers
+const KEEP = 'Checks these instructions rate explicitly (hygiene, test integrity, smoke, checks) keep that severity, a broken wire contract between repos stays critical, and a break between workstreams (kind integration) stays major.'
+const SEV = A.stopRule ? `Stop rule: critical or major only for a regression vs the base branch (behaviour that works at the base and breaks at this head) or a wrong action: ${A.stopRule}. Security and data loss stay critical. ${KEEP} A miss the base also has is a known gap: minor, whatever its kind. Critical and major block the merge. Report only real issues; an empty list means clean.` : SEV_038
 const STOP_FIX = A.stopRule ? 'Stop rule in force: a minor that is a known gap (the base has the same miss): decline it as "known gap"; never add a word list, pattern or matcher branch for it.\n' : ''
 const ACC_READ = A.acceptance ? `Acceptance table (user-approved, binding): ${A.acceptance}. Read it before you change code; your change must satisfy every row that touches it. File missing or unreadable: stop with status "blocked" and say so in notes.\n` : ''
-const ACC_REVIEW = A.acceptance ? `Acceptance table: ${A.acceptance} (read it). Rate a finding critical or major only if it breaks a row of the acceptance table or is a regression vs the base branch${A.stopRule ? ' or is a wrong action under the stop rule' : ''}; anything else is minor. The known-gap exemption never covers a row. Security, data loss and a red gate stay critical.\n` : ''
-const ACC_RUN = sha => A.acceptance ? `Acceptance table: ${A.acceptance}. Before judging anything else, run every row of the acceptance table that this change touches, black-box, at ${sha}: the row's input against the public interface, compared to its expected action. A failing row is a finding (kind bug, severity major, evidence = the row and the output). A failing row is major even when the base fails it too. The known-gap exemption never covers a row. File missing or unreadable: a critical finding (kind question).\n` : ''
+const ACC_REVIEW = A.acceptance ? `Acceptance table: ${A.acceptance} (read it). Rate a finding critical or major only if it breaks a row of the acceptance table or is a regression vs the base branch${A.stopRule ? ' or is a wrong action under the stop rule' : ''}; anything else is minor (this overrides the severity definitions below). The known-gap exemption never covers a row. Security, data loss and a red gate stay critical. ${KEEP}\n` : ''
+const ACC_RUN = sha => A.acceptance ? `Acceptance table: ${A.acceptance}. Before judging anything else, run every row of the acceptance table that this change touches, black-box, at ${sha}: the row's input against the public interface, compared to its expected action. A failing row is a finding (kind bug, severity major, evidence = the row and the output). A failing row is major even when the base fails it too. The known-gap exemption never covers a row. A decision-log line never waives a row; only a changed table does. File missing or unreadable: a critical finding (kind question).\n` : ''
 const DROP = 'Drop (do not downgrade): issues that predate the diff and are not made worse by it, anything the repo\'s linter/formatter catches, code the plan or brief explicitly allows, pure style with no correctness, safety or maintainability cost. A comment added in this diff is a claim to grill, never a reason to drop a finding; do not flag `shortcut:` comments themselves.'
 const EVIDENCE = 'A critical or major of kind bug, regression or integration with evidence "none" and not resolved at this head: reproduce it here. Reproduced: keep it blocking with your evidence; otherwise return it still open with the same id, demoted to minor. Design, question and overengineering kinds are exempt.'
 const LENSES = grill => `Lenses:
@@ -293,7 +295,7 @@ const CONTRACT = {
   properties: { verdict: { enum: ['pass', 'fail'] }, sections: { type: 'string', description: 'one short line per section' }, findings: { type: 'array', items: FINDING } },
   required: ['verdict', 'sections', 'findings'],
 }
-const DRIFT_OUT = { type: 'object', properties: { sections: { type: 'string' }, drift: { type: 'array', items: { type: 'object', properties: { repo: { type: 'string' }, where: { type: 'string' }, change: { type: 'string' } }, required: ['repo', 'where', 'change'] } } }, required: ['sections', 'drift'] }
+const DRIFT_OUT = { type: 'object', properties: { ok: { type: 'boolean', description: 'false if you could not read the decision log or a repo' }, notes: { type: 'array', items: { type: 'string' } }, sections: { type: 'string' }, drift: { type: 'array', items: { type: 'object', properties: { repo: { type: 'string' }, where: { type: 'string' }, change: { type: 'string' } }, required: ['repo', 'where', 'change'] } } }, required: ['ok', 'notes', 'sections', 'drift'] }
 const PROMOTED = {
   type: 'object',
   properties: {
@@ -350,8 +352,9 @@ const redGate = (r, id) => r.gate.green ? [] : [{ id, severity: 'critical', kind
 // A blocker the validator neither verified nor re-opened stays open: silence is not a resolution.
 // Gate findings are rebuilt by redGate from each gate run, so they are never kept here.
 const unaccounted = (prior, verified, open) => prior.filter(f => blocking(f) && f.where !== 'gate' && !verified.includes(f.id) && !open.some(o => o.id === f.id))
-// the file of a where that starts path:line; '' for 'gate', 'merge' and other non-file wheres (churn ignores those)
-const fileOf = where => (where.match(/^([^\s:]+):\d/) || [])[1] || ''
+// the first path:line (or path:from-to) in a finding's where; null for 'gate', 'merge' and other non-file wheres
+const loc = f => { const m = f.where.match(/([^\s:,()]+):(\d+)(?:-(\d+))?/); return m && { file: m[1], from: +m[2], to: +(m[3] || m[2]) } }
+const fileOf = f => loc(f)?.file || '' // churn ignores ''
 // A dead agent is replaced by a fresh one of the same role that redoes the whole step, up to 2 replacements.
 // The attempt number changes the prompt, so a resume can never hand back the dead attempt's cached result.
 // A done+ok result without a full 40-hex sha would orphan a correct push: the next attempt only repairs the sha,
@@ -733,7 +736,6 @@ async function runRepo(r, mine) {
   // the fixer and rechecks see one entry, the other finding whole under also. Both hunts stay independent; a where with no path:line never collapses.
   const alsoOf = {} // kept id -> the finding it absorbed
   const rank = f => FINDING.properties.severity.enum.indexOf(f.severity)
-  const loc = f => { const m = f.where.match(/([^\s:,()]+):(\d+)(?:-(\d+))?/); return m && { file: m[1], from: +m[2], to: +(m[3] || m[2]) } }
   const sameLines = (a, b) => !!(a && b) && a.file === b.file && a.from <= b.to && b.from <= a.to
   const collapse = (ws, vs) => {
     const out = [...ws]
@@ -747,7 +749,6 @@ async function runRepo(r, mine) {
   }
   // Whole-branch fixes push to side branches; the feature branch fast-forwards to the last checked head only after a passing recheck.
   let checked = ''
-  let lastGate // the last recheck's gate, read by the known-gaps offer
   const sides = []
   const fail = why => { Object.assign(res, { verdict: 'fail', open: findings }); res.escalations.push(sides.length ? `${why}; whole-branch fixes left unpromoted on ${sides.at(-1)}, ${r.featureBranch} unchanged` : why); return res }
   const merged = mine.filter(w => w.merged)
@@ -817,7 +818,7 @@ sha = the ${O}/${r.featureBranch} commit you validated. Ids: V-F1, V-F2, ...; qu
     res.fixRounds = round
     const head = checked
     const side = `${r.featureBranch}--wbfix${round}`
-    const asked = new Set(findings.map(f => fileOf(f.where)).filter(Boolean)) // files this round's fix is asked to touch
+    const asked = new Set(findings.map(fileOf).filter(Boolean)) // files this round's fix is asked to touch
     const fix = await step(
       `Whole-branch fix round ${round} on ${r.repo}, feature branch ${r.featureBranch}. Findings:
 ${JSON.stringify(findings)}
@@ -842,7 +843,7 @@ Return status, ok, verified sha, tests, gateTail, one answer per finding id, que
 ${ACC_RUN(fix.sha)}${same(head, fix.sha) ? 'No delta: skip the delta hunt and judge the answers and declines; still run every suite, the test-integrity check and hygiene at this head.\n' : ''}Findings with claimed resolutions — judge the code first, then read each claim:
 ${JSON.stringify(findings.map(f => ({ ...f, claim: fix.answers.find(a => a.id === f.id) || 'no answer' })))}
 ${ALSO(findings)}1. ${REFUTE} A claimed test must fail at ${head}, the pre-fix head: run it there in a second worktree at ${r.repo}/.claude/worktrees/wb-recheck${round}-red (same rules: clear a leftover path first, remove it when done; never mktemp), and green at ${fix.sha}. Reverting the fix hunks is the fallback only when that cannot run; state the fallback in evidence. Judge each answer and each declined minor. ${CLAUSES} ${EVIDENCE}
-2. Hunt regressions the fixes introduced. ${TEST_GUARD} ${CONFLICT}${SETTLED()}
+2. Hunt regressions the fixes introduced. ${TEST_GUARD} ${CONFLICT}${SETTLED()}${A.stopRule ? ' File each break a fix introduced as kind "regression", even when the base lacks the feature.' : ''}
 3. Rerun every suite and report gate {green, summary, command, flaky}:
 ${gates}
 ${GREEN(c.knownRed, r.repo)} ${FLAKY}
@@ -857,14 +858,13 @@ sha = the commit you checked. verdict pass only if nothing critical or major is 
       { label: `${n} recheck r${round}`, phase: 'Whole-branch', agentType: 'validator', model: 'opus', effort: 'high', schema: RECHECK, gated: true })
     if (!re) return fail(died(`recheck r${round}`, `${n} recheck r${round}`))
     if (!same(re.sha, fix.sha)) return fail(`recheck r${round} saw ${re.sha}, the fix pushed ${fix.sha}`)
-    lastGate = re.gate
     noteFlaky(r.repo, re)
     res.questions.push(...(re.questions || []))
     Object.assign(res, { verdict: re.verdict, sections: re.sections, tests: re.tests })
     checked = re.sha
     res.questions.push(...askEscalated(findings.filter(f => re.verified.includes(f.id)), fix))
     // churn: a new regression blocker in a file the fix was asked to touch; two rounds in a row stop the loop
-    const hit = [...new Set(re.findings.filter(f => blocking(f) && f.kind === 'regression' && !findings.some(g => g.id === f.id || g.also?.id === f.id) && asked.has(fileOf(f.where))).map(f => fileOf(f.where)))]
+    const hit = [...new Set(re.findings.filter(f => blocking(f) && f.kind === 'regression' && !findings.some(g => g.id === f.id || g.also?.id === f.id) && asked.has(fileOf(f))).map(fileOf))]
     if (hit.length) res.churn.push({ round, files: hit })
     const action = (...ids) => ids.map(id => fix.answers.find(a => a.id === id)?.action).find(Boolean) || 'fixed'
     for (const id of re.verified) settle(book, id, action(id))
@@ -878,14 +878,17 @@ sha = the commit you checked. verdict pass only if nothing critical or major is 
     // stops after findings are rebuilt, so fail() reports this recheck's open set
     if (hit.length && res.churn.at(-2)?.round === round - 1) {
       const stop = 'stop and simplify: one predicate with one owner, re-run stage wholeBranch'
-      res.questions.push({ q: `heuristic churn in ${n}: fix rounds ${round - 1} and ${round} each broke ${hit.join(', ')} again`, options: [stop, 'run more fix rounds'], default: stop })
-      return fail(`heuristic churn: rounds ${round - 1}-${round} re-broke ${hit.join(', ')}`)
+      const pairs = res.churn.slice(-2).flatMap(c => c.files.map(f => [f, c.round]))
+      const broke = [...new Set(pairs.map(([f]) => f))].map(f => `${f} (${pairs.filter(([g]) => g === f).map(([, k]) => `r${k}`).join(', ')})`).join(', ')
+      res.questions.push({ q: `heuristic churn in ${n}: fix rounds ${round - 1} and ${round} broke ${broke} again`, options: [stop, 'run more fix rounds'], default: stop })
+      return fail(`heuristic churn: rounds ${round - 1}-${round} broke ${broke}`)
     }
   }
   res.open = findings
   const open = findings.filter(blocking)
-  // no offer with an acceptance table: a failing row is filed as a plain major
-  if (open.length && sides.length && lastGate?.green && !A.acceptance && !open.flatMap(f => [f, f.also || {}]).some(f => f.severity === 'critical' || f.kind === 'regression'))
+  // no offer with an acceptance table (a failing row is filed as a plain major) or a stop rule (every open major is a regression,
+  // a wrong action or an explicitly rated check); a red gate is a critical regression via redGate
+  if (open.length && sides.length && !A.acceptance && !A.stopRule && !open.flatMap(f => [f, f.also || {}]).some(f => f.severity === 'critical' || f.kind === 'regression' || f.kind === 'integration'))
     res.questions.push({ q: `whole-branch fixes on ${sides.at(-1)} (checked head ${checked}, gate green) stay unpromoted with ${open.length} open major(s): ${open.map(f => `${f.severity} ${f.where}: ${f.issue}`).join('; ')}. Promote them as known gaps?`, options: ['leave unpromoted', `promote: fast-forward ${r.featureBranch} to ${checked} and park the open majors as known gaps`], default: 'leave unpromoted' })
   if (open.length) return fail(WB_ROUNDS ? `critical/major findings still open after ${res.fixRounds} whole-branch fix round(s)` : 'wbRounds 0: critical/major findings returned unfixed')
   if (sides.length) {
@@ -919,7 +922,9 @@ const skipped = new Set(repoResults.filter(r => r.verdict === 'skipped').map(r =
 const shipped = skipped.size < REPOS.length
 const paused = repoResults.some(r => r.verdict === 'paused') // contracts, docs and the drift audit wait for the user's human check
 const PINS = repoResults.map(r => `${r.repo} @ ${r.featureBranch} = ${r.sha || `${O}/${repoMap[r.repo].base} (nothing merged)`}`).join('\n') + '\n' + STALE
-const driftRan = !!A.decisionLog && shipped && !paused && !short('drift audit') // short last: it records a stop only when the audit would run
+const driftWanted = !!A.decisionLog && shipped && !paused
+const driftShort = driftWanted && short('drift audit') // short last: it records a stop only when the audit would run
+const driftRan = driftWanted && !driftShort
 const [crossRepo, docs, driftOut] = await parallel([
   async () => REPOS.length < 2 || !shipped || paused ? null : short('contracts') ? { verdict: 'fail', sections: 'skipped: token budget below the reserve', findings: [] } : step(
     `Cross-repo wire-contract check, run once every repo is final. Pinned heads:
@@ -986,7 +991,10 @@ Read the decision log ${A.decisionLog}. For each repo, list every user-visible c
 ${RO(REPOS[0].repo, 'drift')}`,
     { label: 'drift', phase: 'Drift audit', agentType: 'reviewer', model: 'fable', schema: DRIFT_OUT }) : null,
 ])
-const drift = !driftRan ? { verdict: 'skipped', items: [] } : driftOut ? { verdict: driftOut.drift.length ? 'drift' : 'pass', items: driftOut.drift } : { verdict: 'died', items: [] }
+// a failed audit's items are dropped: with the log unread every change looks undecided, and each item's default is a revert
+const drift = !driftRan ? { verdict: 'skipped', items: [], sections: '', notes: driftShort ? ['token budget below the reserve'] : [] }
+  : !driftOut ? { verdict: 'died', items: [], sections: '', notes: ['drift agent died 3 times'] }
+  : { verdict: !driftOut.ok ? 'failed' : driftOut.drift.length ? 'drift' : 'pass', items: driftOut.ok ? driftOut.drift : [], sections: driftOut.sections, notes: driftOut.notes }
 
 const brief = f => `${f.severity} ${f.where}: ${f.issue}${f.also ? ` (+ ${f.also.severity} ${f.also.id} at ${f.also.where})` : ""}`
 const uniq = xs => [...new Set(xs)]
@@ -1008,6 +1016,9 @@ const tagged = (who, qs) => uniqQ(qs).map(q => ({ ...q, q: `${who}: ${q.q}` }))
 const questions = [...contractQ, ...wsResults.flatMap(w => tagged(w.id, w.questions || [])), ...repoResults.flatMap(r => tagged(name(r.repo), r.questions || []))]
 const revert = 'revert it: no decision or brief clause covers it'
 questions.push(...drift.items.map(({ repo, where, change }) => ({ q: `drift: ${repo} ${where}: ${change}`, options: [revert, 'keep it and add it to the decision log'], default: revert })))
+const rerun = 're-run stage wholeBranch to audit drift'
+if (A.decisionLog && (drift.verdict === 'died' || drift.verdict === 'failed' || driftShort))
+  questions.push({ q: `drift audit ${drift.verdict}: ${drift.notes.join('; ') || 'the drift agent could not read the decision log or a repo'}`, options: [rerun, 'ship without the drift audit'], default: rerun })
 return {
   stage: STAGE,
   budget: { spent: budget.spent() - SPENT0, tokenBudget: A.tokenBudget ?? null, turnTotal: budget.total, reserve: RESERVE, stoppedBy },

@@ -42,7 +42,7 @@ function mock(args, sc = {}) {
     if (L.endsWith(' docs')) return { baseSha: head[repo], sha: '', files: [], prBody: false, ok: true, tests: 't', notes: [], ...own }
     if (L.endsWith(' promote')) return { ok: true, sha: (p.match(/ to ([0-9a-f]{40})\./) || [])[1], notes: [], ...own }
     if (L === 'contracts') return { verdict: 'pass', sections: 's', findings: [], ...own }
-    if (L === 'drift') return { sections: 's', drift: [], ...own }
+    if (L === 'drift') return { ok: true, notes: [], sections: 's', drift: [], ...own }
     throw new Error('unmocked ' + L)
   }
   return { agent, prompts, opts, all, order, merges, events }
@@ -62,6 +62,7 @@ const t = async (name, fn) => { try { await fn() } catch (e) { fails.push(`${nam
 const idx = (order, L) => order.indexOf(L)
 const dirtyB = { 'b review c1': () => ({ findings: [F('c1-F1')] }), 'b validate c1': () => ({ verified: ['c1-F1'] }) } // b merges after a
 
+const KEEP = 'Checks these instructions rate explicitly (hygiene, test integrity, smoke, checks) keep that severity, a broken wire contract between repos stays critical, and a break between workstreams (kind integration) stays major.'
 const SR = 'wrong output for a listed case, lost user data, a crash'
 await t('1a stopRule: every prompt that carried SEV carries the stop rule with the wrong-action list, and the 0.3.8 definition is gone', async () => {
   const { all } = await go({ cycles: 1, stopRule: SR, workstreams: [ws('a'), ws('b')] }, { 'a review c1': () => ({ findings: [F('c1-F1')] }), 'a validate c1': () => ({ verified: ['c1-F1'] }) })
@@ -87,7 +88,7 @@ await t('2a acceptance: authors and fixers read the table, a missing file blocks
 await t('2b acceptance: every validator runs every row black-box at its sha; reviewers may block only on a broken row or a regression', async () => {
   const { prompts } = await go({ cycles: 1, acceptance: TBL, workstreams: [ws('a'), ws('b')] }, busyAcc) // two workstreams, so the integrated review runs
   for (const L of ['a validate c1', 'one validate', 'one recheck r1']) assert(/run every row of the acceptance table that this change touches, black-box/.test(prompts[L]) && prompts[L].includes(TBL), L)
-  for (const L of ['a review c1', 'one review']) assert(/critical or major only if it breaks a row of the acceptance table or is a regression vs the base branch/.test(prompts[L]) && prompts[L].includes('Security, data loss and a red gate stay critical.') && prompts[L].includes('The known-gap exemption never covers a row.'), L) })
+  for (const L of ['a review c1', 'one review']) assert(/critical or major only if it breaks a row of the acceptance table or is a regression vs the base branch/.test(prompts[L]) && prompts[L].includes('anything else is minor (this overrides the severity definitions below).') && prompts[L].includes(`Security, data loss and a red gate stay critical. ${KEEP}`) && prompts[L].includes('The known-gap exemption never covers a row.'), L) })
 await t('2c acceptance + stopRule: a failing row blocks even when the base fails it too', async () => {
   const { prompts } = await go({ cycles: 1, acceptance: TBL, stopRule: SR, workstreams: [ws('a')] }, {})
   assert(/A failing row is major even when the base fails it too/.test(prompts['a validate c1']) && prompts['a validate c1'].includes('The known-gap exemption never covers a row.')) })
@@ -115,11 +116,13 @@ await t('4a drift: one fable agent after every repo is final, with the log, the 
   const { r, order, prompts, opts } = await go({ cycles: 1, decisionLog: LOG, workstreams: [ws('a')] }, { drift: () => ({ drift: [item] }) })
   assert(idx(order, 'drift') > idx(order, 'one validate') && opts.drift.model === 'fable' && opts.drift.phase === 'Drift audit')
   assert(prompts.drift.includes(LOG) && prompts.drift.includes('brief a') && /\/r\/one @ f = /.test(prompts.drift) && prompts.drift.includes('/r/one: base origin/main'))
-  assert.deepEqual(r.drift, { verdict: 'drift', items: [item] })
+  assert.deepEqual(r.drift, { verdict: 'drift', items: [item], sections: 's', notes: [] })
   assert(r.questions.some(q => q.q === 'drift: /r/one a/x.py:9: default greeting text changed' && q.default.startsWith('revert'))) })
 await t('4b drift: a dead drift agent is verdict died, never a silent pass', async () => {
   const { r } = await go({ cycles: 1, decisionLog: LOG, workstreams: [ws('a')] }, { drift: () => null })
-  assert.equal(r.drift.verdict, 'died') })
+  assert.equal(r.drift.verdict, 'died')
+  const q = r.questions.find(q => q.q.startsWith('drift audit died: '))
+  assert(q && q.default === 're-run stage wholeBranch to audit drift' && q.options.includes('ship without the drift audit'), JSON.stringify(r.questions)) })
 await t('4c drift: runs on stage wholeBranch; never while a humanCheck pause holds a repo', async () => {
   const wb = await go({ stage: 'wholeBranch', decisionLog: LOG, workstreams: [ws('a')] }, {})
   assert(wb.order.includes('drift'))
@@ -129,10 +132,11 @@ await t('4e drift: a budget below the reserve keeps the audit from starting, rea
   let spent = 0
   const b = { total: null, spent: () => spent, remaining: () => Infinity }
   const { r, order } = await go({ cycles: 1, decisionLog: LOG, tokenBudget: 1e8, workstreams: [ws('a')] }, { 'one validate': () => { spent = 1e9; return {} } }, b)
-  assert(order.includes('one validate') && !order.includes('drift') && r.drift.verdict === 'skipped' && r.budget.stoppedBy.includes('drift audit'), JSON.stringify(r.budget)) })
+  assert(order.includes('one validate') && !order.includes('drift') && r.drift.verdict === 'skipped' && r.budget.stoppedBy.includes('drift audit'), JSON.stringify(r.budget))
+  assert(r.questions.some(q => q.q.startsWith('drift audit skipped: ') && q.default === 're-run stage wholeBranch to audit drift'), JSON.stringify(r.questions)) })
 await t('4d (control) without decisionLog no drift agent and drift is skipped', async () => {
   const { r, order } = await go({ cycles: 1, workstreams: [ws('a')] }, {})
-  assert(!order.includes('drift') && r.drift.verdict === 'skipped') })
+  assert(!order.includes('drift') && r.drift.verdict === 'skipped' && !r.questions.some(q => /drift audit/.test(q.q))) })
 
 const churnSc = (rounds, file = 'x.py') => ({ 'one validate': () => ({ verdict: 'fail', findings: [F('V-F1', 'major', `${file}:3`)] }),
   ...Object.fromEntries(rounds.map(k => [`one recheck r${k}`, () => ({ verdict: 'fail', verified: [], findings: [{ ...F(`R${k}-F1`, 'major', `${file}:${10 + k}`), kind: 'regression' }] })])) })
@@ -142,7 +146,7 @@ await t('5a churn: a regression in a file the fix touched, two rounds in a row, 
   assert(!order.includes('one fix r3') && one.verdict === 'fail' && /heuristic churn/.test(one.escalations.join(' ')))
   assert.deepEqual(one.churn, [{ round: 1, files: ['x.py'] }, { round: 2, files: ['x.py'] }])
   assert(one.open.some(o => o.includes('x.py:12')), 'the stopping round\'s regression is reported open')
-  assert(r.questions.some(q => /heuristic churn/.test(q.q) && q.default.startsWith('stop and simplify'))) })
+  assert(r.questions.some(q => q.q === 'one: heuristic churn in one: fix rounds 1 and 2 broke x.py (r1, r2) again' && q.default.startsWith('stop and simplify')), JSON.stringify(r.questions)) })
 await t('5b churn: a single churn round is recorded and the loop continues', async () => {
   const sc = churnSc([1]); sc['one recheck r2'] = () => ({ verified: ['R1-F1'] })
   const { r, order } = await go({ cycles: 1, wbRounds: 3, workstreams: [ws('a')] }, sc)
@@ -180,10 +184,9 @@ await t('7b (control) default stays the repo top reviewModel; an unknown model t
   assert(opts['one review'].model === 'fable')
   await throwsOn({ wbReviewModel: 'haiku', workstreams: [ws('a')] }, /wbReviewModel must be sonnet\|opus\|fable/) })
 
-const EXPLICIT = 'Checks these instructions rate explicitly (hygiene, test integrity, smoke, checks) keep that severity, and a broken wire contract between repos stays critical.'
 await t('9a stopRule: explicit severities survive it in the contracts and whole-branch validate prompts', async () => {
   const { prompts } = await go({ cycles: 1, stopRule: SR, workstreams: [ws('a'), ws('c', { repo: '/r/two' })] }, {})
-  for (const L of ['contracts', 'one validate']) assert(prompts[L].includes(`Security and data loss stay critical. ${EXPLICIT}`), L) })
+  for (const L of ['contracts', 'one validate']) assert(prompts[L].includes(`Security and data loss stay critical. ${KEEP}`), L) })
 await t('9b known gaps: no offer when an acceptance table is set', async () => {
   const { r } = await go({ cycles: 1, wbRounds: 1, acceptance: TBL, workstreams: [ws('a')] }, gapSc)
   assert(!r.questions.some(x => /known gaps\?/.test(x.q))) })
@@ -196,10 +199,78 @@ await t('9d acceptance + stopRule: reviewers may also block on a wrong action; a
   const both = await go({ cycles: 1, acceptance: TBL, stopRule: SR, workstreams: [ws('a')] }, {})
   assert(both.prompts['a review c1'].includes('or is a regression vs the base branch or is a wrong action under the stop rule; anything else is minor'))
   const acc = await go({ cycles: 1, acceptance: TBL, workstreams: [ws('a')] }, {})
-  assert(acc.prompts['a review c1'].includes('or is a regression vs the base branch; anything else is minor') && !acc.prompts['a review c1'].includes('wrong action under the stop rule')) })
+  assert(acc.prompts['a review c1'].includes('or is a regression vs the base branch; anything else is minor') && !acc.prompts['a review c1'].includes('wrong action under the stop rule'))
+  assert.equal(both.prompts['a review c1'].split(KEEP).length, 3, 'KEEP in ACC_REVIEW and in the stop-rule SEV')
+  assert.equal(acc.prompts['a review c1'].split(KEEP).length, 2, 'KEEP in ACC_REVIEW; SEV stays 0.3.8') })
 await t('9e stopRule example names no domain', async () => {
   let e = null; try { await go({ stopRule: '', workstreams: [ws('a')] }, {}) } catch (x) { e = x }
   assert(e.message.includes('"wrong output for a listed case, lost user data, a crash"'), e.message) })
+
+
+// PR #20 review fixes
+await t('10a drift: ok=false is verdict failed with the agent notes, its items dropped, and a re-run question', async () => {
+  const { r } = await go({ cycles: 1, decisionLog: LOG, workstreams: [ws('a')] }, { drift: () => ({ ok: false, notes: ['decision log unreadable'], drift: [{ repo: '/r/one', where: 'a/x.py:9', change: 'c' }] }) })
+  assert.deepEqual(r.drift, { verdict: 'failed', items: [], sections: 's', notes: ['decision log unreadable'] })
+  assert(!r.questions.some(q => q.q.startsWith('drift: ')), 'no revert-by-default question from an audit that could not read the log')
+  const q = r.questions.find(q => q.q === 'drift audit failed: decision log unreadable')
+  assert(q && q.default === q.options[0] && q.options[0] === 're-run stage wholeBranch to audit drift' && q.options[1] === 'ship without the drift audit', JSON.stringify(r.questions)) })
+await t('10b drift: nothing shipped (every repo skipped) runs no drift agent, verdict skipped, no question', async () => {
+  const { r, order } = await go({ cycles: 1, decisionLog: LOG, workstreams: [ws('a')] }, { 'a implement': () => ({ status: 'blocked', ok: false, sha: '' }) })
+  assert(r.repos[0].verdict === 'skipped' && !order.includes('drift') && r.drift.verdict === 'skipped' && !r.questions.some(q => /drift audit/.test(q.q)), JSON.stringify(r.drift)) })
+await t('10c drift: no decisionLog and a short budget never record a drift-audit stop', async () => {
+  let spent = 0
+  const b = { total: null, spent: () => spent, remaining: () => Infinity }
+  const { r } = await go({ cycles: 1, tokenBudget: 1e8, workstreams: [ws('a')] }, { 'one validate': () => { spent = 1e9; return {} } }, b)
+  assert(!r.budget.stoppedBy.includes('drift audit'), JSON.stringify(r.budget)) })
+await t('10d decisionLog: pushing agents stop and report a missing log (blocked, or ok=false with notes)', async () => {
+  const { prompts } = await go({ cycles: 1, decisionLog: LOG, workstreams: [ws('a')] }, {})
+  assert(prompts['a implement'].includes('File missing or unreadable: a critical finding (kind question), or, if you push, stop and report it (status "blocked", or ok=false with the reason in notes).'))
+  assert(!prompts['a implement'].includes('or status "blocked" if you push')) })
+await t('10e acceptance: validators never waive a row from a decision-log line', async () => {
+  const { prompts } = await go({ cycles: 1, acceptance: TBL, workstreams: [ws('a')] }, {})
+  assert(prompts['a validate c1'].includes('The known-gap exemption never covers a row. A decision-log line never waives a row; only a changed table does.')) })
+await t('10f stopRule: the whole-branch recheck files each break a fix introduced as a regression; no text without it', async () => {
+  const sr = await go({ cycles: 1, stopRule: SR, workstreams: [ws('a')] }, busyAcc)
+  const step2 = sr.prompts['one recheck r1'].split('\n').find(l => l.startsWith('2. Hunt regressions the fixes introduced.'))
+  assert(step2.endsWith(' File each break a fix introduced as kind "regression", even when the base lacks the feature.'), step2)
+  const none = await go({ cycles: 1, workstreams: [ws('a')] }, busyAcc)
+  assert(!none.prompts['one recheck r1'].includes('even when the base lacks the feature')) })
+await t('10g churn: the question names each round\'s files', async () => {
+  const sc = { 'one validate': () => ({ verdict: 'fail', findings: [F('V-F1', 'major', 'a.py:3'), F('V-F2', 'major', 'b.py:3')] }),
+    'one recheck r1': () => ({ verdict: 'fail', findings: [F('V-F2', 'major', 'b.py:3'), { ...F('R1-F1', 'major', 'a.py:11'), kind: 'regression' }] }),
+    'one recheck r2': () => ({ verdict: 'fail', findings: [{ ...F('R2-F1', 'major', 'b.py:12'), kind: 'regression' }] }) }
+  const { r, order } = await go({ cycles: 1, wbRounds: 3, workstreams: [ws('a')] }, sc)
+  assert(!order.includes('one fix r3'))
+  const q = r.questions.find(q => /heuristic churn/.test(q.q))
+  assert.equal(q?.q, 'one: heuristic churn in one: fix rounds 1 and 2 broke a.py (r1), b.py (r2) again') })
+await t('10h churn: a where that names path:line after text ("in x.py:12") counts', async () => {
+  const sc = churnSc([1, 2]); for (const k of [1, 2]) sc[`one recheck r${k}`] = () => ({ verdict: 'fail', findings: [{ ...F(`R${k}-F1`, 'major', `in x.py:${10 + k}`), kind: 'regression' }] })
+  const { r, order } = await go({ cycles: 1, wbRounds: 3, workstreams: [ws('a')] }, sc)
+  assert(!order.includes('one fix r3') && r.repos[0].churn.length === 2, JSON.stringify(r.repos[0].churn)) })
+await t('10i (control) churn: a MINOR regression in an asked file two rounds in a row never stops the loop', async () => {
+  const sc = churnSc([1, 2]); for (const k of [1, 2]) sc[`one recheck r${k}`] = () => ({ verdict: 'fail', findings: [F('V-F1', 'major', 'x.py:3'), { ...F(`R${k}-F1`, 'minor', `x.py:${10 + k}`), kind: 'regression' }] })
+  const { r, order } = await go({ cycles: 1, wbRounds: 3, workstreams: [ws('a')] }, sc)
+  assert(order.includes('one fix r3') && r.repos[0].churn.length === 0) })
+await t('10j (control) churn: a kind bug MAJOR in an asked file two rounds in a row never stops the loop', async () => {
+  const sc = churnSc([1, 2]); for (const k of [1, 2]) sc[`one recheck r${k}`] = () => ({ verdict: 'fail', findings: [F(`R${k}-F1`, 'major', `x.py:${10 + k}`)] })
+  const { r, order } = await go({ cycles: 1, wbRounds: 3, workstreams: [ws('a')] }, sc)
+  assert(order.includes('one fix r3') && r.repos[0].churn.length === 0) })
+await t('10k (control) churn: rounds 1 and 3 but not 2 never stop the loop', async () => {
+  const sc = churnSc([1, 3]); sc['one recheck r2'] = () => ({ verdict: 'fail', findings: [F('R2-F1', 'major', 'x.py:12')] })
+  const three = await go({ cycles: 1, wbRounds: 3, workstreams: [ws('a')] }, sc)
+  assert.deepEqual(three.r.repos[0].churn.map(c => c.round), [1, 3])
+  assert(!three.r.questions.some(q => /heuristic churn/.test(q.q)) && /still open after 3/.test(three.r.repos[0].escalations.join(' ')), three.r.repos[0].escalations.join(' '))
+  const four = await go({ cycles: 1, wbRounds: 4, workstreams: [ws('a')] }, sc)
+  assert(four.order.includes('one fix r4')) })
+await t('10l known gaps: no offer under a stop rule', async () => {
+  const { r } = await go({ cycles: 1, wbRounds: 1, stopRule: SR, workstreams: [ws('a')] }, gapSc)
+  assert(!r.questions.some(x => /known gaps\?/.test(x.q))) })
+await t('10m known gaps: no offer while an integration major is open', async () => {
+  const { r } = await go({ cycles: 1, wbRounds: 1, workstreams: [ws('a')] }, { ...gapSc, 'one recheck r1': () => ({ verdict: 'fail', findings: [{ ...F('V-F1'), kind: 'integration' }] }) })
+  assert(!r.questions.some(x => /known gaps\?/.test(x.q))) })
+await t('10n known gaps: no offer when no round pushed a delta (nothing on a side branch)', async () => {
+  const { r } = await go({ cycles: 1, wbRounds: 1, workstreams: [ws('a')] }, { ...gapSc, 'one fix r1': p => ({ sha: p.match(/sha = ([0-9a-f]{40})/)[1] }) })
+  assert(r.repos[0].fixRounds === 1 && !r.questions.some(x => /known gaps\?/.test(x.q))) })
 
 if (fails.length) { console.error(fails.join('\n')); process.exit(1) }
 console.log('stop-rule, acceptance, decision-log, drift, churn, known-gaps and wbReviewModel checks ok')

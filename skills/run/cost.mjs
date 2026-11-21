@@ -10,7 +10,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const STAGES = ['implement', 'review', 'fix', 'validate', 'merge', 'wholeBranch', 'contracts', 'docs']
-const PHASE = { Implement: 'implement', Merge: 'merge', 'Whole-branch': 'wholeBranch', Contracts: 'contracts', 'Docs sync': 'docs' }
+const PHASE = { Implement: 'implement', Merge: 'merge', 'Whole-branch': 'wholeBranch', Contracts: 'contracts', 'Drift audit': 'contracts', 'Docs sync': 'docs' } // the drift audit is a cross-repo read like the contract check
 const stageOf = ({ label = '', phase }) => PHASE[phase] || (phase === 'Review cycles' && label.replace(/ attempt \d+$/, '').match(/ (review|fix|validate) c\d+$/)?.[1])
 const lines = f => readFileSync(f, 'utf8').split('\n').filter(Boolean).map(l => JSON.parse(l))
 
