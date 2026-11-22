@@ -526,9 +526,8 @@ The workflow returns:
   finding a workstream handed over is `<ws id>:<id>` with stage `handed`;
   `contract`); `status` is `fixed`, `answered` or `declined` once a validator
   accepted it, `carried` once a workstream handed it to the whole-branch pass
-  (workstream ledger), `debt` once the user accepted it as known debt, else
-  `open`. `open` in the ledger means no validator accepted it; it may be absent
-  from `open` (a minor nobody re-raised, or an escalation
+  (workstream ledger), else `open`. `open` in the ledger means no validator accepted
+  it; it may be absent from `open` (a minor nobody re-raised, or an escalation
   awaiting the user). Count a carried minor once.
 
 `questions` (`{q, options, default}`) are only what the user must decide; `notes`
@@ -579,13 +578,9 @@ says NOT merged; unpromoted side branches). Then:
   likely the wrong shape, not the code) before another run.
 - **Drift items:** revert by default; keep one only on the user's word, then
   log it.
-- **A finding stuck after its opus round:** the question's options name their
-  re-run, and `workstreams[].decision.answer` gives the exact value. Known debt:
-  `decisions.<id>` = the option's quoted answer, with the stuck run's
-  `carryForward`; the script settles that finding (ledger status `debt`, a
-  `known debt` workstream note), never cycles it again, and it merges; log it in
-  the `decisionLog` and list it as known debt in your report.
-  Drop: `dropped: ["<id>"]`.
+- **A finding stuck after its opus round:** the drop option names its re-run,
+  `dropped: ["<id>"]`; "accept it as known debt" has no scripted path in this
+  release.
 - **Known-gaps promote:** when the rounds run out with the last recheck green
   and only non-regression, non-integration, non-critical majors open, a question offers to
   fast-forward the feature branch to the checked head; the default is leave

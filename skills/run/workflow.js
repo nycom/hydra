@@ -146,15 +146,6 @@ for (const [repo, x] of Object.entries(CF_REPOS)) {
 // restored ids get a p: prefix, so a restarted review's new c1-F1 (or a re-merge's S-<id>-m1-F1) never collides with the earlier call's
 const prior = f => ({ ...f, id: `p:${f.id}` })
 const CF_WS = Object.fromEntries(Object.entries(CF.workstreams || {}).map(([id, x]) => [id, Object.fromEntries(['handed', 'open', 'findings'].map(k => [k, (x[k] || []).map(prior)]))]))
-// known debt: the stuck-finding question's answer "accept <finding id> (<where>) as known debt" settles that carried finding for good
-// it settles the open entry p:<id> (or <id>, as the carryForward already shows it) at the answer's where; ids restart each run, so the where tells a newer same-id finding apart
-const bare = id => id.replace(/^(p:)+/, '')
-const DEBT = Object.fromEntries(Object.entries(DECIDE).map(([id, a]) => [id, a.match(/^\s*accept (\S+)(?: \((.*)\)(?=\s+as known debt\b))?[^]*?\bas known debt\b/i)]).filter(([, m]) => m).map(([id, m]) => [id, { id: m[1], where: m[2] }]))
-const debtAt = (f, e) => bare(e.id) === bare(f.id) && (f.where == null || e.where === f.where)
-// no where in the answer: a debt an earlier run settled on that bare id is never re-applied to a newer same-id finding
-const namedDebt = (f, book) => f.where == null && book.some(e => e.status === 'debt' && debtAt(f, e)) ? undefined : [`p:${f.id}`, f.id].map(id => book.find(e => e.id === id && e.status === 'open' && debtAt(f, e))).find(Boolean)
-if (A.stage !== 'wholeBranch') for (const [id, f] of Object.entries(DEBT))
-  if (!(CF_WS[id]?.findings || []).some(e => debtAt(f, e))) throw new Error(`decisions.${id} accepts ${f.id} as known debt, but carryForward has no such finding of ${id}: pass the stuck run's carryForward, and an answer that reads "accept <finding id> (<where>) as known debt"`)
 const name = repo => repo.split('/').pop()
 const STALE = `Read other repos ONLY via git -C <repo> fetch ${O}, then git -C <repo> show ${O}/<featureBranch>:<path> or git -C <repo> diff ${O}/<base>...${O}/<featureBranch> — never by filesystem path: those checkouts sit on unrelated branches.`
 
@@ -396,7 +387,7 @@ const serialized = (repo, fn) => (lock[repo] = (lock[repo] || Promise.resolve())
 const blocking = f => f.severity !== 'minor' || (!!f.also && f.also.severity !== 'minor') // an absorbed blocker keeps its entry blocking
 // The result's findings ledger: each id keeps the stage that first raised it, its latest text, and a status
 // (open until a validator verifies the fix, answer or decline; a red gate counts fixed once the next gate is green).
-const STATUS = ['fixed', 'declined', 'answered', 'carried', 'debt'] // an escalated finding stays open: it is the user's call; carried = handed to the whole-branch pass; debt = accepted by the user
+const STATUS = ['fixed', 'declined', 'answered', 'carried'] // an escalated finding stays open: it is the user's call; carried = handed to the whole-branch pass
 const track = (book, stage, fs) => { for (const f of fs) { const e = book.find(x => x.id === f.id); const n = { id: f.id, stage: e?.stage || stage, severity: f.severity, kind: f.kind, where: f.where, issue: f.issue, status: 'open' }; e ? Object.assign(e, n) : book.push(n) } }
 const settle = (book, id, action) => { const e = book.find(x => x.id === id); if (e) e.status = STATUS.includes(action) ? action : 'open' }
 const settleGate = (book, gate) => { if (gate.green) for (const e of book) if (e.where === 'gate' && e.status === 'open') e.status = 'fixed' }
@@ -508,9 +499,6 @@ async function runWorkstream(w) {
   const cf = CF_WS[w.id]
   if (cf) {
     book.push(...cf.findings)
-    const named = DEBT[w.id] && namedDebt(DEBT[w.id], book)
-    if (named) named.status = 'debt'
-    for (const e of book) if (e.status === 'debt') out.notes.push(`known debt (accepted by the user): ${e.id} (${e.where}: ${e.issue})`)
     ledger.push(...book.filter(e => STATUS.includes(e.status)).map(({ id, where, issue, status }) => ({ id, where, issue, status })))
     out.handed.push(...cf.handed)
   }
@@ -637,8 +625,6 @@ Return status ("done" only when the gate is green and the push verified, or noth
   // same id, or same where; every red-gate finding has where 'gate', so that sentinel never matches by where (as in unaccounted)
   const sameFinding = (a, b) => a.id === b.id || (a.where !== 'gate' && a.where === b.where)
   const triesOf = f => tries.find(t => sameFinding(t, f))
-  const debt = book.filter(e => e.status === 'debt')
-  const live = fs => fs.filter(f => !debt.some(d => d.id === f.id || (d.where !== 'gate' && d.where === f.where && d.issue === f.issue))) // a re-filed known debt is settled, never cycled again
   let landings = 0 // merges of this workstream that landed
   // the shared-edits check, the human check and workstreams ordered after this one read the merge's sha
   const readsMergeSha = !!(c.reviewSharedEdits || w.humanCheck || W.some(x => x.after?.includes(w.id)))
@@ -663,10 +649,10 @@ New finding ids: c${i}-F1, c${i}-F2, ...`,
       if (!rev) return stop(died(`review c${i}`, `${tag} review c${i}`))
       if (!same(rev.headSha, out.sha)) return stop(`review c${i} saw ${rev.headSha}, the author pushed ${out.sha}`)
       out.cyclesRun = i
-      track(book, 'review', live(rev.findings))
+      track(book, 'review', rev.findings)
       // Clean needs both: nothing blocking in this review AND nothing blocking left by the last validation.
       // Only a validator can clear a carried critical/major; a reviewer that drops one doesn't.
-      let found = live([...rev.findings, ...carry.filter(f => blocking(f) && !rev.findings.some(g => g.id === f.id))])
+      let found = [...rev.findings, ...carry.filter(f => blocking(f) && !rev.findings.some(g => g.id === f.id))]
 
       if (!found.some(blocking)) {
         if (same(out.validatedSha, out.sha)) { carry = found; break } // converged on a validated head; minors carried, not cycled
@@ -691,7 +677,7 @@ Return headSha, gate, evidence, verified (empty), open (ids v${i}-F1, ...) and q
         out.evidence[`validate c${i}`] = val.evidence
         out.questions.push(...(val.questions || []))
         noteFlaky(w.repo, val)
-        const raised = live([...val.open, ...redGate(val, `v${i}-G`)])
+        const raised = [...val.open, ...redGate(val, `v${i}-G`)]
         track(book, 'validate', raised)
         found = [...found, ...raised]
         out.validatedSha = out.sha
@@ -763,7 +749,7 @@ Return headSha, gate, evidence, verified (ids confirmed resolved, or whose answe
             settle(book, f.id, status)
           }
         settleGate(book, val.gate)
-        carry = live([...val.open, ...redGate(val, `v${i}-G`), ...unaccounted(found, val.verified, val.open)]).filter(f => !out.handed.some(h => h.id === f.id))
+        carry = [...val.open, ...redGate(val, `v${i}-G`), ...unaccounted(found, val.verified, val.open)].filter(f => !out.handed.some(h => h.id === f.id))
         track(book, 'validate', carry)
         out.validatedSha = fix.sha
         for (const g of found)
@@ -777,9 +763,7 @@ Return headSha, gate, evidence, verified (ids confirmed resolved, or whose answe
         const spent = carry.filter(blocking).map(f => ({ f, t: triesOf(f) })).find(x => x.t?.rounds.size >= 3)
         if (spent) {
           out.open = carry
-          const q = { q: `${spent.f.id} (${spent.f.where}: ${spent.f.issue}) is still open after ${spent.t.rounds.size} fix rounds, the last on opus. Attempts: ${spent.t.answers.join(' | ')}. How should it be resolved?`, options: ['change the brief or spec so a fix is clear (say how)', `accept it as known debt (re-run with decisions.${w.id} = "accept ${spent.f.id} (${spent.f.where}) as known debt"; it merges with that finding accepted, listed as known debt)`, `drop this workstream (re-run with dropped: ["${w.id}"]; the rest merges and it is listed as not done)`], default: 'change the brief or spec so a fix is clear (say how)' }
-          out.questions.push(q)
-          out.decision = { questions: [q], answer: `re-run with the same args, resumeFromRunId = this run, resume = this run's id, carryForward = this result's carryForward, and decisions.${w.id} = "accept ${spent.f.id} (${spent.f.where}) as known debt" for known debt, else "<the user's answer>"; to drop it, dropped: ["${w.id}"] instead of decisions.${w.id}` }
+          out.questions.push({ q: `${spent.f.id} (${spent.f.where}: ${spent.f.issue}) is still open after ${spent.t.rounds.size} fix rounds, the last on opus. Attempts: ${spent.t.answers.join(' | ')}. How should it be resolved?`, options: ['change the brief or spec so a fix is clear (say how)', 'accept it as known debt', `drop this workstream (re-run with dropped: ["${w.id}"]; the rest merges and it is listed as not done)`], default: 'change the brief or spec so a fix is clear (say how)' })
           return stop(`${spent.f.id} survived ${spent.t.rounds.size} fix rounds, the last on opus; returned to the user as a question`)
         }
       }
