@@ -107,7 +107,7 @@ for (const c of A.repos || []) {
   if (c.commitPrefix != null && !(typeof c.commitPrefix === 'string' && /^[^\n\r"]+$/.test(c.commitPrefix))) throw new Error(`repos ${c.repo}: commitPrefix must be a non-empty string without a newline or a quote`)
   CONF[norm(c.repo)] = c
 }
-const conf = repo => ({ knownRed: [], hot: HOT, regen: '', smoke: '', smokeTimeout: RUN_SECS, copyExcluded: [], commitPrefix: '', ...CONF[repo] })
+const conf = repo => ({ knownRed: [], hot: HOT, regen: '', smoke: '', smokeTimeout: RUN_SECS, copyExcluded: [], ...CONF[repo], commitPrefix: CONF[repo]?.commitPrefix ?? '' })
 // The script can't learn its own path, so the coordinator passes the skill's base directory for run-cmd.mjs.
 if ((W.some(w => w.checks) || Object.values(CONF).some(c => c.smoke)) && !/^\//.test(A.skillDir || '')) throw new Error('skillDir (the skill\'s absolute base directory) is required when a repo has smoke or a workstream has checks')
 const repoMap = {}

@@ -59,7 +59,7 @@ const state = (...xs) => ({ 'one state': () => ({ workstreams: xs }) })
 const HA = SHA(1001), HB = SHA(1002), HC = SHA(1003)
 
 // default-run prompt size in characters; lower it when a default prompt shrinks, never raise it
-const PIN = 72072
+const PIN = 73155
 
 const TBL = '/t/acceptance.md', LOG = '/t/decisions.md', SR = 'wrong output for a listed case, lost user data, a crash'
 const busy = { 'a review c1': () => ({ findings: [F('c1-F1')] }), 'a validate c1': () => ({ verified: ['c1-F1'] }), 'one validate': (p, k) => k > 1 ? {} : { verdict: 'fail', findings: [F('V-F1', 'major', 'x.py:3')] } }
@@ -120,14 +120,16 @@ await t('FB commitPrefix goes on the merge step\'s fixed subjects only', async (
   assert(on.prompts['a merge'].includes('"chore: Update shared files for a"') && on.prompts['a merge'].includes('"chore: Regenerate generated files"'), on.prompts['a merge'])
   assert(on.prompts['a merge'].includes('-m "Merge f--a into f"'))
   assert(off.prompts['a merge'].includes('"Update shared files for a"') && off.prompts['a merge'].includes('"Regenerate generated files"') && !off.prompts['a merge'].includes('chore:'))
-  for (const bad of ['a"b', 'a\nb', '']) await rejects(args(bad), /commitPrefix/) })
+  for (const bad of ['a"b', 'a\nb', '']) await rejects(args(bad), /commitPrefix/)
+  assert(!(await go(args(null), sc)).prompts['a merge'].includes('null')) })
 await t('FB commitPrefix goes on the docs graph commit', async () => {
   const { prompts } = await go({ cycles: 1, workstreams: [ws('a')], repos: [{ repo: '/r/one', commitPrefix: 'chore: ' }] }, {})
   assert(prompts['one docs'].includes('"chore: Refresh the knowledge graph"')) })
 
 // ---- Z1 default prompt size ----
 await t('Z1 the prompt size of a default run only shrinks', async () => {
-  const { all } = await go({ cycles: 1, workstreams: [ws('a'), ws('b')] }, { ...busy, 'one docs': () => ({ sha: SHA(900), files: ['README.md'] }) })
+  const { r, all } = await go({ cycles: 1, workstreams: [ws('a'), ws('b')] }, { ...busy, 'one recheck r1': () => ({ verified: ['V-F1'] }), 'one docs': () => ({ sha: SHA(900), files: ['README.md'] }) })
+  assert(r.repos[0].verdict === 'pass' && 'one docs' in all, `repo ${r.repos[0].verdict}: the pin must cover the docs commit`)
   const total = Object.values(all).flat().reduce((n, p) => n + p.length, 0)
   assert(total <= PIN, `default prompts total ${total} chars, pin ${PIN}`) })
 
