@@ -76,7 +76,7 @@ await t('C1.1b rejected: a claim the validator returns open goes back to the fix
 await t('C1.1c silent: a claim the validator neither verifies nor re-opens is rejected', rejectedClaim(() => ({})))
 await t('C1.1d the claim sentence reaches the delta validator only when a carried answer exists (control: a plain fix cycle)', async () => {
   const { prompts } = await go({ cycles: 1, workstreams: [ws('a')] }, { ...outside, 'a validate c1': () => ({ verified: ['c1-F1'] }) })
-  assert(CLAIM.test(prompts['a validate c1']), prompts['a validate c1'])
+  assert(CLAIM.test(prompts['a validate c1']) && prompts['a validate c1'].includes('A pre-existing test the brief does not name is read-only, so it counts as outside them.'), prompts['a validate c1'])
   const plain = await go({ cycles: 1, workstreams: [ws('a')] }, { 'a review c1': () => ({ findings: [F('c1-F1')] }), 'a validate c1': () => ({ verified: ['c1-F1'] }) })
   assert(!/A claim "carried" holds/.test(plain.prompts['a validate c1'])) })
 await t('C1.1e the allowed files in the claim sentence include those of workstreams already merged', async () => {
@@ -106,6 +106,9 @@ await t('C1.4b whole-branch prompts and the drift audit leave the dropped brief 
   for (const L of ['one review', 'one validate', 'one recheck r1', 'drift']) assert(prompts[L] && !prompts[L].includes('## a\nbrief a') && prompts[L].includes('## b\nbrief b') && prompts[L].includes(DROP_S), L)
   const plain = await go({ cycles: 1, workstreams: [ws('a'), ws('b')] }, {})
   assert(!Object.values(plain.all).flat().some(p => p.includes('Dropped by the user'))) })
+await t('C1.4q a dropped workstream\'s own gate stays out of the whole-branch, recheck and docs gates', async () => {
+  const { prompts } = await go({ cycles: 1, dropped: ['a'], workstreams: [ws('a', { gate: 'npm run only-a' }), ws('b')] }, { 'one validate': (p, k) => k > 1 ? {} : { verdict: 'fail', findings: [F('V-F1')] }, 'one recheck r1': () => ({ verified: ['V-F1'] }) })
+  for (const L of ['one validate', 'one recheck r1', 'one docs']) assert(prompts[L] && prompts[L].includes('npm test') && !prompts[L].includes('only-a'), L) })
 await t('C1.4c an unknown dropped id throws, and so does a workstream ordered after a dropped one', async () => {
   await rejects({ dropped: ['zz'], workstreams: [ws('a')] }, /dropped: no workstream zz/)
   await rejects({ dropped: ['a'], workstreams: [ws('a'), ws('b', { after: ['a'] })] }, /workstream b: after a, which is dropped: drop it too or remove the after/)

@@ -723,7 +723,7 @@ ${accept(fix.sha)}${ACC_RUN(fix.sha)}${same(prev, fix.sha) ? 'No delta: skip the
 Findings with the author's claimed resolutions — judge the code first, then read each claim:
 ${JSON.stringify(found.map(f => ({ ...f, claim: fix.answers.find(a => a.id === f.id) || 'no answer' })))}
 ${out.handed.length ? `Handed to the whole-branch pass (their fix is outside this workstream's files; not yours to judge, never re-file them): ${out.handed.map(f => f.id).join(', ')}\n` : ''}${ledger.length ? `Verified in earlier cycles (a fix that undoes one is a regression unless escalated): ${JSON.stringify(ledger)}\n` : ''}
-1. ${REFUTE} Where a test is claimed, it must fail at ${prev}, the pre-fix head: run it there in a second worktree at ${w.repo}/.claude/worktrees/${w.id}-val${i}-red (same rules: clear a leftover path first, remove it when done; never mktemp), and green at ${fix.sha}. Reverting the fix hunks in your worktree is the fallback only when that cannot run; state the fallback in evidence. Judge each answer to a question and each declined minor: defensible or not. ${CLAUSES} ${CONFLICT} ${MERGE_EDITS(c.hot, out.sharedEdits)}${EVIDENCE}${claimed.length ? ` A claim "carried" holds only when its fix cannot be made inside the files this workstream may edit (${allowed}): return the id in verified if so, otherwise in open.` : ''}
+1. ${REFUTE} Where a test is claimed, it must fail at ${prev}, the pre-fix head: run it there in a second worktree at ${w.repo}/.claude/worktrees/${w.id}-val${i}-red (same rules: clear a leftover path first, remove it when done; never mktemp), and green at ${fix.sha}. Reverting the fix hunks in your worktree is the fallback only when that cannot run; state the fallback in evidence. Judge each answer to a question and each declined minor: defensible or not. ${CLAUSES} ${CONFLICT} ${MERGE_EDITS(c.hot, out.sharedEdits)}${EVIDENCE}${claimed.length ? ` A claim "carried" holds only when its fix cannot be made inside the files this workstream may edit (${allowed}): return the id in verified if so, otherwise in open. A pre-existing test the brief does not name is read-only, so it counts as outside them.` : ''}
 2. Hunt regressions the fixes introduced (they routinely plant new bugs: data loss, broken callers, weakened tests). ${TEST_GUARD}${first ? ` ${fullGuard(fix.sha)}` : ''}
 3. Run the gate and report gate {green, summary, command, flaky}. ${WRAPPED}:
 ${GATE_CMD(w.gate)}
@@ -833,8 +833,8 @@ Push to ${w.featureBranch} (plain push; if rejected, fetch and redo every step o
 async function runRepo(r, mine) {
   const n = name(r.repo)
   const c = r.conf
-  const gates = [...new Set(r.ws.map(w => w.gate))].join('\n')
   const gone = mine.filter(w => w.dropped).map(w => w.id)
+  const gates = [...new Set(r.ws.filter(w => !gone.includes(w.id)).map(w => w.gate))].join('\n')
   const briefs = r.ws.filter(w => !gone.includes(w.id)).map(w => `## ${w.id}\n${w.brief}`).join('\n\n') + GONE(gone)
   const range = `${O}/${r.base}...${O}/${r.featureBranch}`
   const top = ms => MODELS[Math.max(...ms.map(m => MODELS.indexOf(m)))]
@@ -1088,7 +1088,7 @@ Ids: X-F1, X-F2, ...`,
     if (rs?.verdict === 'fail') return { sha: '', files: [], prBody: false, ok: false, tests: '', notes: ['skipped: the whole-branch pass failed; docs run with the passing re-run'] }
     if (short(`${name(d.repo)} docs`)) return { sha: '', files: [], prBody: false, ok: false, tests: '', notes: ['skipped: token budget below the reserve'] }
     const rr = repoMap[d.repo]
-    const gate = rr ? [...new Set(rr.ws.map(w => w.gate))].join('\n') : d.gate
+    const gate = rr ? [...new Set(rr.ws.filter(w => !dropped.includes(w.id)).map(w => w.gate))].join('\n') : d.gate
     const knownRed = conf(d.repo).knownRed
     const side = `${d.featureBranch}--docs`
     const o = await step(
