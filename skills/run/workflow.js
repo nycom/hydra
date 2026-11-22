@@ -45,6 +45,11 @@ for (const w of W) for (const id of w.after || []) {
 }
 const ordered = (w, path = []) => { if (path.includes(w.id)) throw new Error(`after forms a cycle: ${[...path, w.id].join(' -> ')}`); for (const id of w.after || []) ordered(byId[id], [...path, w.id]) }
 W.forEach(w => ordered(w))
+// dropped: workstreams the user dropped; the rest merges and these are listed as not done
+const DROPPED = new Set(A.dropped || [])
+if (A.dropped != null && !(Array.isArray(A.dropped) && A.dropped.every(x => typeof x === 'string'))) throw new Error('dropped must be an array of workstream ids')
+for (const id of DROPPED) if (!byId[id]) throw new Error(`dropped: no workstream ${id}`)
+for (const w of W) for (const id of w.after || []) if (DROPPED.has(id) && !DROPPED.has(w.id)) throw new Error(`workstream ${w.id}: after ${id}, which is dropped: drop it too or remove the after`)
 if (A.localOnly != null && typeof A.localOnly !== 'boolean') throw new Error('localOnly must be a boolean')
 // localOnly: every fetch, push and ls-remote targets a bare repo on local disk the coordinator sets up as this remote
 const O = A.localOnly ? 'hydra-local' : 'origin'
@@ -77,13 +82,15 @@ if (A.stage != null && A.stage !== 'wholeBranch') throw new Error('stage must be
 for (const k of ['tokenBudget', 'tokenReserve', 'wbRounds'])
   if (A[k] != null && !(Number.isInteger(A[k]) && A[k] >= 0)) throw new Error(`${k} must be a non-negative integer or null`)
 
-// files[]: literal paths or dir prefixes (dir/ or dir/**). Two workstreams of one repo may not claim overlapping ones.
+// files[]: literal paths or dir prefixes (dir/ or dir/**). Two workstreams of one repo may not claim overlapping ones,
+// unless one is ordered after the other: they never run at once, and the later one's backstop allows the earlier one's files.
 // shortcut: other glob patterns are compared literally; list concrete paths when two briefs share a directory.
 const stem = f => f.replace(/\/\*\*$/, '/')
+const dependsOn = (w, id) => (w.after || []).some(x => x === id || dependsOn(byId[x], id))
 const overlaps = (a, b) => { const [x, y] = [stem(a), stem(b)]; return x === y || (x.endsWith('/') && y.startsWith(x)) || (y.endsWith('/') && x.startsWith(y)) }
 for (const [i, a] of W.entries())
   for (const b of W.slice(i + 1))
-    if (a.repo === b.repo && a.files && b.files) {
+    if (a.repo === b.repo && a.files && b.files && !dependsOn(a, b.id) && !dependsOn(b, a.id)) {
       const hit = a.files.find(f => b.files.some(g => overlaps(f, g)))
       if (hit) throw new Error(`workstreams ${a.id} and ${b.id} overlap on ${hit}`)
     }
@@ -201,6 +208,7 @@ const RO_TESTS = 'Pre-existing tests are read-only unless the brief names them. 
 const ESCALATE = 'A finding that can only be fixed by breaking another clause of the brief (editing a file or test the brief protects, dropping a mandated call) or by reversing a fix verified earlier in this run, or whose substance is that the brief contradicts the repo: do not pick a side and leave the code; answer it "escalated" with status still done (not blocked), and return a question with both options, the default keeping the current behaviour and tests. Start each such question with the finding id (e.g. "c1-F2: ...").'
 const CONFLICT = 'Only a contradiction between the brief and the repo itself (a premise the history disproves, or two brief clauses that cannot both hold) goes to questions instead of findings: both options, the default keeping the current behaviour and tests. A real defect is always a finding, even in code or tests the brief protects or where its fix would reverse a fix verified earlier; the fixer escalates it.'
 const CLAUSES = 'Judge each fix against the brief\'s hard clauses as well as its finding: a fix that removes a call the brief mandates, edits or deletes a file the brief says not to edit, or deletes or weakens a test an earlier stage verified as guarding a fix stays open as a regression unless the user answered a question allowing it. Accept (verified) an answer escalated as a brief conflict when no fix keeps every clause.'
+const GONE = ids => ids.length ? `\n\nDropped by the user, not on this branch: ${ids.join(', ')}; its absence is never a finding.` : ''
 const LADDER = 'Ladder-first (reuse > stdlib > native > one line > minimum code), no speculative code, stay strictly in scope.'
 const SEV_038 = 'Severity: critical = wrong behaviour, data loss, security, broken contract or red gate; major = real bug or design flaw; minor = the rest. Critical and major block the merge. Report only real issues; an empty list means clean.'
 // explicit severities no stop rule or acceptance table lowers
@@ -501,7 +509,7 @@ async function runWorkstream(w) {
     out.questions.push(...r.questions)
     out.notes.push(...r.notes)
     decisions.push(...r.decisions)
-    Object.assign(out, { status: r.status, tests: r.tests, gateTail: r.gateTail })
+    Object.assign(out, { status: soft(r) ? 'done' : r.status, tests: r.tests, gateTail: r.gateTail })
   }
   const stop = why => {
     // merged earlier: a human-check problem whose fix did not land; the first merge stays on the feature branch
@@ -521,7 +529,7 @@ async function runWorkstream(w) {
   // A seam blocker in a merged workstream's files is this author's to fix; files of workstreams not merged yet never are.
   const integration = () => {
     const done = mergedInto[w.repo] || []
-    const pending = W.filter(x => x.repo === w.repo && x !== w && !done.includes(x))
+    const pending = W.filter(x => x.repo === w.repo && x !== w && !done.includes(x) && !dependsOn(x, w.id))
     return done.length
       ? `Integration fix: if a critical or major can only be fixed in files owned by workstreams already merged into ${w.featureBranch} — ${owners(done)} — first git merge ${O}/${w.featureBranch} into your branch, then fix those files too (the one exception to your file list; say so in notes).${pending.length ? ` Never touch files owned by workstreams not merged yet: ${owners(pending)}.` : ''}`
       : `No workstream has merged into ${w.featureBranch} yet; a blocker outside your files is ${w.files ? 'answered "carried" (see above)' : 'status "blocked" with a question'}.`
@@ -586,7 +594,10 @@ async function runWorkstream(w) {
     return checked(at)
   }
   const prior = RESUMED[w.id]
-  if (prior?.merged && /^[0-9a-f]{40}$/.test(prior.head)) { if (carried(prior.head, prior.featureSha)) return out }
+  if (prior?.merged && /^[0-9a-f]{40}$/.test(prior.head)) {
+    if (DROPPED.has(w.id)) out.escalations.push(`dropped, but already merged into ${w.featureBranch}: it stays on the branch`)
+    if (carried(prior.head, prior.featureSha)) return out
+  }
   else {
   const impl = await step(
     `You are the author of workstream ${w.id} in ${w.repo}.
@@ -698,11 +709,9 @@ Return status, ok, verified sha, tests, gateTail, one answer per finding id, sha
         if (!fix) return stop(unusable(`fix c${i}`, w.branch, `${tag} fix c${i}`))
         absorb(fix)
         if (!pushed(fix, `fix c${i}`)) return blocked(`fix c${i}`, fix)
-        // a fix outside files[] is the whole-branch pass's: it leaves this workstream's findings and cycles
-        const handed = w.files ? found.filter(f => blocking(f) && fix.answers.some(a => a.id === f.id && a.action === 'carried')) : []
-        out.handed.push(...handed)
-        for (const f of handed) { ledger.push({ id: f.id, where: f.where, issue: f.issue, status: 'carried' }); settle(book, f.id, 'carried') }
-        found = found.filter(f => !handed.includes(f))
+        // a claimed fix outside files[] is the whole-branch pass's once this cycle's validator verifies the claim; a rejected one stays in the cycles
+        const claimed = w.files ? found.filter(f => blocking(f) && fix.answers.some(a => a.id === f.id && a.action === 'carried')) : []
+        const allowed = [...new Set([...(w.files || []), ...(mergedInto[w.repo] || []).flatMap(x => x.files || [])])].join(', ')
         out.sha = fix.sha
 
         const first = acceptance // the workstream's first validator: its test guard covers the whole range
@@ -714,7 +723,7 @@ ${accept(fix.sha)}${ACC_RUN(fix.sha)}${same(prev, fix.sha) ? 'No delta: skip the
 Findings with the author's claimed resolutions — judge the code first, then read each claim:
 ${JSON.stringify(found.map(f => ({ ...f, claim: fix.answers.find(a => a.id === f.id) || 'no answer' })))}
 ${out.handed.length ? `Handed to the whole-branch pass (their fix is outside this workstream's files; not yours to judge, never re-file them): ${out.handed.map(f => f.id).join(', ')}\n` : ''}${ledger.length ? `Verified in earlier cycles (a fix that undoes one is a regression unless escalated): ${JSON.stringify(ledger)}\n` : ''}
-1. ${REFUTE} Where a test is claimed, it must fail at ${prev}, the pre-fix head: run it there in a second worktree at ${w.repo}/.claude/worktrees/${w.id}-val${i}-red (same rules: clear a leftover path first, remove it when done; never mktemp), and green at ${fix.sha}. Reverting the fix hunks in your worktree is the fallback only when that cannot run; state the fallback in evidence. Judge each answer to a question and each declined minor: defensible or not. ${CLAUSES} ${CONFLICT} ${MERGE_EDITS(c.hot, out.sharedEdits)}${EVIDENCE}
+1. ${REFUTE} Where a test is claimed, it must fail at ${prev}, the pre-fix head: run it there in a second worktree at ${w.repo}/.claude/worktrees/${w.id}-val${i}-red (same rules: clear a leftover path first, remove it when done; never mktemp), and green at ${fix.sha}. Reverting the fix hunks in your worktree is the fallback only when that cannot run; state the fallback in evidence. Judge each answer to a question and each declined minor: defensible or not. ${CLAUSES} ${CONFLICT} ${MERGE_EDITS(c.hot, out.sharedEdits)}${EVIDENCE}${claimed.length ? ` A claim "carried" holds only when its fix cannot be made inside the files this workstream may edit (${allowed}): return the id in verified if so, otherwise in open.` : ''}
 2. Hunt regressions the fixes introduced (they routinely plant new bugs: data loss, broken callers, weakened tests). ${TEST_GUARD}${first ? ` ${fullGuard(fix.sha)}` : ''}
 3. Run the gate and report gate {green, summary, command, flaky}. ${WRAPPED}:
 ${GATE_CMD(w.gate)}
@@ -729,7 +738,9 @@ Return headSha, gate, evidence, verified (ids confirmed resolved, or whose answe
         out.evidence[`validate c${i} delta`] = val.evidence
         out.questions.push(...(val.questions || []))
         noteFlaky(w.repo, val)
-        out.findingsFixed += val.verified.filter(id => fix.answers.find(a => a.id === id)?.action !== 'escalated').length
+        const handed = claimed.filter(f => val.verified.includes(f.id))
+        out.handed.push(...handed)
+        out.findingsFixed += val.verified.filter(id => !['escalated', 'carried'].includes(fix.answers.find(a => a.id === id)?.action)).length
         out.questions.push(...askEscalated(found.filter(f => val.verified.includes(f.id)), fix))
         for (const f of found)
           if (val.verified.includes(f.id)) {
@@ -752,7 +763,9 @@ Return headSha, gate, evidence, verified (ids confirmed resolved, or whose answe
         const spent = carry.filter(blocking).map(f => ({ f, t: triesOf(f) })).find(x => x.t?.rounds.size >= 3)
         if (spent) {
           out.open = carry
-          out.questions.push({ q: `${spent.f.id} (${spent.f.where}: ${spent.f.issue}) is still open after ${spent.t.rounds.size} fix rounds, the last on opus. Attempts: ${spent.t.answers.join(' | ')}. How should it be resolved?`, options: ['change the brief or spec so a fix is clear (say how)', 'accept it as known debt', 'drop this workstream'], default: 'change the brief or spec so a fix is clear (say how)' })
+          const q = { q: `${spent.f.id} (${spent.f.where}: ${spent.f.issue}) is still open after ${spent.t.rounds.size} fix rounds, the last on opus. Attempts: ${spent.t.answers.join(' | ')}. How should it be resolved?`, options: ['change the brief or spec so a fix is clear (say how)', `accept it as known debt (re-run with decisions.${w.id} = "accept ${spent.f.id} (${spent.f.where}) as known debt"; it merges with that finding accepted, listed as known debt)`, `drop this workstream (re-run with dropped: ["${w.id}"]; the rest merges and it is listed as not done)`], default: 'change the brief or spec so a fix is clear (say how)' }
+          out.questions.push(q)
+          out.decision = { questions: [q], answer: `re-run with the same args, resumeFromRunId = this run, resume = this run's id, carryForward = this result's carryForward, and decisions.${w.id} = "<the user's answer>"; to drop it, dropped: ["${w.id}"] instead of decisions.${w.id}` }
           return stop(`${spent.f.id} survived ${spent.t.rounds.size} fix rounds, the last on opus; returned to the user as a question`)
         }
       }
@@ -769,7 +782,7 @@ Return headSha, gate, evidence, verified (ids confirmed resolved, or whose answe
     const merge = await serialized(w.repo, async () => {
       const done = (mergedInto[w.repo] ||= [])
       // allowed = own files plus those of workstreams already merged (integration fixes); empty hot list or no files[] = no check
-      const allowed = w.files && [...w.files, ...done.flatMap(x => x.files || [])]
+      const allowed = w.files && [...new Set([...w.files, ...done.flatMap(x => x.files || [])])]
       const diff = `git diff --name-only ${O}/${w.featureBranch}...${out.validatedSha} --`
       const backstop = [c.hot.length && `${diff} ${pathspec(c.hot)}`, allowed && `${diff} . ${pathspec(allowed, 'glob,exclude')}`].filter(Boolean)
       const m = await step(
@@ -823,7 +836,8 @@ async function runRepo(r, mine) {
   const n = name(r.repo)
   const c = r.conf
   const gates = [...new Set(r.ws.map(w => w.gate))].join('\n')
-  const briefs = r.ws.map(w => `## ${w.id}\n${w.brief}`).join('\n\n')
+  const gone = mine.filter(w => w.dropped).map(w => w.id)
+  const briefs = r.ws.filter(w => !gone.includes(w.id)).map(w => `## ${w.id}\n${w.brief}`).join('\n\n') + GONE(gone)
   const range = `${O}/${r.base}...${O}/${r.featureBranch}`
   const top = ms => MODELS[Math.max(...ms.map(m => MODELS.indexOf(m)))]
   const res = { repo: r.repo, featureBranch: r.featureBranch, sha: '', verdict: 'skipped', sections: 'no workstream merged', seams: '', tests: '', fixRounds: 0, churn: [], open: [], questions: [], notes: [], escalations: [], findings: [] }
@@ -834,7 +848,7 @@ async function runRepo(r, mine) {
   if (pause) return { ...res, verdict: 'paused', sections: pause, open: shared, escalations: [`whole-branch pass not run: ${pause}`] }
   if (!mine.some(w => w.merged)) return res
   // never a pass on a partial branch: the whole-branch pass runs once every planned workstream of the repo is on it
-  const unmerged = mine.filter(w => !w.merged).map(w => w.id)
+  const unmerged = mine.filter(w => !w.merged && !w.dropped).map(w => w.id)
   if (unmerged.length && STAGE !== 'wholeBranch') return { ...res, verdict: 'incomplete', sections: `not run: ${unmerged.join(', ')} not merged into ${r.featureBranch}`, open: shared, escalations: [`whole-branch pass not run: planned workstream(s) ${unmerged.join(', ')} not merged; settle them, then re-run with resumeFromRunId, resume and carryForward = this result's carryForward (merged workstreams are carried from git)`] }
   // the resumed call already passed this repo's whole-branch pass and its feature branch has not moved since: keep that result
   const kept = CF_REPOS[r.repo]?.passed
@@ -1032,13 +1046,14 @@ No worktree, no checkout, no commits, no pushes; never touch the user's checkout
   })
 }
 const notRun = (w, why) => ({ id: w.id, branch: w.branch, merged: false, open: [], questions: [], notes: [], escalations: [why], findings: [] })
+const dropOut = w => ({ ...notRun(w, `dropped by the user: NOT done; delete ${O}/${w.branch} if an earlier call pushed it`), dropped: true, status: 'dropped' })
 // after: a workstream starts only once every listed one merged, so it branches from the head that carries them
 const started = {}
-const launch = w => started[w.id] ||= (w.after
+const launch = w => started[w.id] ||= (DROPPED.has(w.id) && !RESUMED[w.id]?.merged ? Promise.resolve(dropOut(w)) : w.after
   ? Promise.all(w.after.map(id => launch(byId[id]))).then(pre => { const missing = w.after.filter((_, i) => !pre[i].merged); return missing.length ? notRun(w, `ordered after ${missing.join(', ')}, which did not merge into ${w.featureBranch}; NOT started`) : runWorkstream(w) })
   : runWorkstream(w)).catch(e => { reopen(w, `${w.id} crashed`); return notRun(w, `crashed: ${e}`) })
 const wsPromises = STAGE === 'wholeBranch'
-  ? W.map(w => Promise.resolve({ id: w.id, merged: true, open: [] })) // already merged by an earlier run
+  ? W.map(w => Promise.resolve(DROPPED.has(w.id) ? dropOut(w) : { id: w.id, merged: true, open: [] })) // already merged by an earlier run
   : W.map(w => launch(w))
 // Each repo's whole-branch pass starts as soon as ITS workstreams finish (no global barrier).
 const repoResults = await parallel(REPOS.map(r => async () => {
@@ -1046,6 +1061,7 @@ const repoResults = await parallel(REPOS.map(r => async () => {
   return runRepo(r, mine).catch(e => ({ repo: r.repo, featureBranch: r.featureBranch, sha: '', verdict: 'fail', sections: 'crashed', tests: '', fixRounds: 0, churn: [], open: [], questions: [], notes: [], escalations: [`crashed: ${e}`], findings: [] }))
 }))
 const wsResults = await Promise.all(wsPromises)
+const dropped = wsResults.filter(w => w.dropped).map(w => w.id)
 
 // Barrier: the contract check and docs need every repo final.
 const skipped = new Set(repoResults.filter(r => r.verdict === 'skipped').map(r => r.repo))
@@ -1117,16 +1133,16 @@ sha = the commit you validated. Ids: D-F1, D-F2, ...`,
     `Drift audit, read-only: find every user-visible change that no decision-log line and no brief clause covers.
 ${PINS}
 ${REPOS.map(r => `${r.repo}: base ${O}/${r.base}`).join('\n')}
-${W.map(w => `## ${w.id}\n${w.brief}`).join('\n\n')}
+${W.filter(w => !dropped.includes(w.id)).map(w => `## ${w.id}\n${w.brief}`).join('\n\n')}${GONE(dropped)}
 Read the decision log ${A.decisionLog}. For each repo, list every user-visible change in ${O}/<base>...<pinned sha> (copy, spoken or printed lines, defaults, prompts, thresholds, UI, removed hints or options). Map each one to a decision-log line or a brief clause. Return in drift only the changes with neither.
 If you cannot read the decision log or a repo: ok=false, the reason in notes; still list what you could check.
 ${RO(REPOS[0].repo, 'drift')}`,
     { label: 'drift', phase: 'Drift audit', agentType: 'reviewer', model: 'fable', schema: DRIFT_OUT }) : null,
 ])
-// a failed audit's items are dropped: with the log unread every change looks undecided, and each item's default is a revert
-const drift = !driftRan ? { verdict: 'skipped', items: [], sections: '', notes: driftShort ? ['token budget below the reserve'] : [] }
-  : !driftOut ? { verdict: 'died', items: [], sections: '', notes: [died('drift agent', 'drift')] }
-  : { verdict: !driftOut.ok ? 'failed' : driftOut.drift.length ? 'drift' : 'pass', items: driftOut.ok ? driftOut.drift : [], sections: driftOut.sections, notes: driftOut.notes }
+// a failed audit's items are kept as unconfirmed, never questions: with the log unread every change looks undecided, and each item's default is a revert
+const drift = !driftRan ? { verdict: 'skipped', items: [], unconfirmed: [], sections: '', notes: driftShort ? ['token budget below the reserve'] : [] }
+  : !driftOut ? { verdict: 'died', items: [], unconfirmed: [], sections: '', notes: [died('drift agent', 'drift')] }
+  : { verdict: !driftOut.ok ? 'failed' : driftOut.drift.length ? 'drift' : 'pass', items: driftOut.ok ? driftOut.drift : [], unconfirmed: driftOut.ok ? [] : driftOut.drift, sections: driftOut.sections, notes: driftOut.notes }
 
 const brief = f => `${f.severity} ${f.where}: ${f.issue}${f.also ? ` (+ ${f.also.severity} ${f.also.id} at ${f.also.where})` : ""}`
 const uniq = xs => [...new Set(xs)]
@@ -1150,19 +1166,20 @@ const revert = 'revert it: no decision or brief clause covers it'
 questions.push(...drift.items.map(({ repo, where, change }) => ({ q: `drift: ${repo} ${where}: ${change}`, options: [revert, 'keep it and add it to the decision log'], default: revert })))
 const rerun = 're-run stage wholeBranch to audit drift'
 if (A.decisionLog && (drift.verdict === 'died' || drift.verdict === 'failed' || driftShort))
-  questions.push({ q: `drift audit ${drift.verdict}: ${drift.notes.join('; ') || 'the drift agent could not read the decision log or a repo'}`, options: [rerun, 'ship without the drift audit'], default: rerun })
+  questions.push({ q: `drift audit ${drift.verdict}: ${drift.notes.join('; ') || 'the drift agent could not read the decision log or a repo'}${drift.unconfirmed.length ? ` (${drift.unconfirmed.length} unconfirmed item${drift.unconfirmed.length > 1 ? 's' : ''} in drift.unconfirmed)` : ''}`, options: [rerun, 'ship without the drift audit'], default: rerun })
 return {
   stage: STAGE,
   budget: { spent: budget.spent() - SPENT0, tokenBudget: A.tokenBudget ?? null, turnTotal: budget.total, reserve: RESERVE, stoppedBy },
   cycles: CYCLES,
   maxCycles: CAP,
   questions,
+  dropped,
   workstreams: STAGE === 'wholeBranch' ? [] : wsResults.map(w => ({ ...w, open: w.open.map(brief), handed: (w.handed || []).map(brief), questions: uniqQ(w.questions), notes: uniq(w.notes) })),
   repos: repoResults.map(r => {
     const d = docsOf(r.repo)
     // docs that fail validation or promotion never reach the branch and fail the repo; so does a docs agent that died 3 times
     const docsFailed = d && (d.sha ? d.verdict !== 'pass' : d.verdict === 'fail')
-    return { ...r, verdict: docsFailed ? 'fail' : r.verdict, escalations: [...r.escalations, ...(docsFailed ? [d.sha ? `docs commit ${d.sha} left unpromoted on ${r.featureBranch}--docs` : `${died('docs agent', `${name(r.repo)} docs`)}; docs not synced`] : [])], open: [...r.open, ...(d?.findings || [])].map(brief), questions: uniqQ(r.questions), notes: uniq([...r.notes, ...(leftovers[r.repo] || [])]), findings: [...r.findings, ...asLedger('docs', d?.findings)], docs: docsOut(d), finalSha: (d?.verdict === 'pass' && d.sha) || r.sha, flaky: flakyOf(r.repo) }
+    return { ...r, verdict: docsFailed ? 'fail' : r.verdict, escalations: [...r.escalations, ...(docsFailed ? [d.sha ? `docs commit ${d.sha} left unpromoted on ${r.featureBranch}--docs` : `${died('docs agent', `${name(r.repo)} docs`)}; docs not synced`] : [])], open: [...r.open, ...(d?.findings || [])].map(brief), questions: uniqQ(r.questions), notes: uniq([...r.notes, ...(leftovers[r.repo] || []), ...(x => x.length ? [`not done (dropped): ${x.join(', ')}`] : [])(dropped.filter(id => byId[id].repo === r.repo))]), findings: [...r.findings, ...asLedger('docs', d?.findings)], docs: docsOut(d), finalSha: (d?.verdict === 'pass' && d.sha) || r.sha, flaky: flakyOf(r.repo) }
   }),
   // crossRepo.ledger is the result key, not the prompt-side ledger of settled findings inside runWorkstream
   drift,
