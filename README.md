@@ -64,6 +64,8 @@ Stacked PRs are an opt-in mode, used only when asked for.
 
 Expects `implementer`, `reviewer` and `validator` subagents in `~/.claude/agents/`.
 
+Optional, for per-worker step bars in a progress mod that offers a step tool (for example `mcp__savvy-progress__step`): add that tool to the `tools:` list of the implementer, reviewer and validator agent types, then pass `stepTool` (see `SKILL.md`).
+
 ## Tests
 
 ```
