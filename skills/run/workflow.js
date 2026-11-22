@@ -147,11 +147,13 @@ for (const [repo, x] of Object.entries(CF_REPOS)) {
 const prior = f => ({ ...f, id: `p:${f.id}` })
 const CF_WS = Object.fromEntries(Object.entries(CF.workstreams || {}).map(([id, x]) => [id, Object.fromEntries(['handed', 'open', 'findings'].map(k => [k, (x[k] || []).map(prior)]))]))
 // known debt: the stuck-finding question's answer "accept <finding id> ... as known debt" settles that carried finding for good
-// ids compare without p: prefixes, so a later re-run with the debt run's carryForward (p:p:c1-F1) still names the same finding
+// the named id is restored with one more p: (or already reads as the carryForward has it); a debt an earlier run settled is recognised without p: prefixes
 const bare = id => id.replace(/^(p:)+/, '')
-const DEBT = Object.fromEntries(Object.entries(DECIDE).map(([id, a]) => [id, a.match(/^\s*accept (\S+)[^]*?\bas known debt\b/i)?.[1]]).filter(([, f]) => f).map(([id, f]) => [id, bare(f)]))
+const DEBT = Object.fromEntries(Object.entries(DECIDE).map(([id, a]) => [id, a.match(/^\s*accept (\S+)[^]*?\bas known debt\b/i)?.[1]]).filter(([, f]) => f))
+const settledDebt = (f, book) => book.some(e => e.status === 'debt' && bare(e.id) === bare(f))
+const namedDebt = (f, book) => [`p:${f}`, f].find(id => book.some(e => e.id === id))
 if (A.stage !== 'wholeBranch') for (const [id, f] of Object.entries(DEBT))
-  if (!CF_WS[id]?.findings.some(e => bare(e.id) === f)) throw new Error(`decisions.${id} accepts ${f} as known debt, but carryForward has no such finding of ${id}: pass the stuck run's carryForward`)
+  if (!settledDebt(f, CF_WS[id]?.findings || []) && !namedDebt(f, CF_WS[id]?.findings || [])) throw new Error(`decisions.${id} accepts ${f} as known debt, but carryForward has no such finding of ${id}: pass the stuck run's carryForward, and an answer that reads "accept <finding id> (<where>) as known debt"`)
 const name = repo => repo.split('/').pop()
 const STALE = `Read other repos ONLY via git -C <repo> fetch ${O}, then git -C <repo> show ${O}/<featureBranch>:<path> or git -C <repo> diff ${O}/<base>...${O}/<featureBranch> — never by filesystem path: those checkouts sit on unrelated branches.`
 
@@ -505,8 +507,8 @@ async function runWorkstream(w) {
   const cf = CF_WS[w.id]
   if (cf) {
     book.push(...cf.findings)
-    const settledDebt = book.some(e => e.status === 'debt' && bare(e.id) === DEBT[w.id]) // applied by an earlier run: never re-applied to a newer same-id finding
-    for (const e of book) if (!settledDebt && e.status === 'open' && bare(e.id) === DEBT[w.id]) e.status = 'debt'
+    const named = DEBT[w.id] && !settledDebt(DEBT[w.id], book) && namedDebt(DEBT[w.id], book) // settled by an earlier run: never re-applied to a newer same-id finding
+    for (const e of book) if (named && e.status === 'open' && e.id === named) e.status = 'debt'
     for (const e of book) if (e.status === 'debt') out.notes.push(`known debt (accepted by the user): ${e.id} (${e.where}: ${e.issue})`)
     ledger.push(...book.filter(e => STATUS.includes(e.status)).map(({ id, where, issue, status }) => ({ id, where, issue, status })))
     out.handed.push(...cf.handed)
@@ -776,7 +778,7 @@ Return headSha, gate, evidence, verified (ids confirmed resolved, or whose answe
           out.open = carry
           const q = { q: `${spent.f.id} (${spent.f.where}: ${spent.f.issue}) is still open after ${spent.t.rounds.size} fix rounds, the last on opus. Attempts: ${spent.t.answers.join(' | ')}. How should it be resolved?`, options: ['change the brief or spec so a fix is clear (say how)', `accept it as known debt (re-run with decisions.${w.id} = "accept ${spent.f.id} (${spent.f.where}) as known debt"; it merges with that finding accepted, listed as known debt)`, `drop this workstream (re-run with dropped: ["${w.id}"]; the rest merges and it is listed as not done)`], default: 'change the brief or spec so a fix is clear (say how)' }
           out.questions.push(q)
-          out.decision = { questions: [q], answer: `re-run with the same args, resumeFromRunId = this run, resume = this run's id, carryForward = this result's carryForward, and decisions.${w.id} = "<the user's answer>"; to drop it, dropped: ["${w.id}"] instead of decisions.${w.id}` }
+          out.decision = { questions: [q], answer: `re-run with the same args, resumeFromRunId = this run, resume = this run's id, carryForward = this result's carryForward, and decisions.${w.id} = "accept ${spent.f.id} (${spent.f.where}) as known debt" for known debt, else "<the user's answer>"; to drop it, dropped: ["${w.id}"] instead of decisions.${w.id}` }
           return stop(`${spent.f.id} survived ${spent.t.rounds.size} fix rounds, the last on opus; returned to the user as a question`)
         }
       }

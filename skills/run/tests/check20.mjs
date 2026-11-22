@@ -115,6 +115,9 @@ await t('C1.4d dropped but already merged: carried as merged, with an escalation
   const a = W(r, 'a')
   assert(a.merged && a.escalations.some(e => e === 'dropped, but already merged into f: it stays on the branch') && r.repos[0].verdict === 'pass', JSON.stringify(a))
   assert.deepEqual(r.dropped, []) })
+await t('C1.4o stage wholeBranch leaves a dropped workstream out: listed as not done, its brief out of the review', async () => {
+  const { r, prompts } = await go({ stage: 'wholeBranch', dropped: ['a'], workstreams: [ws('a'), ws('b')] }, {})
+  assert(r.dropped.includes('a') && r.repos[0].notes.includes('not done (dropped): a') && prompts['one review'].includes(DROP_S) && !prompts['one review'].includes('brief a'), JSON.stringify(r.repos[0])) })
 await t('C1.4e a repo whose every workstream is dropped stays skipped', async () => {
   const { r, order } = await go({ cycles: 1, dropped: ['a'], workstreams: [ws('a')] }, {})
   assert(r.repos[0].verdict === 'skipped' && !order.length, order.join()) })
@@ -157,6 +160,22 @@ await t('C1.4l a later re-run with the same debt decision and the debt run\'s ca
   assert(W(third.r, 'a').findings.some(e => e.status === 'debt') && !third.order.includes('a fix c1'), JSON.stringify({ a: W(third.r, 'a'), order: third.order }))
   await go({ cycles: null, resume: 'run-1', carryForward: first.r.carryForward, decisions: { a: 'accept p:c1-F1 (x.py:3) as known debt' }, workstreams: [ws('a'), ws('b')] }, stubborn)
   for (const x of [{ resume: 'run-2', carryForward: second.r.carryForward }, { resume: 'run-2' }, {}]) await go({ stage: 'wholeBranch', decisions: DEBT_A, workstreams: [ws('a'), ws('b')], ...x }, {}) })
+await t('C1.4n a stuck resume holding p:c1-F1 and its own c1-F1: the debt settles only the named one, and a later run never re-applies it to the newer', async () => {
+  const Y = F('c1-F1', 'major', 'y.py:9'), both = { open: [F('p:c1-F1'), Y] }
+  const two = { 'a review c1': () => ({ findings: [Y] }), 'a validate c1': () => both, 'a validate c2': () => both, 'a validate c3': () => both }
+  const first = await go({ cycles: null, workstreams: [ws('a')] }, stubborn)
+  const second = await go({ cycles: null, resume: 'run-1', carryForward: first.r.carryForward, decisions: { a: 'change the brief: x.py:3 may keep its old shape' }, workstreams: [ws('a')] }, two)
+  const q = W(second.r, 'a').questions.find(q => /still open after 3 fix rounds/.test(q.q))
+  const named = q.options.find(o => o.startsWith('accept it as known debt')).match(/decisions\.a = "([^"]+)"/)[1]
+  assert.equal(named, 'accept p:c1-F1 (x.py:3) as known debt')
+  assert(W(second.r, 'a').decision.answer.includes(`decisions.a = "${named}" for known debt`), W(second.r, 'a').decision.answer)
+  const third = await go({ cycles: null, resume: 'run-2', carryForward: second.r.carryForward, decisions: { a: named }, workstreams: [ws('a')] }, { 'a validate c1': () => ({ verified: ['p:c1-F1'] }) })
+  const st = (r, where) => W(r, 'a').findings.filter(e => e.where === where).map(e => `${e.id} ${e.status}`)
+  assert(third.order.includes('a fix c1') && st(third.r, 'x.py:3').includes('p:p:c1-F1 debt') && !st(third.r, 'y.py:9').some(s => s.endsWith(' debt')), JSON.stringify({ f: W(third.r, 'a').findings, order: third.order }))
+  const debt = await go({ cycles: null, resume: 'run-2', carryForward: second.r.carryForward, decisions: { a: named }, workstreams: [ws('a')] }, { 'a fix c1': () => null })
+  assert(st(debt.r, 'y.py:9').includes('p:c1-F1 open'), JSON.stringify(W(debt.r, 'a').findings))
+  const later = await go({ cycles: null, resume: 'run-3', carryForward: debt.r.carryForward, decisions: { a: named }, workstreams: [ws('a')] }, { 'a fix c1': () => null })
+  assert(st(later.r, 'x.py:3').includes('p:p:p:c1-F1 debt') && st(later.r, 'y.py:9').includes('p:p:c1-F1 open'), JSON.stringify(W(later.r, 'a').findings)) })
 await t('C1.4m an answer that declines the debt is no known debt', async () => {
   const first = await go({ cycles: null, workstreams: [ws('a')] }, stubborn)
   const { order } = await go({ cycles: null, resume: 'run-1', carryForward: first.r.carryForward, decisions: { a: "don't accept it as known debt: change the brief so x.py:3 keeps its shape" }, workstreams: [ws('a')] }, stubborn)

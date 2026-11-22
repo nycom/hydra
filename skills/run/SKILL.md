@@ -526,8 +526,9 @@ The workflow returns:
   finding a workstream handed over is `<ws id>:<id>` with stage `handed`;
   `contract`); `status` is `fixed`, `answered` or `declined` once a validator
   accepted it, `carried` once a workstream handed it to the whole-branch pass
-  (workstream ledger), else `open`. `open` in the ledger means no validator accepted
-  it; it may be absent from `open` (a minor nobody re-raised, or an escalation
+  (workstream ledger), `debt` once the user accepted it as known debt, else
+  `open`. `open` in the ledger means no validator accepted it; it may be absent
+  from `open` (a minor nobody re-raised, or an escalation
   awaiting the user). Count a carried minor once.
 
 `questions` (`{q, options, default}`) are only what the user must decide; `notes`
