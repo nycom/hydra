@@ -76,6 +76,9 @@ if (new Set(W.map(w => w.repo + ' ' + w.branch)).size !== W.length) throw new Er
 if (A.cycles != null && !(Number.isInteger(A.cycles) && A.cycles >= 1)) throw new Error('cycles must be a positive integer or null')
 if (A.stopRule != null && !(typeof A.stopRule === 'string' && A.stopRule.trim())) throw new Error('stopRule must be a non-empty string naming the wrong actions that block, e.g. "wrong output for a listed case, lost user data, a crash"')
 const absArg = k => { if (A[k] != null && !(typeof A[k] === 'string' && /^\//.test(A[k]))) throw new Error(`${k} must be an absolute path`) }
+if (A.stepTool != null && !(typeof A.stepTool === 'string' && /^[\w-]+$/.test(A.stepTool))) throw new Error('stepTool must be a tool name (letters, digits, _ and -)')
+// opt-in worker step reports: empty unless stepTool is set, so default prompts are unchanged
+const STEP = A.stepTool ? `\n\nProgress: report your steps with the ${A.stepTool} tool (total once, then done as each step finishes). Send failed: true, with reason and error, only when your own attempt at this step failed. Findings you report, and a red gate or check you were asked to run, are results, not failures.` : ''
 absArg('acceptance')
 absArg('decisionLog')
 if (A.maxCycles != null && !(Number.isInteger(A.maxCycles) && A.maxCycles >= (A.cycles ?? 1))) throw new Error('maxCycles must be an integer >= cycles')
@@ -439,7 +442,7 @@ async function step(prompt, { gated, checks = 0, ...opts }, anySha = false) {
       ? `the previous attempt finished and returned the result below, but its sha ${JSON.stringify(bad.sha)} is not a full 40-hex SHA. Do not redo the work: git ls-remote the branch you were told to push to and return the same result with the verified sha.\n${JSON.stringify(bad)}`
       : skipped ? `the previous attempt returned without running the gate${checks ? ' or every check' : ''}; redo the whole step, run every command, and report the command you ran in gate.command`
       : 'the previous agent died mid-step. Redo the whole step; first check the remote for anything it already pushed.'
-    const r = await agent(n === 1 ? prompt : `${prompt}\n\nAttempt ${n}: ${tail}`, n === 1 ? opts : { ...opts, label: `${opts.label} attempt ${n}` })
+    const r = await agent((n === 1 ? prompt : `${prompt}\n\nAttempt ${n}: ${tail}`) + STEP, n === 1 ? opts : { ...opts, label: `${opts.label} attempt ${n}` })
     const malformed = !anySha && r?.status === 'done' && r.ok && !/^[0-9a-f]{40}$/.test(r.sha)
     const unrun = gated && r?.gate && (!r.gate.command?.trim() || UNRUN.test(r.gate.command) || UNRUN.test(r.gate.summary) || (checks && !(Array.isArray(r.checkExits) && r.checkExits.length === checks && r.checkExits.every(Number.isInteger))))
     if (r && !malformed && !unrun) return bad && r.status === 'done' && r.ok ? { ...bad, sha: r.sha, notes: [...(bad.notes || []), ...(r.notes || [])] } : r
