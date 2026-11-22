@@ -27,6 +27,7 @@ for (const w of W) {
   if (w.reviewModel && !MODELS.includes(w.reviewModel)) throw new Error(`workstream ${w.id}: reviewModel must be sonnet|opus|fable`)
   if (w.files != null && !(Array.isArray(w.files) && w.files.length)) throw new Error(`workstream ${w.id}: files must be a non-empty array`)
   if (w.checks != null && !(Array.isArray(w.checks) && w.checks.length && w.checks.every(x => typeof x === 'string' && x.trim()))) throw new Error(`workstream ${w.id}: checks must be a non-empty array of commands`)
+  if (w.knownRedChecks != null && !(Array.isArray(w.knownRedChecks) && w.knownRedChecks.length && w.knownRedChecks.every(x => w.checks?.includes(x)))) throw new Error(`workstream ${w.id}: knownRedChecks must be a non-empty array of entries of its checks`)
   if (w.quickGate != null && !(typeof w.quickGate === 'string' && w.quickGate.trim())) throw new Error(`workstream ${w.id}: quickGate must be a non-empty command`)
   w.repo = norm(w.repo)
   w.base ||= 'main'
@@ -167,7 +168,13 @@ const sq = s => `'${s.replace(/'/g, `'\\''`)}'` // POSIX single-quoting for a sh
 const RUN = (secs, cmd) => `node ${sq(`${A.skillDir}/run-cmd.mjs`)} ${secs} ${sq(cmd)}`
 const SHELL_CAP = 'give the shell call a timeout above the cap (foreground max is 600 s), or run it in the background and wait'
 const SMOKE = c => c.smoke ? `Live smoke, proving the core invariants: run the repo's local recipe exactly as this command line wraps it (${c.smokeTimeout} s hard cap, exit 124 = timed out; leftover processes are killed; ${SHELL_CAP}):\n${RUN(c.smokeTimeout, c.smoke)}\nA failed or timed-out smoke is a critical finding.` : 'Live smoke: "skipped: no smoke recipe" (do not improvise a boot).'
-const CHECKS = w => w.checks ? `Checks: run each of these from your worktree root, exactly as written (${RUN_SECS} s hard cap, exit 124 = timed out; ${SHELL_CAP}), and report the exit code per command in gate.summary (validators) or tests (authors and fixers):\n${w.checks.map(x => RUN(RUN_SECS, x)).join('\n')}\nA red check is a critical finding; an author never pushes with one red.\n` : ''
+const CHECKS = w => w.checks?.length ? `Checks: run each of these from your worktree root, exactly as written (${RUN_SECS} s hard cap, exit 124 = timed out; ${SHELL_CAP}), and report the exit code per command in checkExits, in this order:\n${w.checks.map(x => RUN(RUN_SECS, x)).join('\n')}\n${w.knownRedChecks?.length ? `Known-red checks (red at the base; report the exit, never a finding): ${JSON.stringify(w.knownRedChecks)}\n` : ''}A red check is a critical finding and is never rerun; an author never pushes with one red${w.knownRedChecks?.length ? ' that is not known-red' : ''}.\n` : ''
+// checkExits is the typed channel for checks: a red one that is not known-red turns the gate red, so redGate files it as critical.
+// author = the exits the author or fixer of the same head reported; its 0 where the validator saw red is a false green.
+const judged = (r, w, author) => {
+  const red = r && w.checks?.length ? w.checks.map((x, i) => [x, r.checkExits[i], author?.[i]]).filter(([x, e]) => e !== 0 && !w.knownRedChecks?.includes(x)) : []
+  return red.length ? { ...r, gate: { ...r.gate, green: false, summary: `${r.gate.summary}; red check(s): ${red.map(([x, e, a]) => `${x} exit ${e}${a === 0 ? ' (false green: its author reported exit 0)' : ''}`).join(', ')}` } } : r
+}
 // copyExcluded: git-ignored files the gate needs (e.g. a local preview test) exist only in the user's checkout
 const COPY = repo => { const ps = conf(repo).copyExcluded; return ps.length ? `Git-excluded files: right after creating each worktree, before any gate or test, copy these paths from the user's checkout ${repo} to the same path in it (mkdir -p the parent, then cp -Rp): ${ps.join(', ')}. Copy only if each exists and git -C ${repo} check-ignore -q <path> succeeds; otherwise copy nothing, stop and report it (status blocked, or a critical hygiene finding). Never commit them (no git add -f).\n` : '' }
 const GIT = (repo, wt) => `Git rules (non-negotiable):
@@ -337,6 +344,8 @@ const VERDICT = {
   required: ['verdict', 'sections', 'sha', 'tests', 'gate', 'findings'],
 }
 const RECHECK = { ...VERDICT, properties: { ...VERDICT.properties, verified: { type: 'array', items: { type: 'string' }, description: 'finding ids confirmed resolved, or whose answer or decline you accept' }, questions: DELTA.properties.questions }, required: [...VERDICT.required, 'verified', 'questions'] }
+// built per call, so a run without checks keeps byte-identical schemas
+const withChecks = (schema, n) => n ? { ...schema, properties: { ...schema.properties, checkExits: { type: 'array', items: { type: 'integer' }, minItems: n, maxItems: n, description: 'exit code of each check, in the order listed; 124 = timed out' } }, required: [...schema.required, 'checkExits'] } : schema
 const CONTRACT = {
   type: 'object',
   properties: { verdict: { enum: ['pass', 'fail'] }, sections: { type: 'string', description: 'one short line per section' }, findings: { type: 'array', items: FINDING } },
@@ -420,17 +429,19 @@ const unran = {} // label -> attempts that returned without running the gate, fo
 const infra = {} // label -> the health probe failed
 const HEALTH = { type: 'object', properties: { ok: { type: 'boolean', description: 'true if the command ran' }, notes: { type: 'string' } }, required: ['ok', 'notes'] }
 const healthy = async o => !!(await agent(`Health check: run git --version in a shell and return ok=true with its output in notes. Change nothing. ${HARD}`, { label: `health ${o.label}`, phase: o.phase, model: 'sonnet', effort: 'low', schema: HEALTH }))?.ok
-async function step(prompt, { gated, ...opts }, anySha = false) {
+// checks: how many checks the prompt carries; the schema asks for their exits, and in a gated step a missing or short checkExits never ran
+async function step(prompt, { gated, checks = 0, ...opts }, anySha = false) {
+  opts.schema = withChecks(opts.schema, checks)
   let bad = null, skipped = false
   unran[opts.label] = 0
   for (let n = 1; n <= 3; n++) {
     const tail = bad
       ? `the previous attempt finished and returned the result below, but its sha ${JSON.stringify(bad.sha)} is not a full 40-hex SHA. Do not redo the work: git ls-remote the branch you were told to push to and return the same result with the verified sha.\n${JSON.stringify(bad)}`
-      : skipped ? 'the previous attempt returned without running the gate; redo the whole step, run every command, and report the command you ran in gate.command'
+      : skipped ? `the previous attempt returned without running the gate${checks ? ' or every check' : ''}; redo the whole step, run every command, and report the command you ran in gate.command`
       : 'the previous agent died mid-step. Redo the whole step; first check the remote for anything it already pushed.'
     const r = await agent(n === 1 ? prompt : `${prompt}\n\nAttempt ${n}: ${tail}`, n === 1 ? opts : { ...opts, label: `${opts.label} attempt ${n}` })
     const malformed = !anySha && r?.status === 'done' && r.ok && !/^[0-9a-f]{40}$/.test(r.sha)
-    const unrun = gated && r?.gate && (!r.gate.command?.trim() || UNRUN.test(r.gate.command) || UNRUN.test(r.gate.summary))
+    const unrun = gated && r?.gate && (!r.gate.command?.trim() || UNRUN.test(r.gate.command) || UNRUN.test(r.gate.summary) || (checks && !(Array.isArray(r.checkExits) && r.checkExits.length === checks && r.checkExits.every(Number.isInteger))))
     if (r && !malformed && !unrun) return bad && r.status === 'done' && r.ok ? { ...bad, sha: r.sha, notes: [...(bad.notes || []), ...(r.notes || [])] } : r
     if (unrun) unran[opts.label]++
     else bad ??= r // the first full result is the one kept and repaired
@@ -504,7 +515,9 @@ async function runWorkstream(w) {
   }
   // blockers open when the resumed call stopped: a restarted review re-checks them, and only a validator clears them
   const reopened = (cf?.findings || []).filter(e => e.status === 'open' && e.severity !== 'minor').map(({ id, severity, kind, where, issue }) => ({ id, severity, kind, where, issue, evidence: 'open when the resumed run stopped' }))
+  let authored = [] // the last author's or fixer's checkExits, for the false-green label
   const absorb = r => {
+    authored = r.checkExits
     out.sharedEdits = r.sharedEdits // each author returns the complete current list
     out.questions.push(...r.questions)
     out.notes.push(...r.notes)
@@ -613,7 +626,7 @@ ${authorGate()}
 ${CHECKS(w)}${GIT(w.repo, w.id)}
 Commit and push to ${w.branch}. Nothing to change (the branch already meets the brief and the gate is green): no commit, no push, status "done", sha = the current ${O}/${w.branch} head, ok = true.
 Return status ("done" only when the gate is green and the push verified, or nothing to change), ok, the verified remote sha, a one-line test summary, gateTail, sharedEdits, decisions (up to 10), questions and notes.`,
-    { label: `${tag} implement`, phase: 'Implement', agentType: 'implementer', model: w.model, schema: IMPLEMENTED })
+    { label: `${tag} implement`, phase: 'Implement', agentType: 'implementer', model: w.model, schema: IMPLEMENTED, checks: w.checks?.length })
   if (!impl) return stop(unusable('implement', w.branch, `${tag} implement`))
   absorb(impl)
   if (!pushed(impl, 'implement')) return blocked('implement', impl)
@@ -657,7 +670,7 @@ New finding ids: c${i}-F1, c${i}-F2, ...`,
       if (!found.some(blocking)) {
         if (same(out.validatedSha, out.sha)) { carry = found; break } // converged on a validated head; minors carried, not cycled
         // A clean review is a claim: a head no validator has seen gets one independent pass before it can merge.
-        const val = await step(
+        const val = judged(await step(
           `Independently validate workstream ${w.id} in ${w.repo} before it merges: git fetch${FETCH}, then ${O}/${w.featureBranch}...${out.sha}. ${w.lite ? 'Lite workstream: no review runs, so you are its only independent check.' : 'The review came back clean, but no validator has seen this head.'}
 The brief:
 ${w.brief}
@@ -671,7 +684,7 @@ ${GREEN(c.knownRed, w.repo)} ${FLAKY}
 ${CHECKS(w)}${RO(w.repo, `${w.id}-val${i}`, c.regen)}
 ${SEV}
 Return headSha, gate, evidence, verified (empty), open (ids v${i}-F1, ...) and questions.`,
-          { label: `${tag} validate c${i}`, phase: 'Review cycles', agentType: 'validator', model: 'opus', effort: 'high', schema: DELTA, gated: true })
+          { label: `${tag} validate c${i}`, phase: 'Review cycles', agentType: 'validator', model: 'opus', effort: 'high', schema: DELTA, gated: true, checks: w.checks?.length }), w, authored)
         if (!val) return stop(died(`validate c${i}`, `${tag} validate c${i}`))
         if (!same(val.headSha, out.sha)) return stop(`validate c${i} saw ${val.headSha}, the head is ${out.sha}`)
         out.evidence[`validate c${i}`] = val.evidence
@@ -705,7 +718,7 @@ sharedEdits: return the complete current list; it replaces the earlier one${out.
 ${authorGate()}
 ${CHECKS(w)}${GIT(w.repo, `${w.id}-fix${i}`)}
 Return status, ok, verified sha, tests, gateTail, one answer per finding id, sharedEdits, decisions (new or changed only), questions (only what code, spec and brief cannot settle; use action "escalated") and notes.`,
-          { label: `${tag} fix c${i}`, phase: 'Review cycles', agentType: 'implementer', model: stuck.length ? 'opus' : w.model, schema: FIXED })
+          { label: `${tag} fix c${i}`, phase: 'Review cycles', agentType: 'implementer', model: stuck.length ? 'opus' : w.model, schema: FIXED, checks: w.checks?.length })
         if (!fix) return stop(unusable(`fix c${i}`, w.branch, `${tag} fix c${i}`))
         absorb(fix)
         if (!pushed(fix, `fix c${i}`)) return blocked(`fix c${i}`, fix)
@@ -715,7 +728,7 @@ Return status, ok, verified sha, tests, gateTail, one answer per finding id, sha
         out.sha = fix.sha
 
         const first = acceptance // the workstream's first validator: its test guard covers the whole range
-        const val = await step(
+        const val = judged(await step(
           `Independently validate the review-fix delta of workstream ${w.id} in ${w.repo}: git fetch${FETCH}, then ${prev}..${fix.sha} on ${w.branch}. Trust nothing the author claims.
 The brief:
 ${w.brief}
@@ -732,7 +745,7 @@ ${GREEN(c.knownRed, w.repo)} ${FLAKY}
 ${CHECKS(w)}${RO(w.repo, `${w.id}-val${i}`, c.regen)}
 ${SEV}
 Return headSha, gate, evidence, verified (ids confirmed resolved, or whose answer or decline you accept), open (same id for an unresolved finding; unresolved, indefensible, plus regressions as kind "regression" with ids v${i}-R1, ...) and questions.`,
-          { label: `${tag} validate c${i}`, phase: 'Review cycles', agentType: 'validator', model: 'opus', effort: 'high', schema: DELTA, gated: true })
+          { label: `${tag} validate c${i}`, phase: 'Review cycles', agentType: 'validator', model: 'opus', effort: 'high', schema: DELTA, gated: true, checks: w.checks?.length }), w, authored)
         if (!val) return stop(died(`validate c${i}`, `${tag} validate c${i}`))
         if (!same(val.headSha, fix.sha)) return stop(`validate c${i} saw ${val.headSha}, the fix pushed ${fix.sha}`)
         out.evidence[`validate c${i} delta`] = val.evidence
@@ -888,6 +901,9 @@ async function runRepo(r, mine) {
     return `${fixed.length ? ` Fixes verified earlier in this run (a finding whose fix would reverse one: file it and name it; the fixer escalates): ${JSON.stringify(fixed)}` : ''}${asked.length ? ` Already asked of the user, never re-ask: ${JSON.stringify(asked)}` : ''}`
   }
   const solo = merged.length === 1 && same(merged[0].preMergeSha, merged[0].baseAtMerge)
+  // the merged tip re-runs the checks of every merged, not-dropped workstream, each command once
+  const onTip = merged.filter(w => !DROPPED.has(w.id)).map(w => byId[w.id])
+  const tip = { checks: [...new Set(onTip.flatMap(w => w.checks || []))], knownRedChecks: [...new Set(onTip.flatMap(w => w.knownRedChecks || []))] }
 
   const [rev, val] = await parallel([
     async () => solo ? { findings: [], seams: `skipped: ${merged[0].id} is the only workstream and merged onto ${r.featureBranch} at its base; no seam to check` } : step(
@@ -904,7 +920,7 @@ ${ACC_REVIEW}${DROP}
 ${SEV}
 headSha = the ${O}/${r.featureBranch} commit you reviewed. Ids: W-F1, W-F2, ...`,
       { label: `${n} review`, phase: 'Whole-branch', agentType: 'reviewer', model: A.wbReviewModel || top(r.ws.map(w => w.reviewModel)), schema: SEAMS }),
-    () => step(
+    async () => judged(await step(
       `Independent whole-branch validation of ${r.repo}, feature branch ${r.featureBranch} vs ${O}/${r.base}. Trust nothing; re-derive everything yourself. ${REFUTE}
 ${ACC_RUN(`the head of ${O}/${r.featureBranch}`)}${RO(r.repo, 'wb-val')}
 Sections (verdict per section):
@@ -915,14 +931,14 @@ ${GREEN(c.knownRed, r.repo)} ${FLAKY}
 3. Spec compliance point by point against the briefs below. ${TEST_GUARD} ${CONFLICT}${SETTLED()}${carried.length ? ` Minors carried from the workstream cycles: ${JSON.stringify(carried)}. Return in verified each carried id whose issue no longer holds at this head (e.g. a shared edit the merge applied); never re-file one in findings.` : ''}
 4. Concurrency / writer audit where relevant.
 5. ${SMOKE(c)}
-Cross-repo wire contracts are checked separately once every repo is final.
+${CHECKS(tip)}Cross-repo wire contracts are checked separately once every repo is final.
 
 Briefs:
 ${briefs}
 
 ${SEV}
 sha = the ${O}/${r.featureBranch} commit you validated. Ids: V-F1, V-F2, ...; questions for brief conflicts.`,
-      { label: `${n} validate`, phase: 'Whole-branch', agentType: 'validator', model: 'opus', effort: 'high', schema: RECHECK, gated: true }),
+      { label: `${n} validate`, phase: 'Whole-branch', agentType: 'validator', model: 'opus', effort: 'high', schema: RECHECK, gated: true, checks: tip.checks.length }), tip),
   ])
   if (!rev || !val) return fail(!rev ? died('integrated review', `${n} review`) : died('whole-branch validator', `${n} validate`))
   if (!solo && !same(rev.headSha, val.sha)) return fail(`review saw ${rev.headSha}, validator saw ${val.sha}`)
@@ -964,7 +980,7 @@ Return status, ok, verified sha, tests, gateTail, one answer per finding id, que
     if (!fix.ok || fix.status !== 'done') return fail(`whole-branch fix r${round} ${fix.status}: ${fix.tests}`)
     if (!same(head, fix.sha)) sides.push(side)
 
-    const re = await step(
+    const re = judged(await step(
       `Re-check whole-branch fix round ${round} on ${r.repo}, feature branch ${r.featureBranch}: git fetch${FETCH}, then the delta ${head}..${fix.sha}. Trust nothing the author claims.
 ${ACC_RUN(fix.sha)}${same(head, fix.sha) ? 'No delta: skip the delta hunt and judge the answers and declines; still run every suite, the test-integrity check and hygiene at this head.\n' : ''}Findings with claimed resolutions — judge the code first, then read each claim:
 ${JSON.stringify(findings.map(f => ({ ...f, claim: fix.answers.find(a => a.id === f.id) || 'no answer' })))}
@@ -975,13 +991,13 @@ ${GATE_CMD(gates)}
 ${GREEN(c.knownRed, r.repo)} ${FLAKY}
 4. ${HYGIENE(`${head}..${fix.sha}`, r.repo)}
 5. ${SMOKE(c)}
-${RO(r.repo, `wb-recheck${round}`)}
+${CHECKS(tip)}${RO(r.repo, `wb-recheck${round}`)}
 Briefs:
 ${briefs}
 
 ${SEV}
 sha = the commit you checked. verdict pass only if nothing critical or major is open; verified = finding ids confirmed resolved, or whose answer or decline you accept; findings = everything still open (same id for a carried finding, new ids R${round}-F1, ...); questions for brief conflicts.`,
-      { label: `${n} recheck r${round}`, phase: 'Whole-branch', agentType: 'validator', model: 'opus', effort: 'high', schema: RECHECK, gated: true })
+      { label: `${n} recheck r${round}`, phase: 'Whole-branch', agentType: 'validator', model: 'opus', effort: 'high', schema: RECHECK, gated: true, checks: tip.checks.length }), tip)
     if (!re) return fail(died(`recheck r${round}`, `${n} recheck r${round}`))
     if (!same(re.sha, fix.sha)) return fail(`recheck r${round} saw ${re.sha}, the fix pushed ${fix.sha}`)
     noteFlaky(r.repo, re)

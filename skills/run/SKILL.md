@@ -321,7 +321,8 @@ Workflow({
 | `workstreams[].lite` | `false` | for small pure files: implement, then the clean-review validator alone (acceptance tests, full-range test guard, gate, trial merge); no reviewer ever runs. A critical or major it files gets a fix and a delta validation per cycle, capped by `maxCycles` as usual. Still merged, and covered by the whole-branch pass. A lite workstream alone on its untouched base gets no reviewer at all: the integrated review is skipped too, so only validators see it |
 | `workstreams[].humanCheck` | none | instructions for the user's by-eye check. Once this workstream merges, its repo's whole-branch pass waits for the answer; other merges do not (see Human checks) |
 | `workstreams[].files` | none | allowed paths; overlap within a repo throws unless one workstream is ordered `after` the other; merge rejects edits outside |
-| `workstreams[].checks` | none | extra commands (an e2e login, a contract probe) the author, fixer and both workstream validators run via `run-cmd.mjs` with a 540 s cap, reporting the exit code per command; a red or timed-out check is critical. The `gate` itself never gets a deadline |
+| `workstreams[].checks` | none | extra commands (an e2e login, a contract probe) the author, fixer and both workstream validators run via `run-cmd.mjs` with a 540 s cap, reporting the exit code per command in the typed `checkExits` field; the whole-branch validator and each recheck run the checks of every merged, not-dropped workstream (each command once). The script rates the validators' exits: a red or timed-out check that is not known-red turns the gate red, a critical; a red check is never rerun (no flaky rule). A validator red where the author or fixer of that head reported 0 is labelled a false green. A missing or short `checkExits` from a validator is an attempt that never ran its gate. The merge and docs steps run no checks. The `gate` itself never gets a deadline |
+| `workstreams[].knownRedChecks` | none | entries of that workstream's `checks` that are red at the base (any other entry throws): their exit is reported, never a finding. On the merged tip it is the union over the merged workstreams |
 | `workstreams[].quickGate` | none | a faster gate the author and fixer run before each push, and reviewers use for probes. The full `gate` stays mandatory for both workstream validators, the merge, whole-branch fix rounds and rechecks, and docs |
 | `workstreams[].reviewModel` | sonnet→`opus`, opus→`fable` | review model; whole-branch review uses the repo's highest unless `wbReviewModel` is set |
 | `repos[].knownRed` | `[]` | exact test ids red at the base; any other failure is red |
@@ -537,7 +538,9 @@ cap or budget stops, failed merges, a finding that survived its opus fix — eac
 says NOT merged; unpromoted side branches). Then:
 
 - `git ls-remote` every returned `finalSha` against its feature branch before
-  believing it.
+  believing it. Then run each merged workstream's `checks` once yourself at `finalSha`
+  in a throwaway worktree (`node <skill dir>/run-cmd.mjs 540 '<cmd>'`); a red one
+  not in its `knownRedChecks` is a critical: fix-up, then `stage: "wholeBranch"`.
 - Read it; spot-check anything `open`, `extended`, unmerged, a non-`pass`
   verdict, `docs.ok: false`, or a `crossRepo` finding against the code (and the
   docs diffs — docs must describe what shipped, including every review-round

@@ -10,6 +10,8 @@ const budget = { total: null, spent: () => 0, remaining: () => Infinity }
 const push = { status: 'done', ok: true, tests: 't', gateTail: 'exit 0', sharedEdits: [], decisions: [], questions: [], notes: [] }
 const green = { command: 'npm test', green: true, summary: '' }
 const F = (id, severity, kind = 'bug') => ({ id, severity, kind, where: 'a:1', issue: `issue ${id}`, evidence: 'test t1 red' })
+// a validator asked for checkExits reports every check green
+const exits = o => { const n = o.schema.properties.checkExits?.minItems; return n ? { checkExits: Array(n).fill(0) } : {} }
 function mock(sc = {}) {
   const prompts = {}, opts = {}
   const head = {}
@@ -22,12 +24,12 @@ function mock(sc = {}) {
     if (L.endsWith('implement')) return (head[id] = SHA(id.length), { ...push, sha: head[id] })
     if (/fix c(\d)/.test(L)) { const r = { ...push, sha: SHA(10 + +L.at(-1)), answers: [], ...own }; head[id] = r.sha; return r }
     if (/review c\d/.test(L)) return { headSha: head[id], findings: [], ...own }
-    if (/validate c\d/.test(L)) return { headSha: head[id], gate: green, verified: [], open: [], ...own }
+    if (/validate c\d/.test(L)) return { headSha: head[id], gate: green, verified: [], open: [], ...exits(o), ...own }
     if (L.endsWith('merge')) return (head[repo] = SHA(50), { ...push, sha: SHA(50) })
     if (L.endsWith(' review')) return { headSha: head[repo] || SHA(50), findings: [], seams: 'none', ...own }
-    if (L.endsWith(' validate') && o.phase === 'Whole-branch') return { verdict: 'pass', sections: 's', sha: head[repo] || SHA(50), tests: 't', gate: green, findings: [], ...own }
+    if (L.endsWith(' validate') && o.phase === 'Whole-branch') return { verdict: 'pass', sections: 's', sha: head[repo] || SHA(50), tests: 't', gate: green, findings: [], ...exits(o), ...own }
     if (/fix r(\d)/.test(L)) { const r = { ...push, sha: SHA(70 + +L.at(-1)), answers: [], ...own }; head[repo] = r.sha; return r }
-    if (/recheck r\d/.test(L)) return { verdict: 'pass', sections: 's', sha: head[repo], tests: 't', gate: green, findings: [], verified: [], ...own }
+    if (/recheck r\d/.test(L)) return { verdict: 'pass', sections: 's', sha: head[repo], tests: 't', gate: green, findings: [], verified: [], ...exits(o), ...own }
     if (L.endsWith(' docs')) return { baseSha: head[repo], sha: '', files: [], prBody: false, ok: true, tests: 't', notes: [] }
     if (L.endsWith(' promote')) return { ok: true, sha: (p.match(/ to ([0-9a-f]{40})\./) || [])[1], notes: [] }
     throw new Error('unmocked ' + L)
@@ -151,7 +153,7 @@ await t('R4 up-merges are producers only', async () => {
 })
 await t('R8 checks name where exit codes go', async () => {
   const { p } = await go({ cycles: null, skillDir: SKILL, workstreams: [ws('a', { checks: ['true'] })] }, { 'a review c1': () => ({ findings: [F('c1-F1', 'major')] }), 'a validate c1': () => ({ verified: ['c1-F1'] }) })
-  for (const k of ['a implement', 'a fix c1', 'a validate c1']) assert(/exit code per command in gate\.summary \(validators\) or tests \(authors and fixers\)/.test(p[k]), k)
+  for (const k of ['a implement', 'a fix c1', 'a validate c1']) assert(/exit code per command in checkExits/.test(p[k]), k)
 })
 await t('EXTRA hard rules are generic', async () => {
   const { p } = await go({ cycles: null, workstreams: [ws('a'), ws('b', { repo: '/r/two' })] })
