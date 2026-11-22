@@ -146,7 +146,7 @@ await t('5a churn: a regression in a file the fix touched, two rounds in a row, 
   assert(!order.includes('one fix r3') && one.verdict === 'fail' && /heuristic churn/.test(one.escalations.join(' ')))
   assert.deepEqual(one.churn, [{ round: 1, files: ['x.py'] }, { round: 2, files: ['x.py'] }])
   assert(one.open.some(o => o.includes('x.py:12')), 'the stopping round\'s regression is reported open')
-  assert(r.questions.some(q => q.q === 'one: heuristic churn in one: fix rounds 1 and 2 broke x.py (r1, r2) again' && q.default.startsWith('stop and simplify')), JSON.stringify(r.questions)) })
+  assert(r.questions.some(q => q.q === 'one: heuristic churn: fix rounds 1 and 2 broke x.py (r1, r2) again' && !q.q.includes('in one') && q.default.startsWith('stop and simplify')), JSON.stringify(r.questions)) })
 await t('5b churn: a single churn round is recorded and the loop continues', async () => {
   const sc = churnSc([1]); sc['one recheck r2'] = () => ({ verified: ['R1-F1'] })
   const { r, order } = await go({ cycles: 1, wbRounds: 3, workstreams: [ws('a')] }, sc)
@@ -226,9 +226,11 @@ await t('10d decisionLog: pushing agents stop and report a missing log (blocked,
   const { prompts } = await go({ cycles: 1, decisionLog: LOG, workstreams: [ws('a')] }, {})
   assert(prompts['a implement'].includes('File missing or unreadable: a critical finding (kind question), or, if you push, stop and report it (status "blocked", or ok=false with the reason in notes).'))
   assert(!prompts['a implement'].includes('or status "blocked" if you push')) })
-await t('10e acceptance: validators never waive a row from a decision-log line', async () => {
-  const { prompts } = await go({ cycles: 1, acceptance: TBL, workstreams: [ws('a')] }, {})
-  assert(prompts['a validate c1'].includes('The known-gap exemption never covers a row. A decision-log line never waives a row; only a changed table does.')) })
+await t('10e acceptance: validators never waive a row from a decision-log line, and say so only when a decision log is set', async () => {
+  const both = await go({ cycles: 1, acceptance: TBL, decisionLog: LOG, workstreams: [ws('a')] }, {})
+  assert(both.prompts['a validate c1'].includes('The known-gap exemption never covers a row. A decision-log line never waives a row; only a changed table does.'))
+  const acc = await go({ cycles: 1, acceptance: TBL, workstreams: [ws('a')] }, {})
+  assert(acc.prompts['a validate c1'].includes('The known-gap exemption never covers a row.') && !acc.prompts['a validate c1'].includes('decision-log line never waives')) })
 await t('10f stopRule: the whole-branch recheck files each break a fix introduced as a regression; no text without it', async () => {
   const sr = await go({ cycles: 1, stopRule: SR, workstreams: [ws('a')] }, busyAcc)
   const step2 = sr.prompts['one recheck r1'].split('\n').find(l => l.startsWith('2. Hunt regressions the fixes introduced.'))
@@ -242,7 +244,7 @@ await t('10g churn: the question names each round\'s files', async () => {
   const { r, order } = await go({ cycles: 1, wbRounds: 3, workstreams: [ws('a')] }, sc)
   assert(!order.includes('one fix r3'))
   const q = r.questions.find(q => /heuristic churn/.test(q.q))
-  assert.equal(q?.q, 'one: heuristic churn in one: fix rounds 1 and 2 broke a.py (r1), b.py (r2) again') })
+  assert.equal(q?.q, 'one: heuristic churn: fix rounds 1 and 2 broke a.py (r1), b.py (r2) again') })
 await t('10h churn: a where that names path:line after text ("in x.py:12") counts', async () => {
   const sc = churnSc([1, 2]); for (const k of [1, 2]) sc[`one recheck r${k}`] = () => ({ verdict: 'fail', findings: [{ ...F(`R${k}-F1`, 'major', `in x.py:${10 + k}`), kind: 'regression' }] })
   const { r, order } = await go({ cycles: 1, wbRounds: 3, workstreams: [ws('a')] }, sc)

@@ -104,9 +104,10 @@ for (const c of A.repos || []) {
   if (c.reviewSharedEdits != null && typeof c.reviewSharedEdits !== 'boolean') throw new Error(`repos ${c.repo}: reviewSharedEdits must be a boolean`)
   // the script can't run git: whether each path is ignored is checked by every agent that copies it
   if (c.copyExcluded != null && !(Array.isArray(c.copyExcluded) && c.copyExcluded.every(p => typeof p === 'string' && p.trim() && p === p.trim() && !p.startsWith('/') && !p.startsWith('~') && !p.split('/').includes('..')))) throw new Error(`repos ${c.repo}: copyExcluded must be an array of paths inside the repo (relative, no ..)`)
+  if (c.commitPrefix != null && !(typeof c.commitPrefix === 'string' && /^[^\n\r"]+$/.test(c.commitPrefix))) throw new Error(`repos ${c.repo}: commitPrefix must be a non-empty string without a newline or a quote`)
   CONF[norm(c.repo)] = c
 }
-const conf = repo => ({ knownRed: [], hot: HOT, regen: '', smoke: '', smokeTimeout: RUN_SECS, copyExcluded: [], ...CONF[repo] })
+const conf = repo => ({ knownRed: [], hot: HOT, regen: '', smoke: '', smokeTimeout: RUN_SECS, copyExcluded: [], ...CONF[repo], commitPrefix: CONF[repo]?.commitPrefix ?? '' })
 // The script can't learn its own path, so the coordinator passes the skill's base directory for run-cmd.mjs.
 if ((W.some(w => w.checks) || Object.values(CONF).some(c => c.smoke)) && !/^\//.test(A.skillDir || '')) throw new Error('skillDir (the skill\'s absolute base directory) is required when a repo has smoke or a workstream has checks')
 const repoMap = {}
@@ -116,6 +117,10 @@ for (const r of REPOS)
   if (r.ws.some(w => w.featureBranch !== r.featureBranch || w.base !== r.base)) throw new Error(`${r.repo}: workstreams disagree on featureBranch/base`)
 const DOCS = (A.docsRepos || REPOS).map(d => ({ repo: d.repo && norm(d.repo), featureBranch: d.featureBranch, base: d.base || repoMap[d.repo && norm(d.repo)]?.base || 'main', gate: d.gate || '' }))
 for (const d of DOCS) if (!d.repo || !d.featureBranch) throw new Error('docsRepos items need {repo, featureBranch, base?, gate?}')
+// the gate runs under pipefail: a reader that exits early (head, grep -q) makes the writer die of SIGPIPE (exit 141), which reads red
+const EARLY_EXIT = /\|\s*(head\b|grep\s+(-\w*q|--quiet))/
+for (const [who, g] of [...W.flatMap(w => [[`workstream ${w.id}`, w.gate], [`workstream ${w.id}`, w.quickGate]]), ...DOCS.map(d => [`docsRepos ${d.repo}`, d.gate])])
+  if (EARLY_EXIT.test(g || '')) throw new Error(`${who}: the gate pipes into head or grep -q: under the pipefail wrapper the writer gets SIGPIPE (exit 141) and the gate reads red; use tail, or redirect to a file`)
 // carryForward: what git cannot say, handed from a paused or incomplete result to its resume (findings, settled ledgers, passed whole-branch passes)
 const CF = A.carryForward || {}
 if (typeof CF !== 'object' || Array.isArray(CF)) throw new Error('carryForward must be the carryForward object of the result being resumed')
@@ -200,11 +205,11 @@ const LADDER = 'Ladder-first (reuse > stdlib > native > one line > minimum code)
 const SEV_038 = 'Severity: critical = wrong behaviour, data loss, security, broken contract or red gate; major = real bug or design flaw; minor = the rest. Critical and major block the merge. Report only real issues; an empty list means clean.'
 // explicit severities no stop rule or acceptance table lowers
 const KEEP = 'Checks these instructions rate explicitly (hygiene, test integrity, smoke, checks) keep that severity, a broken wire contract between repos stays critical, and a break between workstreams (kind integration) stays major.'
-const SEV = A.stopRule ? `Stop rule: critical or major only for a regression vs the base branch (behaviour that works at the base and breaks at this head) or a wrong action: ${A.stopRule}. Security and data loss stay critical. ${KEEP} A miss the base also has is a known gap: minor, whatever its kind. Critical and major block the merge. Report only real issues; an empty list means clean.` : SEV_038
+const SEV = A.stopRule ? `Stop rule: critical or major only for a regression (behaviour that works at the base branch, or worked before a fix made in this run, and breaks at this head) or a wrong action: ${A.stopRule}. Security and data loss stay critical. ${KEEP} A miss the base also has is a known gap: minor, whatever its kind. Critical and major block the merge. Report only real issues; an empty list means clean.` : SEV_038
 const STOP_FIX = A.stopRule ? 'Stop rule in force: a minor that is a known gap (the base has the same miss): decline it as "known gap"; never add a word list, pattern or matcher branch for it.\n' : ''
 const ACC_READ = A.acceptance ? `Acceptance table (user-approved, binding): ${A.acceptance}. Read it before you change code; your change must satisfy every row that touches it. File missing or unreadable: stop with status "blocked" and say so in notes.\n` : ''
 const ACC_REVIEW = A.acceptance ? `Acceptance table: ${A.acceptance} (read it). Rate a finding critical or major only if it breaks a row of the acceptance table or is a regression vs the base branch${A.stopRule ? ' or is a wrong action under the stop rule' : ''}; anything else is minor (this overrides the severity definitions below). The known-gap exemption never covers a row. Security, data loss and a red gate stay critical. ${KEEP}\n` : ''
-const ACC_RUN = sha => A.acceptance ? `Acceptance table: ${A.acceptance}. Before judging anything else, run every row of the acceptance table that this change touches, black-box, at ${sha}: the row's input against the public interface, compared to its expected action. A failing row is a finding (kind bug, severity major, evidence = the row and the output). A failing row is major even when the base fails it too. The known-gap exemption never covers a row. A decision-log line never waives a row; only a changed table does. File missing or unreadable: a critical finding (kind question).\n` : ''
+const ACC_RUN = sha => A.acceptance ? `Acceptance table: ${A.acceptance}. Before judging anything else, run every row of the acceptance table that this change touches, black-box, at ${sha}: the row's input against the public interface, compared to its expected action. A failing row is a finding (kind bug, severity major, evidence = the row and the output). A failing row is major even when the base fails it too. The known-gap exemption never covers a row. ${A.decisionLog ? 'A decision-log line never waives a row; only a changed table does. ' : ''}File missing or unreadable: a critical finding (kind question).\n` : ''
 const DROP = 'Drop (do not downgrade): issues that predate the diff and are not made worse by it, anything the repo\'s linter/formatter catches, code the plan or brief explicitly allows, pure style with no correctness, safety or maintainability cost. A comment added in this diff is a claim to grill, never a reason to drop a finding; do not flag `shortcut:` comments themselves.'
 const EVIDENCE = 'A critical or major of kind bug, regression or integration with evidence "none" and not resolved at this head: reproduce it here. Reproduced: keep it blocking with your evidence; otherwise return it still open with the same id, demoted to minor. Design, question and overengineering kinds are exempt.'
 const LENSES = grill => `Lenses:
@@ -445,7 +450,7 @@ ${NOT_FEATURE}
 No worktree, no checkout, no commits; never touch the user's checkout of ${repo}. ${HARD}
 Return ok, the remote sha of ${branch} and notes (every step not done and why; empty when all succeeded).`,
     { label, phase, agentType: 'implementer', model: 'sonnet', effort: 'low', schema: PROMOTED })
-  if (!(p?.ok && same(p.sha, to))) return p ? p.notes.join('; ') || `${branch} is at ${p.sha}` : 'promote agent died 3 times'
+  if (!(p?.ok && same(p.sha, to))) return p ? p.notes.join('; ') || `${branch} is at ${p.sha}` : died('promote agent', label)
   leftovers[repo] = [...(leftovers[repo] || []), ...p.notes.map(x => `${label}: ${x}`)]
   return ''
 }
@@ -775,8 +780,8 @@ Set up: worktree merge-${w.id}, detached at ${O}/${w.featureBranch} (fetch first
 If ${out.validatedSha} is already an ancestor of ${O}/${w.featureBranch} (git merge-base --is-ancestor), it is merged, never a failure ("Already up to date"): skip steps 2 and 3, apply in step 4 only the edits the branch does not carry yet, and return status "done", ok = true, alreadyMerged = true, sha = the ${w.featureBranch} head you leave (pushed or unchanged).
 2. ${backstop.length ? `Backstop: ${backstop.join(' and ')} must each print nothing. Otherwise ok=false, status "failed", the offending paths in notes.` : 'No backstop paths for this repo.'}
 3. git merge --no-ff ${out.validatedSha} -m "Merge ${w.branch} into ${w.featureBranch}". On conflict: git merge --abort, remove the worktree, ok=false, status "failed", the conflicting files in notes.
-4. ${out.sharedEdits.length ? `Apply these shared-file edits on top of the merge, keeping what earlier merges put in those files${out.merged ? ' (this workstream merged before: skip an edit the branch already carries)' : ''} (a generated file is regenerated with the repo's own tooling, never hand-merged); one commit "Update shared files for ${w.id}":\n${JSON.stringify(out.sharedEdits)}` : 'No shared-file edits.'}
-5. ${c.regen ? `Regenerate generated files: ${c.regen}\nCommit any change as "Regenerate generated files".` : 'No regen recipe for this repo.'}
+4. ${out.sharedEdits.length ? `Apply these shared-file edits on top of the merge, keeping what earlier merges put in those files${out.merged ? ' (this workstream merged before: skip an edit the branch already carries)' : ''} (a generated file is regenerated with the repo's own tooling, never hand-merged); one commit "${c.commitPrefix}Update shared files for ${w.id}":\n${JSON.stringify(out.sharedEdits)}` : 'No shared-file edits.'}
+5. ${c.regen ? `Regenerate generated files: ${c.regen}\nCommit any change as "${c.commitPrefix}Regenerate generated files".` : 'No regen recipe for this repo.'}
 ${GATE(w.gate, c.knownRed, w.repo)}
 Red gate: do not push, return ok=false with the failure.
 ${HYGIENE(`${O}/${w.featureBranch}..HEAD`, w.repo)}
@@ -938,7 +943,7 @@ Never merge a workstream branch: an unmerged workstream is the coordinator's cal
 ${ACC_READ}${LADDER}
 ${GATE(gates, c.knownRed, r.repo)}
 ${GIT(r.repo, `wb-fix${round}`)}
-In notes, name each workstream of this run whose brief reads or edits a file you changed (<file>: <workstream ids>), so a later brief carries the new behaviour.
+In notes, list each file you changed as "changed: <path>".
 Return status, ok, verified sha, tests, gateTail, one answer per finding id, questions and notes; sharedEdits and decisions empty.`,
       { label: `${n} fix r${round}`, phase: 'Whole-branch', agentType: 'implementer', model: top(r.ws.map(w => w.model)), schema: FIXED })
     if (!fix) return fail(unusable(`whole-branch fix r${round}`, side, `${n} fix r${round}`))
@@ -989,7 +994,7 @@ sha = the commit you checked. verdict pass only if nothing critical or major is 
       const stop = 'stop and simplify: one predicate with one owner, re-run stage wholeBranch'
       const pairs = res.churn.slice(-2).flatMap(c => c.files.map(f => [f, c.round]))
       const broke = [...new Set(pairs.map(([f]) => f))].map(f => `${f} (${pairs.filter(([g]) => g === f).map(([, k]) => `r${k}`).join(', ')})`).join(', ')
-      res.questions.push({ q: `heuristic churn in ${n}: fix rounds ${round - 1} and ${round} broke ${broke} again`, options: [stop, 'run more fix rounds'], default: stop })
+      res.questions.push({ q: `heuristic churn: fix rounds ${round - 1} and ${round} broke ${broke} again`, options: [stop, 'run more fix rounds'], default: stop })
       return fail(`heuristic churn: rounds ${round - 1}-${round} broke ${broke}`)
     }
   }
@@ -1061,7 +1066,7 @@ Sections (verdict per section):
 ${SEV}
 Ids: X-F1, X-F2, ...`,
     { label: 'contracts', phase: 'Contracts', agentType: 'validator', model: 'opus', effort: 'high', schema: CONTRACT })
-    .then(x => x || { verdict: 'fail', sections: 'contract validator died 3 times', findings: [] }),
+    .then(x => x || { verdict: 'fail', sections: died('contract validator', 'contracts'), findings: [] }),
   () => parallel(DOCS.map(d => async () => {
     if (!shipped || paused || skipped.has(d.repo)) return null
     // docs build on the validated head only; a failed pass may have its fixes on a side branch
@@ -1080,7 +1085,7 @@ ${PINS}
 Set up: worktree docs-sync, detached at ${O}/${d.featureBranch}; push to the side branch ${side}, never to ${d.featureBranch}: it fast-forwards to your commit only after a validator passes it. If ${O}/${side} already exists and contains ${O}/${d.featureBranch}, an earlier attempt of this step pushed it: continue from it; otherwise it is a leftover of an earlier run: delete it first (git push ${O} --delete ${side}).
 1. Update in ${d.repo}: README / docs / runbooks (new or changed env vars with prod-required secrets first, endpoints, contract fields, defaults flipped in review, deleted scaffolding, behaviour changed for existing clients); design/spec docs if this repo holds them (rows whose box, trigger or status moved).
 2. ${A.localOnly ? 'Local-only run: no PR exists and gh never runs; skip this step.' : `If a PR already exists for ${d.featureBranch} (gh pr view), update its body (placement table, test plan, claims the fixes made false) with gh pr edit — never create a PR.`}
-3. Knowledge graph, if graphify-out/ exists: graphify update . (add --force if the branch deleted files; never --update or semantic mode); reset line 1 of graphify-out/GRAPH_REPORT.md to the repo name (never a worktree name); drop manifest changes that are mtime-only; commit only graph.json, GRAPH_REPORT.md, manifest.json and .graphify_labels.json as "Refresh the knowledge graph". No graphify-out/: skip.
+3. Knowledge graph, if graphify-out/ exists: graphify update . (add --force if the branch deleted files; never --update or semantic mode); reset line 1 of graphify-out/GRAPH_REPORT.md to the repo name (never a worktree name); drop manifest changes that are mtime-only; commit only graph.json, GRAPH_REPORT.md, manifest.json and .graphify_labels.json as "${conf(d.repo).commitPrefix}Refresh the knowledge graph". No graphify-out/: skip.
 4. ${gate ? `${GATE(gate, knownRed, d.repo)}\nRun it after the graph refresh. Red gate: do not push, ok=false.` : 'No gate for this repo.'}
 5. Before pushing: ${HYGIENE(`${O}/${d.featureBranch}..HEAD`, d.repo)}
 Nothing stale and the graph unchanged: no commit, empty sha, ok=true.
@@ -1109,16 +1114,18 @@ sha = the commit you validated. Ids: D-F1, D-F2, ...`,
     return { ...o, verdict: why ? 'fail' : 'pass', findings: why ? [...findings, { id: 'D-P', severity: 'critical', kind: 'docs', where: side, issue: `validated docs not promoted to ${d.featureBranch}: ${why}`, evidence: 'the promote step' }] : findings }
   })),
   async () => driftRan ? step(
-    `${PINS}
+    `Drift audit, read-only: find every user-visible change that no decision-log line and no brief clause covers.
+${PINS}
 ${REPOS.map(r => `${r.repo}: base ${O}/${r.base}`).join('\n')}
 ${W.map(w => `## ${w.id}\n${w.brief}`).join('\n\n')}
 Read the decision log ${A.decisionLog}. For each repo, list every user-visible change in ${O}/<base>...<pinned sha> (copy, spoken or printed lines, defaults, prompts, thresholds, UI, removed hints or options). Map each one to a decision-log line or a brief clause. Return in drift only the changes with neither.
+If you cannot read the decision log or a repo: ok=false, the reason in notes; still list what you could check.
 ${RO(REPOS[0].repo, 'drift')}`,
     { label: 'drift', phase: 'Drift audit', agentType: 'reviewer', model: 'fable', schema: DRIFT_OUT }) : null,
 ])
 // a failed audit's items are dropped: with the log unread every change looks undecided, and each item's default is a revert
 const drift = !driftRan ? { verdict: 'skipped', items: [], sections: '', notes: driftShort ? ['token budget below the reserve'] : [] }
-  : !driftOut ? { verdict: 'died', items: [], sections: '', notes: ['drift agent died 3 times'] }
+  : !driftOut ? { verdict: 'died', items: [], sections: '', notes: [died('drift agent', 'drift')] }
   : { verdict: !driftOut.ok ? 'failed' : driftOut.drift.length ? 'drift' : 'pass', items: driftOut.ok ? driftOut.drift : [], sections: driftOut.sections, notes: driftOut.notes }
 
 const brief = f => `${f.severity} ${f.where}: ${f.issue}${f.also ? ` (+ ${f.also.severity} ${f.also.id} at ${f.also.where})` : ""}`
@@ -1129,7 +1136,7 @@ const docsOf = repo => {
   if (j < 0 || !shipped || paused || skipped.has(repo)) return null
   const d = docs?.[j]
   const verdict = d?.verdict || (d?.sha ? 'fail' : 'n/a')
-  return d ? { sha: d.sha, files: d.files, prBody: d.prBody, ok: d.ok, tests: d.tests, notes: d.sha && verdict !== 'pass' ? [...d.notes, `not promoted: docs commit ${d.sha} stays on ${DOCS[j].featureBranch}--docs`] : d.notes, verdict, findings: d.findings || [] } : { sha: '', files: [], prBody: false, ok: false, tests: '', notes: ['docs agent died 3 times'], verdict: 'fail', findings: [] }
+  return d ? { sha: d.sha, files: d.files, prBody: d.prBody, ok: d.ok, tests: d.tests, notes: d.sha && verdict !== 'pass' ? [...d.notes, `not promoted: docs commit ${d.sha} stays on ${DOCS[j].featureBranch}--docs`] : d.notes, verdict, findings: d.findings || [] } : { sha: '', files: [], prBody: false, ok: false, tests: '', notes: [died('docs agent', `${name(repo)} docs`)], verdict: 'fail', findings: [] }
 }
 const docsOut = d => d && { ...d, findings: d.findings.map(brief) }
 // Contracts have no fix loop: an open cross-repo blocker is the user's call, with the contract check's own recipe.
@@ -1155,7 +1162,7 @@ return {
     const d = docsOf(r.repo)
     // docs that fail validation or promotion never reach the branch and fail the repo; so does a docs agent that died 3 times
     const docsFailed = d && (d.sha ? d.verdict !== 'pass' : d.verdict === 'fail')
-    return { ...r, verdict: docsFailed ? 'fail' : r.verdict, escalations: [...r.escalations, ...(docsFailed ? [d.sha ? `docs commit ${d.sha} left unpromoted on ${r.featureBranch}--docs` : 'docs agent died 3 times; docs not synced'] : [])], open: [...r.open, ...(d?.findings || [])].map(brief), questions: uniqQ(r.questions), notes: uniq([...r.notes, ...(leftovers[r.repo] || [])]), findings: [...r.findings, ...asLedger('docs', d?.findings)], docs: docsOut(d), finalSha: (d?.verdict === 'pass' && d.sha) || r.sha, flaky: flakyOf(r.repo) }
+    return { ...r, verdict: docsFailed ? 'fail' : r.verdict, escalations: [...r.escalations, ...(docsFailed ? [d.sha ? `docs commit ${d.sha} left unpromoted on ${r.featureBranch}--docs` : `${died('docs agent', `${name(r.repo)} docs`)}; docs not synced`] : [])], open: [...r.open, ...(d?.findings || [])].map(brief), questions: uniqQ(r.questions), notes: uniq([...r.notes, ...(leftovers[r.repo] || [])]), findings: [...r.findings, ...asLedger('docs', d?.findings)], docs: docsOut(d), finalSha: (d?.verdict === 'pass' && d.sha) || r.sha, flaky: flakyOf(r.repo) }
   }),
   // crossRepo.ledger is the result key, not the prompt-side ledger of settled findings inside runWorkstream
   drift,

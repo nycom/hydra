@@ -139,7 +139,7 @@ await t('4a a carried finding stops counting: the workstream merges on the next 
   assert(a.merged && a.cyclesRun === 2 && a.handed.length === 1 && a.findings.find(e => e.id === 'c1-F1')?.status === 'carried', JSON.stringify(a))
   assert(/answer it "carried"/.test(prompts['a fix c1']) && /Handed to the whole-branch pass .*c1-F1/.test(prompts['a validate c1']))
   assert(!/Needing anything else is status "blocked"|a blocker outside your files is status "blocked"/.test(prompts['a fix c1']) && /a blocker outside your files is answered "carried"/.test(prompts['a fix c1']), 'the fix prompt never also tells a files[] workstream to block on an out-of-files fix')
-  assert(order.includes('one fix r1') && prompts['one fix r1'].includes('"a:c1-F1"') && /name each workstream of this run whose brief reads or edits a file you changed/.test(prompts['one fix r1']), order.join()) })
+  assert(order.includes('one fix r1') && prompts['one fix r1'].includes('"a:c1-F1"') && /list each file you changed as "changed: <path>"/.test(prompts['one fix r1']), order.join()) })
 await t('4b (control) with no files[] declared, "carried" is not offered and the finding stays open', async () => {
   const { r, prompts } = await go({ cycles: 1, maxCycles: 1, workstreams: [ws('a', { files: undefined })] }, outside)
   assert(!/answer it "carried"/.test(prompts['a fix c1']) && /a blocker outside your files is status "blocked"/.test(prompts['a fix c1']) && !W(r, 'a').merged) })
