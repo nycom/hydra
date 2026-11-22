@@ -45,6 +45,8 @@ Opt-in, per run (details and every arg in `skills/run/SKILL.md`):
 - `decisions`: the user's answer to a blocked workstream's question, on a resume; that same workstream resumes at implement with the answer in its brief.
 - `repos[].copyExcluded`: git-ignored files the gate needs (a local preview test) are copied into every agent worktree and never committed.
 - `repos[].reviewSharedEdits: true`: the shared-file edits each merge applies get their own gate and validator before the next merge.
+- `repos[].commitPrefix`: optional non-empty string with no newline or quote, put before the merge step's fixed subjects (shared-file edits, regenerated files) and the docs step's graph refresh; the merge commit subject is unchanged.
+- A gate must not pipe into `head` or `grep -q` (SIGPIPE, exit 141); the script rejects both.
 - `stopRule` + `acceptance`: a string of wrong actions and an approved case table; reviewers block only on those and on regressions vs the base, validators run each row black-box.
 - `decisionLog`: the user's answers become binding for every agent, and a read-only drift audit after the run turns each unlogged change into a revert-by-default question.
 - `wbReviewModel`: pick the integrated whole-branch review model (cheaper on intermediate passes, top tier on the pass expected to close clean).
