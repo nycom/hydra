@@ -46,8 +46,8 @@ for (const w of W) for (const id of w.after || []) {
 const ordered = (w, path = []) => { if (path.includes(w.id)) throw new Error(`after forms a cycle: ${[...path, w.id].join(' -> ')}`); for (const id of w.after || []) ordered(byId[id], [...path, w.id]) }
 W.forEach(w => ordered(w))
 // dropped: workstreams the user dropped; the rest merges and these are listed as not done
-const DROPPED = new Set(A.dropped || [])
 if (A.dropped != null && !(Array.isArray(A.dropped) && A.dropped.every(x => typeof x === 'string'))) throw new Error('dropped must be an array of workstream ids')
+const DROPPED = new Set(A.dropped || [])
 for (const id of DROPPED) if (!byId[id]) throw new Error(`dropped: no workstream ${id}`)
 for (const w of W) for (const id of w.after || []) if (DROPPED.has(id) && !DROPPED.has(w.id)) throw new Error(`workstream ${w.id}: after ${id}, which is dropped: drop it too or remove the after`)
 if (A.localOnly != null && typeof A.localOnly !== 'boolean') throw new Error('localOnly must be a boolean')
@@ -146,6 +146,10 @@ for (const [repo, x] of Object.entries(CF_REPOS)) {
 // restored ids get a p: prefix, so a restarted review's new c1-F1 (or a re-merge's S-<id>-m1-F1) never collides with the earlier call's
 const prior = f => ({ ...f, id: `p:${f.id}` })
 const CF_WS = Object.fromEntries(Object.entries(CF.workstreams || {}).map(([id, x]) => [id, Object.fromEntries(['handed', 'open', 'findings'].map(k => [k, (x[k] || []).map(prior)]))]))
+// known debt: the stuck-finding question's answer "accept <finding id> ... as known debt" settles that carried finding for good
+const DEBT = Object.fromEntries(Object.entries(DECIDE).map(([id, a]) => [id, a.match(/\baccept (\S+)[^]*?\bas known debt\b/i)?.[1]]).filter(([, f]) => f))
+for (const [id, f] of Object.entries(DEBT))
+  if (!CF_WS[id]?.findings.some(e => e.id === `p:${f}`)) throw new Error(`decisions.${id} accepts ${f} as known debt, but carryForward has no such finding of ${id}: pass the stuck run's carryForward`)
 const name = repo => repo.split('/').pop()
 const STALE = `Read other repos ONLY via git -C <repo> fetch ${O}, then git -C <repo> show ${O}/<featureBranch>:<path> or git -C <repo> diff ${O}/<base>...${O}/<featureBranch> — never by filesystem path: those checkouts sit on unrelated branches.`
 
@@ -387,7 +391,7 @@ const serialized = (repo, fn) => (lock[repo] = (lock[repo] || Promise.resolve())
 const blocking = f => f.severity !== 'minor' || (!!f.also && f.also.severity !== 'minor') // an absorbed blocker keeps its entry blocking
 // The result's findings ledger: each id keeps the stage that first raised it, its latest text, and a status
 // (open until a validator verifies the fix, answer or decline; a red gate counts fixed once the next gate is green).
-const STATUS = ['fixed', 'declined', 'answered', 'carried'] // an escalated finding stays open: it is the user's call; carried = handed to the whole-branch pass
+const STATUS = ['fixed', 'declined', 'answered', 'carried', 'debt'] // an escalated finding stays open: it is the user's call; carried = handed to the whole-branch pass; debt = accepted by the user
 const track = (book, stage, fs) => { for (const f of fs) { const e = book.find(x => x.id === f.id); const n = { id: f.id, stage: e?.stage || stage, severity: f.severity, kind: f.kind, where: f.where, issue: f.issue, status: 'open' }; e ? Object.assign(e, n) : book.push(n) } }
 const settle = (book, id, action) => { const e = book.find(x => x.id === id); if (e) e.status = STATUS.includes(action) ? action : 'open' }
 const settleGate = (book, gate) => { if (gate.green) for (const e of book) if (e.where === 'gate' && e.status === 'open') e.status = 'fixed' }
@@ -499,6 +503,7 @@ async function runWorkstream(w) {
   const cf = CF_WS[w.id]
   if (cf) {
     book.push(...cf.findings)
+    for (const e of book) if (e.id === `p:${DEBT[w.id]}`) { e.status = 'debt'; out.notes.push(`known debt (accepted by the user): ${e.id} (${e.where}: ${e.issue})`) }
     ledger.push(...book.filter(e => STATUS.includes(e.status)).map(({ id, where, issue, status }) => ({ id, where, issue, status })))
     out.handed.push(...cf.handed)
   }
@@ -529,7 +534,7 @@ async function runWorkstream(w) {
   // A seam blocker in a merged workstream's files is this author's to fix; files of workstreams not merged yet never are.
   const integration = () => {
     const done = mergedInto[w.repo] || []
-    const pending = W.filter(x => x.repo === w.repo && x !== w && !done.includes(x) && !dependsOn(x, w.id))
+    const pending = W.filter(x => x.repo === w.repo && x !== w && !done.includes(x) && !(dependsOn(x, w.id) && x.files?.some(f => w.files?.some(g => overlaps(f, g)))))
     return done.length
       ? `Integration fix: if a critical or major can only be fixed in files owned by workstreams already merged into ${w.featureBranch} — ${owners(done)} — first git merge ${O}/${w.featureBranch} into your branch, then fix those files too (the one exception to your file list; say so in notes).${pending.length ? ` Never touch files owned by workstreams not merged yet: ${owners(pending)}.` : ''}`
       : `No workstream has merged into ${w.featureBranch} yet; a blocker outside your files is ${w.files ? 'answered "carried" (see above)' : 'status "blocked" with a question'}.`
@@ -625,6 +630,8 @@ Return status ("done" only when the gate is green and the push verified, or noth
   // same id, or same where; every red-gate finding has where 'gate', so that sentinel never matches by where (as in unaccounted)
   const sameFinding = (a, b) => a.id === b.id || (a.where !== 'gate' && a.where === b.where)
   const triesOf = f => tries.find(t => sameFinding(t, f))
+  const debt = book.filter(e => e.status === 'debt')
+  const live = fs => fs.filter(f => !debt.some(d => sameFinding(d, f))) // a re-filed known debt is settled, never cycled again
   let landings = 0 // merges of this workstream that landed
   // the shared-edits check, the human check and workstreams ordered after this one read the merge's sha
   const readsMergeSha = !!(c.reviewSharedEdits || w.humanCheck || W.some(x => x.after?.includes(w.id)))
@@ -652,7 +659,7 @@ New finding ids: c${i}-F1, c${i}-F2, ...`,
       track(book, 'review', rev.findings)
       // Clean needs both: nothing blocking in this review AND nothing blocking left by the last validation.
       // Only a validator can clear a carried critical/major; a reviewer that drops one doesn't.
-      let found = [...rev.findings, ...carry.filter(f => blocking(f) && !rev.findings.some(g => g.id === f.id))]
+      let found = live([...rev.findings, ...carry.filter(f => blocking(f) && !rev.findings.some(g => g.id === f.id))])
 
       if (!found.some(blocking)) {
         if (same(out.validatedSha, out.sha)) { carry = found; break } // converged on a validated head; minors carried, not cycled
@@ -677,7 +684,7 @@ Return headSha, gate, evidence, verified (empty), open (ids v${i}-F1, ...) and q
         out.evidence[`validate c${i}`] = val.evidence
         out.questions.push(...(val.questions || []))
         noteFlaky(w.repo, val)
-        const raised = [...val.open, ...redGate(val, `v${i}-G`)]
+        const raised = live([...val.open, ...redGate(val, `v${i}-G`)])
         track(book, 'validate', raised)
         found = [...found, ...raised]
         out.validatedSha = out.sha
@@ -698,7 +705,7 @@ ${ESCALATE}
 ${ACC_READ}${STOP_FIX}${RO_TESTS}
 Minor: fix only if it is a one-liner inside your files, otherwise decline with a reason — declining is a valid outcome.
 Keep fixes minimal and inside this workstream's files.
-${w.files ? 'A critical or major whose only fix lies outside the files you may edit (a pre-existing test, or a file the integration-fix exception below does not give you): change nothing for it and answer it "carried", naming that file in the note; the whole-branch pass fixes it, and it stops counting toward this workstream\'s cycles.\n' : ''}Nothing to change (all answered, declined or escalated): no commit, no push, sha = the current ${O}/${w.branch} head (${prev} unless an earlier attempt moved it), ok = true.
+${w.files ? 'A critical or major whose only fix lies outside the files you may edit (a pre-existing test, or a file the integration-fix exception below does not give you): change nothing for it and answer it "carried", naming that file in the note; once the validator agrees, the whole-branch pass fixes it and it leaves your cycles.\n' : ''}Nothing to change (all answered, declined or escalated): no commit, no push, sha = the current ${O}/${w.branch} head (${prev} unless an earlier attempt moved it), ok = true.
 ${SHARED(c, w.files, true)}
 ${integration()}
 sharedEdits: return the complete current list; it replaces the earlier one${out.sharedEdits.length ? `, so keep every entry still needed from:\n${JSON.stringify(out.sharedEdits)}` : ''}.
@@ -749,7 +756,7 @@ Return headSha, gate, evidence, verified (ids confirmed resolved, or whose answe
             settle(book, f.id, status)
           }
         settleGate(book, val.gate)
-        carry = [...val.open, ...redGate(val, `v${i}-G`), ...unaccounted(found, val.verified, val.open)].filter(f => !out.handed.some(h => h.id === f.id))
+        carry = live([...val.open, ...redGate(val, `v${i}-G`), ...unaccounted(found, val.verified, val.open)]).filter(f => !out.handed.some(h => h.id === f.id))
         track(book, 'validate', carry)
         out.validatedSha = fix.sha
         for (const g of found)

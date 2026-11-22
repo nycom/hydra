@@ -129,6 +129,20 @@ await t('C1.4f the stuck-finding question: drop names dropped, known debt names 
   assert(q.options.some(o => o.startsWith('accept it as known debt (re-run with decisions.a = "accept c1-F1 (x.py:3) as known debt"')), JSON.stringify(q.options))
   assert(q.default === q.options[0] && a.decision?.questions[0] === q && /decisions\.a = /.test(a.decision.answer) && /dropped: \["a"\]/.test(a.decision.answer), JSON.stringify(a.decision)) })
 
+await t('C1.4g known debt: the resume settles the accepted finding, never fixes it again, merges and lists it as known debt', async () => {
+  const first = await go({ cycles: null, workstreams: [ws('a')] }, stubborn)
+  const { r, order } = await go({ cycles: null, resume: 'run-1', carryForward: first.r.carryForward, decisions: { a: 'accept c1-F1 (x.py:3) as known debt' }, workstreams: [ws('a')] }, stubborn)
+  const a = W(r, 'a')
+  assert(a.merged && a.findingsFixed === 0 && !order.includes('a fix c1') && r.repos[0].verdict === 'pass', JSON.stringify({ a, order }))
+  assert(a.findings.find(e => e.id === 'p:c1-F1')?.status === 'debt' && a.notes.includes('known debt (accepted by the user): p:c1-F1 (x.py:3: issue c1-F1)'), JSON.stringify(a))
+  await rejects({ cycles: null, resume: 'run-1', decisions: { a: 'accept c1-F1 (x.py:3) as known debt' }, workstreams: [ws('a')] }, /decisions\.a accepts c1-F1 as known debt, but carryForward has no such finding of a/) })
+await t('C1.4h (control) a plain decision is no known debt: the restored blocker still runs the fix loop', async () => {
+  const first = await go({ cycles: null, workstreams: [ws('a')] }, stubborn)
+  const { order } = await go({ cycles: null, resume: 'run-1', carryForward: first.r.carryForward, decisions: { a: 'change the brief: x.py:3 may keep its old shape' }, workstreams: [ws('a')] }, stubborn)
+  assert(order.includes('a fix c1'), order.join()) })
+await t('C1.4i a non-array dropped gets the argument error, not a raw TypeError', async () => {
+  for (const d of [5, true, { a: 1 }]) await rejects({ cycles: 1, dropped: d, workstreams: [ws('a')] }, /^dropped must be an array of workstream ids$/) })
+
 // ---- friction (a): files[] overlap allowed between after-ordered workstreams ----
 await t('FA after-ordered workstreams may share files; the merge backstop names each path once', async () => {
   const { r, prompts } = await go({ cycles: 1, workstreams: [ws('a', { files: ['big.js'] }), ws('b', { files: ['big.js'], after: ['a'] })] }, {})
@@ -140,6 +154,9 @@ await t('FA (control) unordered workstreams sharing a file still throw', async (
 await t('FA a later workstream sharing files is never listed as off-limits to the earlier one', async () => {
   const { prompts } = await go({ cycles: 1, workstreams: [ws('x'), ws('a', { files: ['big.js'], after: ['x'] }), ws('b', { files: ['big.js'], after: ['a'] })] }, { 'a review c1': () => ({ findings: [F('c1-F1')] }), 'a validate c1': () => ({ verified: ['c1-F1'] }) })
   assert(!/Never touch files owned by workstreams not merged yet: [^\n]*b \(big\.js\)/.test(prompts['a fix c1']), prompts['a fix c1']) })
+await t('FA (control) a later workstream with disjoint files stays off-limits to the earlier one', async () => {
+  const { prompts } = await go({ cycles: 1, workstreams: [ws('x'), ws('a', { after: ['x'] }), ws('b', { after: ['a'] })] }, { 'a review c1': () => ({ findings: [F('c1-F1')] }), 'a validate c1': () => ({ verified: ['c1-F1'] }) })
+  assert(/Never touch files owned by workstreams not merged yet: b \(b\/\)\./.test(prompts['a fix c1']), prompts['a fix c1']) })
 
 if (fails.length) { console.error(fails.join('\n')); process.exit(1) }
 console.log('check20 ok')

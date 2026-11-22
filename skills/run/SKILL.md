@@ -580,8 +580,10 @@ says NOT merged; unpromoted side branches). Then:
   log it.
 - **A finding stuck after its opus round:** the question's options name their
   re-run, and `workstreams[].decision.answer` gives the exact value. Known debt:
-  `decisions.<id>` accepting it, so the validators accept it on that answer and
-  it merges; log it in the `decisionLog` and list it as known debt in your report.
+  `decisions.<id>` = the option's quoted answer, with the stuck run's
+  `carryForward`; the script settles that finding (ledger status `debt`, a
+  `known debt` workstream note), never cycles it again, and it merges; log it in
+  the `decisionLog` and list it as known debt in your report.
   Drop: `dropped: ["<id>"]`.
 - **Known-gaps promote:** when the rounds run out with the last recheck green
   and only non-regression, non-integration, non-critical majors open, a question offers to
