@@ -116,7 +116,7 @@ await t('4a drift: one fable agent after every repo is final, with the log, the 
   const { r, order, prompts, opts } = await go({ cycles: 1, decisionLog: LOG, workstreams: [ws('a')] }, { drift: () => ({ drift: [item] }) })
   assert(idx(order, 'drift') > idx(order, 'one validate') && opts.drift.model === 'fable' && opts.drift.phase === 'Drift audit')
   assert(prompts.drift.includes(LOG) && prompts.drift.includes('brief a') && /\/r\/one @ f = /.test(prompts.drift) && prompts.drift.includes('/r/one: base origin/main'))
-  assert.deepEqual(r.drift, { verdict: 'drift', items: [item], sections: 's', notes: [] })
+  assert.deepEqual(r.drift, { verdict: 'drift', items: [item], unconfirmed: [], sections: 's', notes: [] })
   assert(r.questions.some(q => q.q === 'drift: /r/one a/x.py:9: default greeting text changed' && q.default.startsWith('revert'))) })
 await t('4b drift: a dead drift agent is verdict died, never a silent pass', async () => {
   const { r } = await go({ cycles: 1, decisionLog: LOG, workstreams: [ws('a')] }, { drift: () => null })
@@ -176,6 +176,19 @@ await t('6c known gaps: no offer when the recheck died, saw another sha, or the 
     const { r } = await go({ cycles: 1, wbRounds: 1, workstreams: [ws('a')] }, { ...gapSc, 'one recheck r1': own })
     assert(!r.questions.some(x => /known gaps\?/.test(x.q))) } })
 
+// two workstreams, so the integrated review runs and its finding absorbs the validator's at the same lines
+const alsoSc = (w, v) => ({ 'one review': () => ({ findings: [w] }), 'one validate': () => ({ verdict: 'fail', findings: [v] }), 'one recheck r1': () => ({ verdict: 'fail', verified: [], findings: [F('W-F1', 'major', 'x.py:3')] }) })
+await t('6d known gaps: a kept major whose absorbed finding is a major bug still gets the offer', async () => {
+  const { r } = await go({ cycles: 1, wbRounds: 1, workstreams: [ws('a'), ws('b')] }, alsoSc(F('W-F1', 'major', 'x.py:3'), F('V-F1', 'major', 'x.py:3')))
+  const kept = r.repos[0].open.find(o => o.includes('x.py:3'))
+  assert(kept?.includes('(+ major V-F1 at x.py:3)'), JSON.stringify(r.repos[0].open))
+  assert(r.questions.some(x => /Promote them as known gaps\?/.test(x.q)), JSON.stringify(r.questions)) })
+await t('6e known gaps: no offer when the absorbed finding is a critical or a regression', async () => {
+  for (const [w, v] of [[F('W-F1', 'critical', 'x.py:3'), F('V-F1', 'critical', 'x.py:3')], [F('W-F1', 'major', 'x.py:3'), { ...F('V-F1', 'major', 'x.py:3'), kind: 'regression' }]]) {
+    const { r } = await go({ cycles: 1, wbRounds: 1, workstreams: [ws('a'), ws('b')] }, alsoSc(w, v))
+    assert(r.repos[0].open.some(o => o.includes('V-F1')), JSON.stringify(r.repos[0].open))
+    assert(!r.questions.some(x => /known gaps\?/.test(x.q)), `${v.severity} ${v.kind}`) } })
+
 await t('7a wbReviewModel overrides the whole-branch review model only', async () => {
   const { opts } = await go({ cycles: 1, wbReviewModel: 'opus', workstreams: [ws('a', { model: 'opus' }), ws('b', { files: ['b/'] })] }, {})
   assert(opts['one review'].model === 'opus' && opts['a review c1'].model === 'fable') })
@@ -208,11 +221,12 @@ await t('9e stopRule example names no domain', async () => {
 
 
 // PR #20 review fixes
-await t('10a drift: ok=false is verdict failed with the agent notes, its items dropped, and a re-run question', async () => {
-  const { r } = await go({ cycles: 1, decisionLog: LOG, workstreams: [ws('a')] }, { drift: () => ({ ok: false, notes: ['decision log unreadable'], drift: [{ repo: '/r/one', where: 'a/x.py:9', change: 'c' }] }) })
-  assert.deepEqual(r.drift, { verdict: 'failed', items: [], sections: 's', notes: ['decision log unreadable'] })
+await t('10a drift: ok=false is verdict failed with the agent notes, its items kept as unconfirmed, and a re-run question', async () => {
+  const item = { repo: '/r/one', where: 'a/x.py:9', change: 'c' }
+  const { r } = await go({ cycles: 1, decisionLog: LOG, workstreams: [ws('a')] }, { drift: () => ({ ok: false, notes: ['decision log unreadable'], drift: [item] }) })
+  assert.deepEqual(r.drift, { verdict: 'failed', items: [], unconfirmed: [item], sections: 's', notes: ['decision log unreadable'] })
   assert(!r.questions.some(q => q.q.startsWith('drift: ')), 'no revert-by-default question from an audit that could not read the log')
-  const q = r.questions.find(q => q.q === 'drift audit failed: decision log unreadable')
+  const q = r.questions.find(q => q.q === 'drift audit failed: decision log unreadable (1 unconfirmed item in drift.unconfirmed)')
   assert(q && q.default === q.options[0] && q.options[0] === 're-run stage wholeBranch to audit drift' && q.options[1] === 'ship without the drift audit', JSON.stringify(r.questions)) })
 await t('10b drift: nothing shipped (every repo skipped) runs no drift agent, verdict skipped, no question', async () => {
   const { r, order } = await go({ cycles: 1, decisionLog: LOG, workstreams: [ws('a')] }, { 'a implement': () => ({ status: 'blocked', ok: false, sha: '' }) })
