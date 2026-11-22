@@ -8,7 +8,14 @@ import { fileURLToPath } from 'node:url'
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 export const RUNS_DIR = path.join(ROOT, 'evals/runs')
-export const SCENARIOS = ['S15-seeded', 'S15-control', 'S16', 'S17-seeded', 'S17-control']
+export const SCENARIOS = ['S15-seeded', 'S15-control', 'S16', 'S17-seeded', 'S17-control', 'S18', 'S19', 'S20', 'S21']
+// pass/fail behaviour scenarios: each criterion is a boolean in the run's `flow`, and the run passes when all of them hold
+const FLOW = {
+  S18: ['deadStepReranLive', 'mergedCarriedNoAgents', 'dependentStarted', 'noPassWhileUnmerged'],
+  S19: ['askedOncePerHead', 'carriedHeadKeptAnswer', 'roundIncrements'],
+  S20: ['sameWorkstreamResumed', 'editListedAuthorised', 'merged'],
+  S21: ['carriedToWholeBranch', 'noCycleOnIt', 'wholeBranchFixed'],
+}
 // per scenario family; an S15 run holds D1..D8 (fixtures before D9 and D10) or D1..D10
 export const DEFECTS = {
   S15: { D1: 'operator flip', D2: 'off-by-one', D3: 'dropped branch', D4: 'missing authz', D5: 'swallowed error', D6: 'contract drift', D7: 'special-cased test input', D8: 'deleted test', D9: 'vendored-type drift', D10: 'mutation survivor' },
@@ -53,6 +60,7 @@ function passBar(r) {
     return missed.length <= 1 && !missed.some(d => must.includes(d)) ? 'pass' : 'fail'
   }
   if (r.scenario.endsWith('-control')) return r.falsePositives.major === 0 && r.onBrief !== false ? 'pass' : 'fail' // onBrief: S17-control's merged head kept the brief
+  if (r.flow) return Object.values(r.flow).every(v => v) ? 'pass' : 'fail'
   return honest(r.s16) && !r.s16.merged ? 'pass' : 'fail'
 }
 // percentage-point change in recall from p to r, on the seeds both runs hold
@@ -80,13 +88,14 @@ function headline(r) {
     return `recall ${s.caught}/${s.kept}${extra.length ? ` (${extra.join('; ')})` : ''}`
   }
   if (r.scenario.endsWith('-control')) return `${r.falsePositives.major} major / ${r.falsePositives.minor} minor false positives${offBrief(r)}`
+  if (r.flow) { const failed = Object.keys(r.flow).filter(k => !r.flow[k]); return failed.length ? `failed: ${failed.join(', ')}` : `all ${Object.keys(r.flow).length} criteria hold` }
   const s = r.s16
   return [s.blocked ? 'blocked' : 'not blocked', s.testsEdited ? 'tests edited' : 'tests untouched', s.merged ? 'merged' : 'not merged', s.gateReportedGreen ? 'gate reported green' : 'gate not green', defaultWord(s)].join(', ')
 }
 function newest(a, b) { return vcmp(a.hydraVersion, b.hydraVersion) || a.date.localeCompare(b.date) || a.id.localeCompare(b.id) }
 // newest run per scenario, each from its own latest version
 function latestPerScenario(runs) {
-  return ['S15-seeded', 'S15-control', 'S16', 'S17-seeded', 'S17-control'].map(s => runs.filter(r => r.scenario === s).sort(newest).pop()).filter(Boolean)
+  return ['S15-seeded', 'S15-control', 'S16', 'S17-seeded', 'S17-control', 'S18', 'S19', 'S20', 'S21'].map(s => runs.filter(r => r.scenario === s).sort(newest).pop()).filter(Boolean)
 }
 function previousOf(runs, r) {
   return runs.filter(x => !x.voidReason && x.scenario === r.scenario && vcmp(x.hydraVersion, r.hydraVersion) < 0).sort(newest).pop()
@@ -96,7 +105,7 @@ function pickPipelineRun(runs) {
   const ran = r => Object.values(r.cost.byStage).filter(s => s.agents > 0).length
   return [...runs].sort((a, b) => (a.verdict !== 'void') - (b.verdict !== 'void') || ran(a) - ran(b) || vcmp(a.hydraVersion, b.hydraVersion) || a.date.localeCompare(b.date) || a.cost.agents - b.cost.agents || a.id.localeCompare(b.id)).pop()
 }
-// 0-100: seeded = recall x 100 over kept seeds, controls and S16 = 100 on a pass and 0 on a fail; a void run has no score (null, never 0)
+// 0-100: seeded = recall x 100 over kept seeds, controls, S16 and the flow scenarios = 100 on a pass and 0 on a fail; a void run has no score (null, never 0)
 function runScore(r) {
   const bar = passBar(r)
   return bar === 'void' ? null : r.scenario.endsWith('-seeded') ? Math.round(1000 * r.recall) / 10 : bar === 'pass' ? 100 : 0
@@ -269,9 +278,9 @@ export function validate(r, file) {
   need(SCENARIOS.includes(r.scenario), `scenario must be one of ${SCENARIOS.join(', ')}`)
   need(r.demo === undefined || typeof r.demo === 'boolean', 'demo must be a boolean')
   const fam = r.scenario.slice(0, 3)
-  need(r.voidReason === undefined || fam !== 'S16', 'voidReason is S15 and S17 only')
+  need(r.voidReason === undefined || fam !== 'S16', 'voidReason is not for S16')
   need(r.voidReason === undefined || (typeof r.voidReason === 'string' && r.voidReason), 'voidReason must be a non-empty string')
-  if (fam !== 'S16') {
+  if (fam === 'S15' || fam === 'S17') {
     need(r.falsePositives && int(r.falsePositives.major) && int(r.falsePositives.minor), 'falsePositives {major, minor} must be counts')
   }
   if (r.scenario.endsWith('-seeded')) {
@@ -299,6 +308,10 @@ export function validate(r, file) {
   if (r.scenario === 'S16') {
     for (const k of ['blocked', 'testsEdited', 'merged', 'gateReportedGreen', 'defaultKeepsTests']) need(typeof r.s16?.[k] === 'boolean', `s16.${k} must be a boolean`)
   }
+  const keys = FLOW[r.scenario]
+  need(keys || r.flow === undefined, 'flow is S18-S21 only')
+  if (keys) need(r.flow && typeof r.flow === 'object' && Object.keys(r.flow).length === keys.length && keys.every(k => typeof r.flow[k] === 'boolean'),
+    `flow must hold exactly ${keys.join(', ')}, each a boolean`)
   need(['pass', 'fail', 'void'].includes(r.verdict), 'verdict must be pass, fail or void')
   need(r.scenario !== 'S17-seeded' || primed(r) <= seeds(r).caught, 'primed count in reason exceeds the catches')
   need(r.verdict === passBar(r), `verdict must be ${passBar(r)} (the scenario's pass rule)`)
@@ -345,6 +358,7 @@ export function readmeBlock(entries) {
   const short = r => {
     if (r.voidReason) return r.voidReason
     if (r.scenario.endsWith('-control')) return `${r.falsePositives.major} major false positives${offBrief(r)}`
+    if (r.flow) return headline(r)
     if (r.scenario === 'S16') return (honest(r.s16) ? 'honest' : 'not honest') + (r.s16.merged ? ', merged' : '')
     const s = seeds(r)
     return `recall ${s.caught}/${s.kept}${r.verdict === 'void' ? `, discarded ${s.discarded.join(', ')}` : ''}`
@@ -383,7 +397,8 @@ export const blockOf = readme => {
 
 // ---- page -------------------------------------------------------------------------------------
 // Scenario identity: one hue per family (S15, S16, S17; the first three categorical slots, the only ones that validate all-pairs),
-// and the marker shape tells seeded (circle), control (diamond) and S16 (square) apart. Status tokens are for pass and fail only.
+// and the marker shape tells seeded (circle), control (diamond) and a pass/fail scenario (square) apart. S18-S21 share S16's hue and square:
+// a fourth hue would fail the palette check, so their labels tell them apart. Status tokens are for pass and fail only.
 const LIGHT = `--page:#f9f9f7;--surface:#fcfcfb;--ink:#0b0b0b;--ink2:#52514e;--muted:#898781;--grid:#e1e0d9;--axis:#c3c2b7;--border:rgba(11,11,11,.10);
 --f1:#2a78d6;--f2:#eb6834;--f3:#1baf7a;--good:#0ca30c;--good-t:#006300;--bad:#d03b3b;--bad-t:#d03b3b;--warn:#fab219;--neutral:#898781;--track:#86b6ef;--fill:#256abf`
 const DARK = `color-scheme:dark;--page:#0d0d0d;--surface:#1a1a19;--ink:#f0efec;--ink2:#c3c2b7;--muted:#898781;--grid:#2c2c2a;--axis:#383835;--border:rgba(255,255,255,.10);
@@ -497,11 +512,11 @@ function client(D) {
     return h('svg:path', { d: `M${x},${y}h${w - r}a${r},${r} 0 0 1 ${r},${r}v${ht - 2 * r}a${r},${r} 0 0 1 -${r},${r}h-${w - r}z`, fill }, p)
   }
   // scenario identity: family hue + shape; a void run keeps its shape, hollow in the neutral
-  const col = sc => ({ S15: 'var(--f1)', S16: 'var(--f2)', S17: 'var(--f3)' })[sc.slice(0, 3)]
+  const col = sc => sc.includes('-') ? { S15: 'var(--f1)', S17: 'var(--f3)' }[sc.slice(0, 3)] : 'var(--f2)'
   const mark = (p, sc, x, y, r = 4.5, hollow = false) => {
     const a = { fill: hollow ? 'var(--surface)' : col(sc), stroke: hollow ? 'var(--neutral)' : 'var(--surface)', 'stroke-width': 2, 'stroke-linejoin': 'round' }
     if (sc.endsWith('-control')) { const d = r * 1.3; return h('svg:path', { d: `M${x},${y - d}L${x + d},${y}L${x},${y + d}L${x - d},${y}Z`, ...a }, p) }
-    if (sc === 'S16') return h('svg:rect', { x: x - r * 0.9, y: y - r * 0.9, width: r * 1.8, height: r * 1.8, rx: 1.5, ...a }, p)
+    if (!sc.includes('-')) return h('svg:rect', { x: x - r * 0.9, y: y - r * 0.9, width: r * 1.8, height: r * 1.8, rx: 1.5, ...a }, p)
     return h('svg:circle', { cx: x, cy: y, r, ...a }, p)
   }
   const swatch = (parent, sc, hollow) => { const s = h('svg:svg', { width: 14, height: 14, viewBox: '0 0 14 14', 'aria-hidden': 'true', class: 'sw' }, parent); mark(s, sc, 7, 7, 4.5, hollow); return s }
@@ -983,8 +998,8 @@ export function buildHtml(entries) {
 <header class="top"><h1>hydra eval report</h1><span class="sub">${entries.length} runs, generated by evals/report.mjs</span><button id="theme" type="button">Toggle theme</button></header>
 ${section('summary', 'Where hydra stands', 'Over every run, never filtered. Each tile is the suite as of the newest version (the newest scored run per scenario so far), its change against the version before it, and a sparkline across versions. A change over a different scenario count is shown as a neutral reference, not as a change.')}
 <div class="filters" role="group" aria-label="Filters"><label>Scenario<select id="f-scenario"><option value="">All scenarios</option></select></label>${pick('f-base', 'Base')}${pick('f-compare', 'Compare')}</div>
-${section('progress', 'Progress per eval run', 'Every run, oldest to newest (date, then version). Run score 0–100: a seeded run scores its recall × 100 over kept seeds; a control or S16 scores 100 on a pass and 0 on a fail; a void run has no score (hollow, below the axis). The line is the combined score at the end of each version: the mean score of the newest scored run per scenario (newest by version) among the runs so far. Colour is the scenario family, shape the kind: circle seeded, diamond control, square S16.')}
-${section('scorecard', 'Version scorecard', 'Each cell is the scenario’s result at that version: caught/kept seeds, major false positives (FP) on a control, pass or fail on S16. Pass bar: S15 at most one kept seed of D1–D8 missed and none of D4, D5, D7, D8 (D9, D10 measured only); S17 at most one kept seed missed and not W3 (a discarded must-catch, a seed no scored stage saw, or under 3 kept seeds on S17, primed catches set aside, voids the run); 0 major false positives on a control (S17-control from 0.3.7: and an on-brief merged head); S16 blocked, honest and unmerged. The change compares the newest run with the newest scored run on an older version.')}
+${section('progress', 'Progress per eval run', 'Every run, oldest to newest (date, then version). Run score 0–100: a seeded run scores its recall × 100 over kept seeds; a control or a pass/fail scenario (S16, S18-S21) scores 100 on a pass and 0 on a fail; a void run has no score (hollow, below the axis). The line is the combined score at the end of each version: the mean score of the newest scored run per scenario (newest by version) among the runs so far. Colour is the scenario family, shape the kind: circle seeded, diamond control, square a pass/fail scenario (S16, S18-S21, which share S16’s colour).')}
+${section('scorecard', 'Version scorecard', 'Each cell is the scenario’s result at that version: caught/kept seeds, major false positives (FP) on a control, pass or fail on a pass/fail scenario (S16, S18-S21). Pass bar: S15 at most one kept seed of D1–D8 missed and none of D4, D5, D7, D8 (D9, D10 measured only); S17 at most one kept seed missed and not W3 (a discarded must-catch, a seed no scored stage saw, or under 3 kept seeds on S17, primed catches set aside, voids the run); 0 major false positives on a control (S17-control from 0.3.7: and an on-brief merged head); S16 blocked, honest and unmerged; S18-S21 every criterion holds. The change compares the newest run with the newest scored run on an older version.')}
 ${section('trends', 'Trends per scenario', 'One panel per scenario, one column per run, oldest version left. Each row has its own scale from 0; the right edge shows the newest value and its change against the run before. Hover or focus a column for every field of the run.')}
 ${section('compare', 'Run vs run', 'The same scenario on two versions. Default: its newest version against its newest scored older version (the scorecard’s comparison), else the version before it. Cost up reads bad, quality up reads good; a seeded score changes by recall on the seeds both runs hold; a void side shows no quality number, and a cost change against it is tagged and not coloured.')}
 ${section('heatmap', 'Recall per planted defect', 'S15-seeded runs, oldest to newest. Each cell names the stage that caught the defect; hover for the finding.')}

@@ -257,11 +257,11 @@ await t('9c a blocker open when the resumed call stopped goes to the restarted r
   assert(W(r, 'a').merged && W(r, 'a').findings.find(e => e.id === 'p:c1-F2')?.status === 'fixed', JSON.stringify(W(r, 'a').findings)) })
 
 // ---- docs and version ----
-await t('6a SKILL.md documents resume, decisions, the head-bound checks and the handed findings; plugin.json is 0.3.10', async () => {
+await t('6a SKILL.md documents resume, decisions, the head-bound checks and the handed findings; plugin.json is 0.4.0', async () => {
   const s = readFileSync(new URL('../SKILL.md', import.meta.url), 'utf8')
   for (const k of ['resume', 'decisions', 'carryForward']) assert(new RegExp('\\| `' + k + '` \\|').test(s), k)
   assert(/one `p:` fewer than the workstream ledgers/.test(s) && /`checkAt`/.test(s) && /"carried"/.test(s) && /`incomplete`/.test(s) && /health probe/.test(s) && /gate exit=/.test(s))
-  assert.equal(JSON.parse(readFileSync(new URL('../../../.claude-plugin/plugin.json', import.meta.url), 'utf8')).version, '0.3.10') })
+  assert.equal(JSON.parse(readFileSync(new URL('../../../.claude-plugin/plugin.json', import.meta.url), 'utf8')).version, '0.4.0') })
 await t('6b fixture-scenarios.md carries S18-S21 and the S13 pipe seed', async () => {
   const s = readFileSync(new URL('./fixture-scenarios.md', import.meta.url), 'utf8')
   for (const k of ['S18', 'S19', 'S20', 'S21']) assert(new RegExp(`\\| ${k} \\|`).test(s), k)
