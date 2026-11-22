@@ -1,5 +1,5 @@
 // Progress: every agent label keeps the shapes a progress mod matches, the coordinator's progress calls, and the opt-in step-report text.
-// Every scenario fails against the 0.3.10 script except the ones marked (control).
+// Every scenario fails against the 0.3.10 script except the ones marked (control) and the pins B1a-e and B4d.
 import { Run } from './run.mjs'
 import assert from 'node:assert'
 import { readFileSync } from 'node:fs'
@@ -122,7 +122,7 @@ await t('B4a stepTool: every prompt but the health probe ends with the step-repo
   assert(r.workstreams.every(w => w.merged))
   for (const [L, ps] of Object.entries(all)) for (const p of ps) {
     if (L.startsWith('health ')) assert(!p.includes('Progress: report'), L)
-    else { assert(p.includes(TAIL), `${L}: tool named`); assert(/Findings you report, and a red gate or check you were asked to run, are results, not failures\.$/.test(p), `${L}: ends with it`) }
+    else { assert(p.includes(TAIL), `${L}: tool named`); assert(p.includes('Send failed: true, with reason and error, only when your own attempt at this step failed.'), `${L}: failed rule`); assert(/Findings you report, and a red gate or check you were asked to run, are results, not failures\.$/.test(p), `${L}: ends with it`) }
   }
   assert(Object.keys(all).some(L => L.startsWith('health ')), 'a health probe ran')
 })

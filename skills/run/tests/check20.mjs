@@ -120,6 +120,9 @@ await t('C1.4d dropped but already merged: carried as merged, with an escalation
   assert.deepEqual(r.dropped, [])
   const short = await go({ cycles: 1, resume: 'run-2', dropped: ['a'], workstreams: [ws('a'), ws('b')] }, state({ id: 'a', head: 'abc1234', merged: true }))
   assert(!ran(short.order, 'a').length && short.r.dropped.includes('a'), short.order.join()) })
+await t('C1.4r dropped but already merged: its checks still run on the merged tip', async () => {
+  const { prompts } = await go({ skillDir: '/s', cycles: 1, resume: 'run-2', dropped: ['a'], workstreams: [ws('a', { checks: ['own-a'] }), ws('b', { checks: ['own-b'] })] }, { ...state({ id: 'a', head: HA, merged: true }, { id: 'b', head: HB, merged: true }), 'one validate': () => ({ checkExits: [0, 0] }) })
+  for (const c of ['own-a', 'own-b']) assert(prompts['one validate'].includes(`540 '${c}'`), c) })
 await t('C1.4o stage wholeBranch leaves a dropped workstream out: listed as not done, its brief out of the review', async () => {
   const { r, prompts } = await go({ stage: 'wholeBranch', dropped: ['a'], workstreams: [ws('a'), ws('b')] }, {})
   assert(r.dropped.includes('a') && r.repos[0].notes.includes('not done (dropped): a') && prompts['one review'].includes(DROP_S) && !prompts['one review'].includes('brief a'), JSON.stringify(r.repos[0])) })
@@ -143,7 +146,8 @@ await t('FA after-ordered workstreams may share files; the merge backstop names 
   const { r, prompts } = await go({ cycles: 1, workstreams: [ws('a', { files: ['big.js'] }), ws('b', { files: ['big.js'], after: ['a'] })] }, {})
   assert(W(r, 'b').merged, JSON.stringify(W(r, 'b')))
   assert.equal(prompts['b merge'].split("':(glob,exclude)big.js'").length, 2, prompts['b merge'])
-  await go({ cycles: 1, workstreams: [ws('a', { files: ['big.js'] }), ws('b', { after: ['a'] }), ws('c', { files: ['big.js'], after: ['b'] })] }, {}) })
+  await go({ cycles: 1, workstreams: [ws('a', { files: ['big.js'] }), ws('b', { after: ['a'] }), ws('c', { files: ['big.js'], after: ['b'] })] }, {})
+  await go({ cycles: 1, workstreams: [ws('b', { files: ['big.js'], after: ['a'] }), ws('a', { files: ['big.js'] })] }, {}) })
 await t('FA (control) unordered workstreams sharing a file still throw', async () => {
   await rejects({ workstreams: [ws('a', { files: ['big.js'] }), ws('b', { files: ['big.js'] })] }, /workstreams a and b overlap on big\.js/) })
 await t('FA a later workstream sharing files is never listed as off-limits to the earlier one', async () => {

@@ -99,7 +99,7 @@ await t('T1c knownRedChecks must name entries of checks', async () => {
 })
 
 await t('T1d malformed checkExits is an unrun attempt, retried; three times never ran its gate', async () => {
-  for (const bad of [undefined, [], [0]]) {
+  for (const bad of [undefined, [], [0], ['0', 0], [0.5, 0]]) {
     const { r, all } = await go({ cycles: 1, workstreams: [ws('a', { checks: [E2E, 'true'] })] }, { 'a validate c1': () => ({ checkExits: bad }) })
     const x = W(r, 'a')
     assert.equal(all['a validate c1'].length, 3, `${JSON.stringify(bad)}: three attempts`)
@@ -121,6 +121,9 @@ await t('T1e false green: the fixer reported 0, the validator of the same head r
   const c = await go({ cycles: 1, maxCycles: 1, workstreams: [ws('a', { checks: [E2E] })] }, sc(2))
   const h = W(c.r, 'a').findings.find(f => f.id === 'v1-G')
   assert(h && h.severity === 'critical' && !h.issue.includes('false green'), JSON.stringify(W(c.r, 'a').findings))
+  // the implementer is the author when the validator runs straight after it
+  const i = await go({ cycles: 1, maxCycles: 1, workstreams: [ws('a', { checks: [E2E] })] }, { 'a validate c1': (p, k) => k === 1 ? { checkExits: [3] } : {} })
+  assert(W(i.r, 'a').findings.some(f => f.id === 'v1-G' && f.issue.includes(`${E2E} exit 3 (false green: its author reported exit 0)`)), JSON.stringify(W(i.r, 'a').findings))
 })
 
 const tip = [ws('a', { checks: ['shared', 'own-a'] }), ws('b', { checks: ['shared', 'own-b'] })]
@@ -137,6 +140,9 @@ await t('T1f a red check on the merged tip is a critical V-G for the whole-branc
   assert(all['one fix r1'][0].includes('"id":"V-G"') && all['one fix r1'][0].includes('red check(s): own-a exit 1'), 'V-G to the fixer')
   assert(r.repos[0].findings.some(f => f.id === 'V-G' && f.severity === 'critical'))
 })
+await t('T1f a red check in a recheck is a critical R1-G and fails the repo', async () => {
+  const { r } = await go({ cycles: 1, wbRounds: 1, workstreams: tip }, { 'one validate': () => ({ verdict: 'fail', findings: [F('V-F1')] }), 'one recheck r1': () => ({ verified: ['V-F1'], checkExits: [0, 0, 5] }) })
+  assert(r.repos[0].verdict === 'fail' && r.repos[0].findings.some(f => f.id === 'R1-G' && f.severity === 'critical' && f.issue.includes('red check(s): own-b exit 5')), JSON.stringify(r.repos[0].findings)) })
 await t('T1f known-red on the tip is the union, and a dropped workstream adds no check', async () => {
   const { r, all } = await go({ cycles: 1, workstreams: [ws('a', { checks: ['shared'], knownRedChecks: ['shared'] }), ws('b', { checks: ['shared', 'own-b'] })] }, { 'one validate': () => ({ checkExits: [1, 0] }) })
   assert(r.repos[0].verdict === 'pass' && !('one fix r1' in all), JSON.stringify(r.repos[0].findings))

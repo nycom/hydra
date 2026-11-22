@@ -129,7 +129,7 @@ for (const r of REPOS)
 const DOCS = (A.docsRepos || REPOS).map(d => ({ repo: d.repo && norm(d.repo), featureBranch: d.featureBranch, base: d.base || repoMap[d.repo && norm(d.repo)]?.base || 'main', gate: d.gate || '' }))
 for (const d of DOCS) if (!d.repo || !d.featureBranch) throw new Error('docsRepos items need {repo, featureBranch, base?, gate?}')
 // the gate runs under pipefail: a reader that exits early (head, grep -q) makes the writer die of SIGPIPE (exit 141), which reads red
-const EARLY_EXIT = /\|\s*(head\b|grep\s+(-\w*q|--quiet))/
+const EARLY_EXIT = /(?<!\|)\|(?!\|)\s*(head\b|grep\s+(-\w*q|--quiet))/
 for (const [who, g] of [...W.flatMap(w => [[`workstream ${w.id}`, w.gate], [`workstream ${w.id}`, w.quickGate]]), ...DOCS.map(d => [`docsRepos ${d.repo}`, d.gate])])
   if (EARLY_EXIT.test(g || '')) throw new Error(`${who}: the gate pipes into head or grep -q: under the pipefail wrapper the writer gets SIGPIPE (exit 141) and the gate reads red; use tail, or redirect to a file`)
 // carryForward: what git cannot say, handed from a paused or incomplete result to its resume (findings, settled ledgers, passed whole-branch passes)
@@ -904,8 +904,8 @@ async function runRepo(r, mine) {
     return `${fixed.length ? ` Fixes verified earlier in this run (a finding whose fix would reverse one: file it and name it; the fixer escalates): ${JSON.stringify(fixed)}` : ''}${asked.length ? ` Already asked of the user, never re-ask: ${JSON.stringify(asked)}` : ''}`
   }
   const solo = merged.length === 1 && same(merged[0].preMergeSha, merged[0].baseAtMerge)
-  // the merged tip re-runs the checks of every merged, not-dropped workstream, each command once
-  const onTip = merged.filter(w => !DROPPED.has(w.id)).map(w => byId[w.id])
+  // the merged tip re-runs the checks of every merged workstream (a dropped one already merged stays on the branch), each command once
+  const onTip = merged.map(w => byId[w.id])
   const tip = { checks: [...new Set(onTip.flatMap(w => w.checks || []))], knownRedChecks: [...new Set(onTip.flatMap(w => w.knownRedChecks || []))] }
 
   const [rev, val] = await parallel([

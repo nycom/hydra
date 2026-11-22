@@ -104,7 +104,8 @@ await t('C1.5 a gate that pipes into head or grep -q is rejected, tee and tail p
   await rejects({ cycles: 1, workstreams: [ws('a', { quickGate: 'x | grep -q ok' })] }, /SIGPIPE/)
   await rejects({ cycles: 1, workstreams: [ws('a')], docsRepos: [{ repo: '/r/one', featureBranch: 'f', gate: 'npm test | head -5' }] }, /SIGPIPE/)
   await go({ cycles: 1, workstreams: [ws('a', { gate: 'npm test | tee log; npm run lint' })] }, {})
-  await go({ cycles: 1, workstreams: [ws('a', { gate: 'npm test | tail -5' })] }, {}) })
+  await go({ cycles: 1, workstreams: [ws('a', { gate: 'npm test | tail -5' })] }, {})
+  await go({ cycles: 1, workstreams: [ws('a', { gate: 'npm test || head -50 err.log' })] }, {}) })
 
 // ---- C1.6 whole-branch fixer notes ----
 await t('C1.6 the whole-branch fixer lists changed files; its notes reach the repo', async () => {

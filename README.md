@@ -33,7 +33,9 @@ Interactive report: [evals/report.html](evals/report.html), open locally (GitHub
 - Then a whole-branch review plus an independent validator, a cross-repo contract check, and a validated docs sync. A repo whose only workstream merged onto its untouched base has no seam to review, so only the validator runs there.
 - Whole-branch fix rounds stop on churn: two rounds in a row that each bring a new regression-kind blocker in a file the round's fixer was asked to fix stop that repo's rounds with a question. Rounds that run out on a green recheck with no open critical, regression or integration finding offer to promote the checked head with its open majors parked as known gaps; the offer is skipped when `acceptance` or `stopRule` is set.
 - A fixer whose only fix lies outside its workstream's `files[]` hands the finding to the whole-branch pass, where it stops counting toward that workstream's cycles. Every gate runs through one pipefail wrapper that prints its exit code last, and a step whose agent died twice gets a health probe before a third try.
-- A `carried` claim (the only fix lies outside `files[]`) is checked by the validator; a rejected claim goes back to the fixer for one more cycle, counted by the usual stop rules. A soft block reports `blocked` with `merged: true`. An infra stop says how many times the agent actually died and that the step can be resumed. Unconfirmed drift-audit items are kept under `drift.unconfirmed`, with no question.
+- A `carried` claim (the only fix lies outside `files[]`) is checked by the validator; a rejected claim goes back to the fixer for one more cycle, counted by the usual stop rules. A soft block that continued on its defaults reads `status: done`, with a note. An infra stop says how many times the agent actually died and that the step can be resumed. Unconfirmed drift-audit items are kept under `drift.unconfirmed`, with no question.
+- With a progress panel, the coordinator sends a progress call at every return, the review phase and dropped workstreams included. The coordinator also runs each merged workstream's `checks` once itself at `finalSha`.
+- Smaller prompt fixes: the churn question no longer repeats the repo name, the decision-log sentence is emitted only with `decisionLog`, a regression under a stop rule has one meaning (it worked at the base or before a fix in this run), the drift prompt opens with its task and says what to do with an unreadable log, and the whole-branch fixer lists each file it changed as `changed: <path>` in notes.
 - The mechanical part lives in `skills/run/workflow.js` (a Claude Code Workflow script); `skills/run/SKILL.md` is the coordinator's procedure.
 
 Opt-in, per run (details and every arg in `skills/run/SKILL.md`):
@@ -47,7 +49,7 @@ Opt-in, per run (details and every arg in `skills/run/SKILL.md`):
 - `decisions`: the user's answer to a blocked workstream's question, on a resume; that same workstream resumes at implement with the answer in its brief.
 - `dropped`: workstream ids the user dropped. They run no agent, the rest merges, and the result lists them as not done (top-level `dropped`, the repo note `not done (dropped): <ids>`) for the PR body's Not done list. The stuck-finding question names this re-run.
 - `workstreams[].files` may overlap another workstream's when one is ordered `after` the other.
-- `stepTool: "<tool name>"`: the coordinator sends a progress call at every return, the review phase and dropped workstreams included. Hydra never hard-codes a tool name.
+- `stepTool: "<tool name>"`: workers report their steps with that tool, and send `failed` only when their own attempt at a step failed. Hydra never hard-codes a tool name.
 - `repos[].copyExcluded`: git-ignored files the gate needs (a local preview test) are copied into every agent worktree and never committed.
 - `repos[].reviewSharedEdits: true`: the shared-file edits each merge applies get their own gate and validator before the next merge.
 - `repos[].commitPrefix`: optional non-empty string with no newline or quote, put before the merge step's fixed subjects (shared-file edits, regenerated files) and the docs step's graph refresh; the merge commit subject is unchanged.
@@ -67,7 +69,7 @@ Stacked PRs are an opt-in mode, used only when asked for.
 
 Expects `implementer`, `reviewer` and `validator` subagents in `~/.claude/agents/`.
 
-Optional, for per-worker step bars in a progress mod that offers a step tool (for example `mcp__savvy-progress__step`): add that tool to the `tools:` list of the implementer, reviewer and validator agent types, then pass `stepTool` (see `SKILL.md`).
+Optional, for per-worker step bars in a progress mod that offers a step tool: add that tool to the `tools:` list of the implementer, reviewer and validator agent types, then pass `stepTool` (see `SKILL.md`).
 
 ## Tests
 

@@ -365,7 +365,10 @@ major" on language or heuristic rules.
 otherwise). Before the first Workflow call: `progress` with `title`, `total` =
 workstreams, `phase: "delegate"`, one task per workstream, its `title` the
 workstream id verbatim (`tier`: `careful` for opus, `medium` for sonnet). Never
-name a workstream exactly like its repo directory. Call `progress` after every Workflow return
+name a workstream exactly like its repo directory or `health`; an id that is
+another id plus a word is matched by the longest title. A rejected merge is
+ticked at once and `done` never goes down, so the bar can read one high until
+that workstream merges: never lower `done` to correct it. Call `progress` after every Workflow return
 (the first call, each resume, each `stage: "wholeBranch"` re-run): `done` =
 workstreams with `merged: true` so far. Phase: `"delegate"` while a workstream
 is unmerged or a `humanCheck` or block decision is pending, `phase: "review"` while
