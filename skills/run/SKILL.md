@@ -326,6 +326,7 @@ Workflow({
 | `repos[].smoke` | none | the safe local boot recipe the whole-branch validator and each whole-branch recheck run via `run-cmd.mjs` (own process group, hard timeout, leftover processes killed); a failed or timed-out smoke is critical; none = smoke skipped |
 | `repos[].smokeTimeout` | `540` | smoke hard cap in seconds, an integer from 1 to 590 (stays under the agent shell's 600 s foreground limit) |
 | `repos[].copyExcluded` | `[]` | paths inside the repo, git-ignored (e.g. in `.git/info/exclude`), that the gate needs, such as a local preview test. Every agent copies them from the user's checkout into each worktree it creates, before any gate, only after `git check-ignore` confirms they are ignored; absolute paths, `~` and `..` throw. Hygiene checks no commit carries them |
+| `repos[].commitPrefix` | none | a non-empty string without a newline or a quote, e.g. `"chore: "`, put before the merge step's fixed commit subjects (shared-file edits, regenerated files) and the docs step's graph refresh; the merge commit subject is unchanged |
 | `repos[].reviewSharedEdits` | `false` | after a merge that applied shared-file edits, one opus `validator` checks exactly those commits (each edit against its intent, the gate, hygiene) inside the merge lock, so before the next merge lands; its findings (and a red gate) join the repo's whole-branch fix rounds. Opt-in, not automatic: defaults stay as before, and it costs one opus agent per such merge while the whole-branch validator already reruns every suite. Turn it on when shared edits are code-like (generated clients, lockfiles, contract digests) |
 | `docsRepos[].gate` | the repo's workstream gates | gate for a docs-only repo |
 
@@ -445,8 +446,9 @@ Code in an already-merged sibling's files stays the fixer's through the
 integration-fix exception. The finding leaves the workstream's cycles (ledger
 status `carried`, listed in `workstreams[].handed`) and joins its repo's
 whole-branch findings as `<ws id>:<id>`, where the whole-branch fixer fixes it;
-that fixer's notes name the run's workstreams whose briefs read the files it
-changed.
+that fixer's notes list the files it changed (`changed: <path>`); carry the new
+behaviour into every brief you write afterwards that reads one of them, in this
+run's fix-ups, a later run or a later slice.
 
 **Gate wrapper:** every gate an agent runs goes through one fixed wrapper,
 `bash -c 'set -eo pipefail\n<gate>'; echo "gate exit=$?"`, so a failure behind a
@@ -454,7 +456,9 @@ pipe or a `;` chain is red, and only `gate exit=0` is green. A non-zero exit
 whose every failure is allowed by the green rules (known-red, known-flaky, or
 proven flaky by the rerun rule) is not red, but the wrapper stopped there, so the
 agent runs each later command through the wrapper too and judges them all.
-Nothing is pushed on a red gate.
+Nothing is pushed on a red gate. A gate must not pipe into `head`, `grep -q` or any
+reader that exits early: the writer gets SIGPIPE (exit 141) and the gate reads red;
+use `tail`, or redirect to a file. The script rejects the first two.
 
 ## 4. Final call (coordinator)
 
