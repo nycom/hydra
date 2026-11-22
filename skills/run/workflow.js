@@ -147,9 +147,11 @@ for (const [repo, x] of Object.entries(CF_REPOS)) {
 const prior = f => ({ ...f, id: `p:${f.id}` })
 const CF_WS = Object.fromEntries(Object.entries(CF.workstreams || {}).map(([id, x]) => [id, Object.fromEntries(['handed', 'open', 'findings'].map(k => [k, (x[k] || []).map(prior)]))]))
 // known debt: the stuck-finding question's answer "accept <finding id> ... as known debt" settles that carried finding for good
-const DEBT = Object.fromEntries(Object.entries(DECIDE).map(([id, a]) => [id, a.match(/\baccept (\S+)[^]*?\bas known debt\b/i)?.[1]]).filter(([, f]) => f))
-for (const [id, f] of Object.entries(DEBT))
-  if (!CF_WS[id]?.findings.some(e => e.id === `p:${f}`)) throw new Error(`decisions.${id} accepts ${f} as known debt, but carryForward has no such finding of ${id}: pass the stuck run's carryForward`)
+// ids compare without p: prefixes, so a later re-run with the debt run's carryForward (p:p:c1-F1) still names the same finding
+const bare = id => id.replace(/^(p:)+/, '')
+const DEBT = Object.fromEntries(Object.entries(DECIDE).map(([id, a]) => [id, a.match(/^\s*accept (\S+)[^]*?\bas known debt\b/i)?.[1]]).filter(([, f]) => f).map(([id, f]) => [id, bare(f)]))
+if (A.stage !== 'wholeBranch') for (const [id, f] of Object.entries(DEBT))
+  if (!CF_WS[id]?.findings.some(e => bare(e.id) === f)) throw new Error(`decisions.${id} accepts ${f} as known debt, but carryForward has no such finding of ${id}: pass the stuck run's carryForward`)
 const name = repo => repo.split('/').pop()
 const STALE = `Read other repos ONLY via git -C <repo> fetch ${O}, then git -C <repo> show ${O}/<featureBranch>:<path> or git -C <repo> diff ${O}/<base>...${O}/<featureBranch> — never by filesystem path: those checkouts sit on unrelated branches.`
 
@@ -503,7 +505,9 @@ async function runWorkstream(w) {
   const cf = CF_WS[w.id]
   if (cf) {
     book.push(...cf.findings)
-    for (const e of book) if (e.id === `p:${DEBT[w.id]}`) { e.status = 'debt'; out.notes.push(`known debt (accepted by the user): ${e.id} (${e.where}: ${e.issue})`) }
+    const settledDebt = book.some(e => e.status === 'debt' && bare(e.id) === DEBT[w.id]) // applied by an earlier run: never re-applied to a newer same-id finding
+    for (const e of book) if (!settledDebt && e.status === 'open' && bare(e.id) === DEBT[w.id]) e.status = 'debt'
+    for (const e of book) if (e.status === 'debt') out.notes.push(`known debt (accepted by the user): ${e.id} (${e.where}: ${e.issue})`)
     ledger.push(...book.filter(e => STATUS.includes(e.status)).map(({ id, where, issue, status }) => ({ id, where, issue, status })))
     out.handed.push(...cf.handed)
   }
@@ -631,7 +635,7 @@ Return status ("done" only when the gate is green and the push verified, or noth
   const sameFinding = (a, b) => a.id === b.id || (a.where !== 'gate' && a.where === b.where)
   const triesOf = f => tries.find(t => sameFinding(t, f))
   const debt = book.filter(e => e.status === 'debt')
-  const live = fs => fs.filter(f => !debt.some(d => sameFinding(d, f))) // a re-filed known debt is settled, never cycled again
+  const live = fs => fs.filter(f => !debt.some(d => d.id === f.id || (d.where !== 'gate' && d.where === f.where && d.issue === f.issue))) // a re-filed known debt is settled, never cycled again
   let landings = 0 // merges of this workstream that landed
   // the shared-edits check, the human check and workstreams ordered after this one read the merge's sha
   const readsMergeSha = !!(c.reviewSharedEdits || w.humanCheck || W.some(x => x.after?.includes(w.id)))
@@ -656,7 +660,7 @@ New finding ids: c${i}-F1, c${i}-F2, ...`,
       if (!rev) return stop(died(`review c${i}`, `${tag} review c${i}`))
       if (!same(rev.headSha, out.sha)) return stop(`review c${i} saw ${rev.headSha}, the author pushed ${out.sha}`)
       out.cyclesRun = i
-      track(book, 'review', rev.findings)
+      track(book, 'review', live(rev.findings))
       // Clean needs both: nothing blocking in this review AND nothing blocking left by the last validation.
       // Only a validator can clear a carried critical/major; a reviewer that drops one doesn't.
       let found = live([...rev.findings, ...carry.filter(f => blocking(f) && !rev.findings.some(g => g.id === f.id))])
