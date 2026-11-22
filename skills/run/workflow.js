@@ -146,14 +146,15 @@ for (const [repo, x] of Object.entries(CF_REPOS)) {
 // restored ids get a p: prefix, so a restarted review's new c1-F1 (or a re-merge's S-<id>-m1-F1) never collides with the earlier call's
 const prior = f => ({ ...f, id: `p:${f.id}` })
 const CF_WS = Object.fromEntries(Object.entries(CF.workstreams || {}).map(([id, x]) => [id, Object.fromEntries(['handed', 'open', 'findings'].map(k => [k, (x[k] || []).map(prior)]))]))
-// known debt: the stuck-finding question's answer "accept <finding id> ... as known debt" settles that carried finding for good
-// the named id is restored with one more p: (or already reads as the carryForward has it); a debt an earlier run settled is recognised without p: prefixes
+// known debt: the stuck-finding question's answer "accept <finding id> (<where>) as known debt" settles that carried finding for good
+// it settles the open entry p:<id> (or <id>, as the carryForward already shows it) at the answer's where; ids restart each run, so the where tells a newer same-id finding apart
 const bare = id => id.replace(/^(p:)+/, '')
-const DEBT = Object.fromEntries(Object.entries(DECIDE).map(([id, a]) => [id, a.match(/^\s*accept (\S+)[^]*?\bas known debt\b/i)?.[1]]).filter(([, f]) => f))
-const settledDebt = (f, book) => book.some(e => e.status === 'debt' && bare(e.id) === bare(f))
-const namedDebt = (f, book) => [`p:${f}`, f].find(id => book.some(e => e.id === id))
+const DEBT = Object.fromEntries(Object.entries(DECIDE).map(([id, a]) => [id, a.match(/^\s*accept (\S+)(?: \((.*)\)(?=\s+as known debt\b))?[^]*?\bas known debt\b/i)]).filter(([, m]) => m).map(([id, m]) => [id, { id: m[1], where: m[2] }]))
+const debtAt = (f, e) => bare(e.id) === bare(f.id) && (f.where == null || e.where === f.where)
+// no where in the answer: a debt an earlier run settled on that bare id is never re-applied to a newer same-id finding
+const namedDebt = (f, book) => f.where == null && book.some(e => e.status === 'debt' && debtAt(f, e)) ? undefined : [`p:${f.id}`, f.id].map(id => book.find(e => e.id === id && e.status === 'open' && debtAt(f, e))).find(Boolean)
 if (A.stage !== 'wholeBranch') for (const [id, f] of Object.entries(DEBT))
-  if (!settledDebt(f, CF_WS[id]?.findings || []) && !namedDebt(f, CF_WS[id]?.findings || [])) throw new Error(`decisions.${id} accepts ${f} as known debt, but carryForward has no such finding of ${id}: pass the stuck run's carryForward, and an answer that reads "accept <finding id> (<where>) as known debt"`)
+  if (!(CF_WS[id]?.findings || []).some(e => debtAt(f, e))) throw new Error(`decisions.${id} accepts ${f.id} as known debt, but carryForward has no such finding of ${id}: pass the stuck run's carryForward, and an answer that reads "accept <finding id> (<where>) as known debt"`)
 const name = repo => repo.split('/').pop()
 const STALE = `Read other repos ONLY via git -C <repo> fetch ${O}, then git -C <repo> show ${O}/<featureBranch>:<path> or git -C <repo> diff ${O}/<base>...${O}/<featureBranch> — never by filesystem path: those checkouts sit on unrelated branches.`
 
@@ -507,8 +508,8 @@ async function runWorkstream(w) {
   const cf = CF_WS[w.id]
   if (cf) {
     book.push(...cf.findings)
-    const named = DEBT[w.id] && !settledDebt(DEBT[w.id], book) && namedDebt(DEBT[w.id], book) // settled by an earlier run: never re-applied to a newer same-id finding
-    for (const e of book) if (named && e.status === 'open' && e.id === named) e.status = 'debt'
+    const named = DEBT[w.id] && namedDebt(DEBT[w.id], book)
+    if (named) named.status = 'debt'
     for (const e of book) if (e.status === 'debt') out.notes.push(`known debt (accepted by the user): ${e.id} (${e.where}: ${e.issue})`)
     ledger.push(...book.filter(e => STATUS.includes(e.status)).map(({ id, where, issue, status }) => ({ id, where, issue, status })))
     out.handed.push(...cf.handed)
@@ -1062,7 +1063,7 @@ const notRun = (w, why) => ({ id: w.id, branch: w.branch, merged: false, open: [
 const dropOut = w => ({ ...notRun(w, `dropped by the user: NOT done; delete ${O}/${w.branch} if an earlier call pushed it`), dropped: true, status: 'dropped' })
 // after: a workstream starts only once every listed one merged, so it branches from the head that carries them
 const started = {}
-const launch = w => started[w.id] ||= (DROPPED.has(w.id) && !RESUMED[w.id]?.merged ? Promise.resolve(dropOut(w)) : w.after
+const launch = w => started[w.id] ||= (DROPPED.has(w.id) && !(RESUMED[w.id]?.merged && /^[0-9a-f]{40}$/.test(RESUMED[w.id].head)) ? Promise.resolve(dropOut(w)) : w.after
   ? Promise.all(w.after.map(id => launch(byId[id]))).then(pre => { const missing = w.after.filter((_, i) => !pre[i].merged); return missing.length ? notRun(w, `ordered after ${missing.join(', ')}, which did not merge into ${w.featureBranch}; NOT started`) : runWorkstream(w) })
   : runWorkstream(w)).catch(e => { reopen(w, `${w.id} crashed`); return notRun(w, `crashed: ${e}`) })
 const wsPromises = STAGE === 'wholeBranch'
