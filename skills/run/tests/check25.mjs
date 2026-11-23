@@ -101,7 +101,7 @@ const wb = (id = 'a:p:c1-F1') => ({
   'one fix r1': () => ({ answers: [{ id: 'V-F1', action: 'fixed', note: 'flipped' }, { id, action: 'fixed', note: 'flipped' }] }),
   'one recheck r1': () => ({ verified: ['V-F1', id] }),
 })
-const SETTLED_NOTE = 'a question from an earlier call that starts with c1-F1 or a:c1-F1 is settled'
+const SETTLED_NOTE = 'a question from an earlier call under the "a: " tag that starts with c1-F1, or any that starts with a:c1-F1, is settled'
 await t('1h a handed finding a later call fixed leaves a repo note naming its id, for the question held from the paused call', async () => {
   const args = x => ({ cycles: 1, workstreams: [ws('a', { humanCheck: look })], ...x })
   const { r: r1 } = await go(args(), carry(stale))
@@ -135,6 +135,35 @@ await t('1l (control) with two workstreams only the fixed one\'s own and tagged 
   const qs = r.questions.map(q => q.q).sort()
   const keep = ['b: c1-F1: b local', 'one: b:c1-F1: wb b', 'one: c1-F1: untagged']
   assert(r.repos[0].verdict === 'pass' && keep.every(k => qs.includes(k)) && qs.some(q => q.startsWith('one: b:c1-F1 (x/old.test.js:3')) && qs.length === 4, JSON.stringify(qs)) })
+const settled = r => r.repos[0].notes.filter(x => x.includes('is settled'))
+const resumeAt = (r1, x, sc) => go({ ...x, resume: 'run-1', carryForward: r1.carryForward }, { 'one state': () => ({ workstreams: r1.workstreams.filter(w => w.merged).map(w => ({ id: w.id, head: w.validatedSha, merged: true })) }), ...sc })
+await t('1m with two workstreams the earlier-call note scopes the untagged id to its own workstream', async () => {
+  const X = F('c1-F1', 'critical', 'x/old.test.js:3'), own = w => ({
+    [`${w} review c1`]: () => ({ findings: [X] }),
+    [`${w} fix c1`]: () => ({ answers: [{ id: 'c1-F1', action: 'carried', note: 'x/ is a base test' }] }),
+    [`${w} validate c1`]: () => ({ verified: ['c1-F1'], questions: [Q(`c1-F1: ${w} asks`)] }) })
+  const two = { cycles: 1, workstreams: [ws('a'), ws('b')] }
+  const still = () => ({ verdict: 'fail', findings: [{ ...X, id: 'a:c1-F1' }, { ...X, id: 'b:c1-F1' }] })
+  const { r: r1 } = await go(two, { ...own('a'), ...own('b'), 'one recheck r1': still, 'one recheck r2': still })
+  assert(r1.repos[0].verdict === 'fail' && ['a', 'b'].every(w => r1.questions.some(q => q.q === `${w}: c1-F1: ${w} asks`)), 'call 1 holds both questions')
+  const { r } = await resumeAt(r1, two, {
+    'one validate': () => ({ verdict: 'fail', findings: [F('V-F1', 'critical', 'x/old.test.js:3')] }),
+    'one fix r1': () => ({ answers: [{ id: 'V-F1', action: 'fixed', note: 'f' }, { id: 'a:p:c1-F1', action: 'fixed', note: 'f' }, { id: 'b:p:c1-F1', action: 'declined', note: 'n' }] }),
+    'one recheck r1': () => ({ verified: ['V-F1', 'a:p:c1-F1', 'b:p:c1-F1'] }) })
+  const n = settled(r)
+  assert(r.repos[0].verdict === 'pass' && n.length === 1 && n[0].includes(SETTLED_NOTE) && !n.some(x => x.includes('"b: "') || x.includes('b:c1-F1')), JSON.stringify(r.repos[0].notes)) })
+await t('1n (control) an earlier-call handed finding the whole-branch pass escalated leaves no settled note', async () => {
+  const still = () => ({ verdict: 'fail', findings: [{ ...C, id: 'a:c1-F1' }] })
+  const { r: r1 } = await go(one, carry(stale, { 'one recheck r1': still, 'one recheck r2': still }))
+  const { r } = await resumeAt(r1, one, { ...wb(), 'one fix r1': () => ({ answers: [{ id: 'V-F1', action: 'fixed', note: 'f' }, { id: 'a:p:c1-F1', action: 'escalated', note: 'a brief names b/' }] }) })
+  assert(r.repos[0].verdict === 'pass' && !settled(r).length, JSON.stringify(r.repos[0].notes)) })
+await t('1o a third call names every earlier form of the id', async () => {
+  const still = id => () => ({ verdict: 'fail', findings: [{ ...C, id }] })
+  const { r: r1 } = await go(one, carry(stale, { 'one recheck r1': still('a:c1-F1'), 'one recheck r2': still('a:c1-F1') }))
+  const { r: r2 } = await resumeAt(r1, one, { 'one validate': () => ({ verdict: 'fail', findings: [{ ...C, id: 'a:p:c1-F1' }] }), 'one recheck r1': still('a:p:c1-F1'), 'one recheck r2': still('a:p:c1-F1') })
+  assert(r2.repos[0].verdict === 'fail', 'call 2 fails too')
+  const { r } = await resumeAt({ ...r2, workstreams: r1.workstreams }, one, wb('a:p:p:c1-F1'))
+  assert(r.repos[0].notes.some(x => x.includes('a question from an earlier call under the "a: " tag that starts with p:c1-F1 or c1-F1, or any that starts with a:p:c1-F1 or a:c1-F1, is settled')), JSON.stringify(r.repos[0].notes)) })
 
 // ---- 2. every prompt on the handed path gives the same answer ----
 await t('2a the delta validator that verifies a carried claim is told what that licenses, and to start any question about it with the id', async () => {
@@ -177,6 +206,8 @@ await t('3a SKILL.md states the drop; plugin.json is at least 0.4.3', async () =
   assert(/dropped the question about it/.test(s), 'the drop note')
   assert(/drop\s+a\s+held\s+question\s+that\s+starts\s+with\s+an\s+id\s+such\s+a\s+note\s+names/.test(s) && /a\s+question\s+from\s+an\s+earlier\s+call\s+that\s+starts\s+with/.test(s), 'the held-question drop')
   assert(s.includes('a file a brief names by path, directory or glob as not to be edited') && !/may not stop that fix/.test(s), 'the widened carve-out')
+  assert(/under\s+the\s+"<ws\s+id>:\s+"\s+tag\s+that\s+starts\s+with\s+<id>,\s+or\s+any\s+that\s+starts\s+with\s+<ws\s+id>:<id>/.test(s), 'the scoped earlier-call note')
+  assert(/clean-review\s+validator\s+asks\s+before\s+any\s+finding\s+is\s+carried/.test(s), 'the clean-review limit')
   const v = JSON.parse(readFileSync(new URL('../../../.claude-plugin/plugin.json', import.meta.url), 'utf8')).version.split('.').map(Number); assert(v[0] > 0 || v[1] > 4 || (v[1] === 4 && v[2] >= 3), 'at least 0.4.3') })
 
 if (fails.length) { console.error(fails.join('\n')); process.exit(1) }
