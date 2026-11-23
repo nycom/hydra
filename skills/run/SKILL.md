@@ -471,7 +471,13 @@ open question: …` (or the whole-branch round's, in the repo's `notes`), only
 once that fix is validated: its delta validator leaves nothing blocking, or the
 whole-branch pass ends with its fixes promoted. Otherwise it stays open and the
 next fixer sees it again. Escalations and validator questions are never
-offered: they stay the user's.
+offered: they stay the user's. One exception needs no fixer: a question that
+starts with the id of a handed finding (`<id>` or `<ws id>:<id>`) leaves
+`questions` once the whole-branch pass fixed that finding (repo note
+`whole-branch fix r<n> fixed <ws id>:<id>; dropped the question about it: …`).
+A question about it that does not start with the id stays, and the handed rule
+spares only a file a brief names as not to be edited, so a brief that protects
+a directory or a glob may not stop that fix: name the file.
 
 **Fixes outside `files[]` go to the whole-branch pass:** when a workstream has
 `files[]`, its fixer answers a critical or major whose only fix lies outside the
@@ -574,7 +580,8 @@ The workflow returns:
   awaiting the user). Count a carried minor once.
 
 `questions` (`{q, options, default}`) are only what the user must decide (an
-optional question a later validated fix `settles` is already dropped); `notes`
+optional question a later validated fix `settles`, or one about a handed finding
+the whole-branch pass fixed, is already dropped); `notes`
 are deviations and things not run; `escalations` are what the script itself
 saw go wrong (dead agents after 2 replacements, a validator that never ran its gate in 3 attempts, a push step that "returned no usable result 3 times (died or malformed sha); check origin/<branch> for an unvalidated push", SHA mismatches between agents,
 cap or budget stops, failed merges, a finding that survived its opus fix — each
