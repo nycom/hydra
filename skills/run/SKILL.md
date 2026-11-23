@@ -427,9 +427,10 @@ or the problem}]`, earlier answers first), `resumeFromRunId` = the paused run,
 `resume` = its id and `carryForward` = its `carryForward`. Between the pause and the resume change nothing but
 `humanChecks`: no hand fixes, no brief edits. Hold the paused result's
 `questions` and ask them with the final return's. A later call's repo note `… a
-question from an earlier call that starts with <id> … is settled` means the
-whole-branch pass fixed that finding: drop a held question that starts with an
-id such a note names (after its `<ws id>: ` or repo tag). The resume's git probe
+question from an earlier call under the "<ws id>: " tag that starts with <id>,
+or any that starts with <ws id>:<id>, is settled` means the whole-branch pass
+fixed that finding: drop a held question that starts with an id such a note
+names, the bare `<id>` only under that workstream's tag. The resume's git probe
 carries every merged workstream, so nothing is re-implemented and an answer
 reaches its workstream without any replay. An answer binds to the workstream
 head, never the feature tip: a re-merge with no new workstream commit, or a
@@ -480,11 +481,14 @@ starts with the id of a handed finding (`<id>` or `<ws id>:<id>`) leaves
 `whole-branch fix r<n> fixed <ws id>:<id>; dropped the question about it: …`).
 That drop sees this call's questions only. For a finding handed in an earlier
 call (a `p:` id) the repo note is `whole-branch fix r<n> fixed <ws
-id>:p:<id>: a question from an earlier call that starts with <id> or <ws
-id>:<id> is settled`, and the coordinator drops the question it held.
+id>:p:<id>: a question from an earlier call under the "<ws id>: " tag that
+starts with <id>, or any that starts with <ws id>:<id>, is settled`, and the
+coordinator drops the question it held.
 A question about it that does not start with the id stays, and so does one
 about a file a brief names by path, directory or glob as not to be edited: the
-handed rule spares that file, so its finding is escalated, not fixed.
+handed rule spares that file, so its finding is escalated, not fixed. So does a
+question a clean-review validator asks before any finding is carried: it names
+no handed finding yet.
 
 **Fixes outside `files[]` go to the whole-branch pass:** when a workstream has
 `files[]`, its fixer answers a critical or major whose only fix lies outside the

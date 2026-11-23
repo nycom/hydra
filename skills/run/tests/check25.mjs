@@ -204,7 +204,7 @@ await t('4b a hard-blocked author resumed with that answer reaches the carry and
 await t('3a SKILL.md states the drop; plugin.json is at least 0.4.3', async () => {
   const s = readFileSync(new URL('../SKILL.md', import.meta.url), 'utf8')
   assert(/dropped the question about it/.test(s), 'the drop note')
-  assert(/drop\s+a\s+held\s+question\s+that\s+starts\s+with\s+an\s+id\s+such\s+a\s+note\s+names/.test(s) && /a\s+question\s+from\s+an\s+earlier\s+call\s+that\s+starts\s+with/.test(s), 'the held-question drop')
+  assert(/drop\s+a\s+held\s+question\s+that\s+starts\s+with\s+an\s+id\s+such\s+a\s+note\s+names/.test(s) && /a\s+question\s+from\s+an\s+earlier\s+call\s+under\s+the\s+\"<ws\s+id>:\s+\"\s+tag/.test(s) && /the\s+bare\s+`<id>`\s+only\s+under\s+that\s+workstream's\s+tag/.test(s), 'the held-question drop')
   assert(s.includes('a file a brief names by path, directory or glob as not to be edited') && !/may not stop that fix/.test(s), 'the widened carve-out')
   assert(/under\s+the\s+"<ws\s+id>:\s+"\s+tag\s+that\s+starts\s+with\s+<id>,\s+or\s+any\s+that\s+starts\s+with\s+<ws\s+id>:<id>/.test(s), 'the scoped earlier-call note')
   assert(/clean-review\s+validator\s+asks\s+before\s+any\s+finding\s+is\s+carried/.test(s), 'the clean-review limit')
