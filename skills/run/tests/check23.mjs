@@ -1,4 +1,4 @@
-// A resume probe unique per call, so a second resume never replays the first's git state.
+// A resume probe unique per call (so a second resume never replays the first's git state) and author questions a later fix settled.
 // Every scenario fails against the 0.4.0 script except the ones marked (control).
 import { Run } from './run.mjs'
 import assert from 'node:assert'
@@ -84,11 +84,37 @@ await t('1d (control) the probe is deterministic: the same args give the same pr
 await t('1e a carryForward call that is not a positive integer throws', async () => {
   for (const call of [0, 1.5, '2']) await assert.rejects(go(base({ resume: 'r', carryForward: { call } }), {}), /carryForward\.call/, String(call)) })
 
+// ---- 2. a question a later fix of the same workstream settled leaves questions ----
+const optional = Q('optional: also flip the stale assertion in b/old.test.js?')
+const softBlock = { 'a implement': () => ({ status: 'blocked', ok: true, questions: [optional] }), 'a review c1': () => ({ findings: [F('c1-F1')] }), 'a validate c1': () => ({ verified: ['c1-F1'] }) }
+const fixWith = own => ({ ...softBlock, 'a fix c1': () => ({ answers: [{ id: 'c1-F1', action: 'fixed', note: 'flipped it under the integration-fix exception' }], ...own }) })
+await t('2a the fix prompt lists the open questions by id, and a settled one never reaches the top-level questions', async () => {
+  const { r, prompts } = await go({ cycles: 1, workstreams: [ws('a')] }, fixWith({ settles: ['Q1'] }))
+  assert(prompts['a fix c1'].includes('"id":"Q1"') && prompts['a fix c1'].includes(optional.q) && /settles/.test(prompts['a fix c1']), 'the fixer sees the question and how to settle it')
+  assert(W(r, 'a').merged, 'merged')
+  assert(!r.questions.some(q => q.q.includes(optional.q)) && !W(r, 'a').questions.some(q => q.q === optional.q), JSON.stringify(r.questions))
+  assert(W(r, 'a').notes.some(x => x.includes('fix c1 settled') && x.includes(optional.q)), JSON.stringify(W(r, 'a').notes)) })
+await t('2b (control) a fix that settles nothing leaves the question with the user', async () => {
+  const { r } = await go({ cycles: 1, workstreams: [ws('a')] }, fixWith({}))
+  assert(r.questions.some(q => q.q === `a: ${optional.q}`), JSON.stringify(r.questions)) })
+await t('2c (control) an unknown id in settles changes nothing', async () => {
+  const { r } = await go({ cycles: 1, workstreams: [ws('a')] }, fixWith({ settles: ['Q9'] }))
+  assert(r.questions.some(q => q.q === `a: ${optional.q}`), JSON.stringify(r.questions)) })
+await t('2d (control) with no open question the fix prompt says nothing about settling', async () => {
+  const { prompts } = await go({ cycles: 1, workstreams: [ws('a')] }, { 'a review c1': () => ({ findings: [F('c1-F1')] }), 'a validate c1': () => ({ verified: ['c1-F1'] }) })
+  assert(prompts['a fix c1'] && !/settles/.test(prompts['a fix c1'])) })
+await t('2e (control) a validator\'s brief-conflict question is never offered to the fixer to settle: it stays the user\'s', async () => {
+  const conflict = Q('the brief and the repo disagree on the field name')
+  const { r, prompts } = await go({ cycles: 1, workstreams: [ws('a')] }, { 'a validate c1': (p, k) => k === 1 ? { open: [F('v1-F1')], questions: [conflict] } : { verified: ['v1-F1'] }, 'a fix c1': () => ({ settles: ['Q1'] }) })
+  assert(prompts['a fix c1'] && !prompts['a fix c1'].includes(conflict.q), 'not listed')
+  assert(r.questions.some(q => q.q === `a: ${conflict.q}`), JSON.stringify(r.questions)) })
+
 // ---- docs and version ----
-await t('6a SKILL.md states the per-call probe', async () => {
+await t('6a SKILL.md states the per-call probe and settled questions', async () => {
   const s = readFileSync(new URL('../SKILL.md', import.meta.url), 'utf8')
   const row = s.split('\n').find(l => l.startsWith('| `resume` |'))
-  assert(/call ordinal/.test(row) && /digest/.test(row) && !/its prompt names that id, so it always runs live/.test(row), 'resume row') })
+  assert(/call ordinal/.test(row) && /digest/.test(row) && !/its prompt names that id, so it always runs live/.test(row), 'resume row')
+  assert(/`settles`/.test(s), 'settled questions') })
 
 if (fails.length) { console.error(fails.join('\n')); process.exit(1) }
 console.log('check23 ok')

@@ -322,6 +322,7 @@ const FIXED = {
         required: ['id', 'action', 'note'],
       },
     },
+    settles: { type: 'array', items: { type: 'string' }, description: 'ids of the listed open questions this fix settled (took an option other than the default, or made the question moot); empty if none' },
   },
   required: [...PUSHED.required, 'answers'],
 }
@@ -522,10 +523,12 @@ async function runWorkstream(w) {
   // blockers open when the resumed call stopped: a restarted review re-checks them, and only a validator clears them
   const reopened = (cf?.findings || []).filter(e => e.status === 'open' && e.severity !== 'minor').map(({ id, severity, kind, where, issue }) => ({ id, severity, kind, where, issue, evidence: 'open when the resumed run stopped' }))
   let authored = [] // the last author's or fixer's checkExits, for the false-green label
+  const raised = [] // the author's and fixers' own questions: a later fix that acts on one settles it
   const absorb = r => {
     authored = r.checkExits
     out.sharedEdits = r.sharedEdits // each author returns the complete current list
     out.questions.push(...r.questions)
+    raised.push(...r.questions)
     out.notes.push(...r.notes)
     decisions.push(...r.decisions)
     Object.assign(out, { status: soft(r) ? 'done' : r.status, tests: r.tests, gateTail: r.gateTail })
@@ -707,10 +710,11 @@ Return headSha, gate, evidence, verified (empty), open (ids v${i}-F1, ...) and q
         const prev = out.sha
         // A blocker that survived two fix rounds gets one opus fix with the earlier attempts.
         const stuck = found.filter(blocking).map(f => ({ f, t: triesOf(f) })).filter(x => x.t?.rounds.size >= 2)
+        const asked = raised.filter(q => out.questions.includes(q)).map((q, k) => ({ id: `Q${k + 1}`, ...q })) // still open, so the user is never asked about done work
         const fix = await step(
           `You are the author of workstream ${w.id} (${w.repo}, branch ${w.branch}). Review cycle ${i} findings:
 ${JSON.stringify(found)}
-${stuck.map(({ f, t }) => `${f.id}: a prior fixer attempted this ${t.rounds.size} times: ${t.answers.join(' | ')}. Those attempts did not hold: find the root cause rather than repeat them; if no fix can hold, say why in the answer.\n`).join('')}${decisions.length ? `Your earlier reasoning:\n${JSON.stringify(decisions)}\n` : ''}
+${stuck.map(({ f, t }) => `${f.id}: a prior fixer attempted this ${t.rounds.size} times: ${t.answers.join(' | ')}. Those attempts did not hold: find the root cause rather than repeat them; if no fix can hold, say why in the answer.\n`).join('')}${decisions.length ? `Your earlier reasoning:\n${JSON.stringify(decisions)}\n` : ''}${asked.length ? `Questions this workstream's author or fixers raised earlier, still open for the user:\n${JSON.stringify(asked)}\nIf a change you make takes an option other than a question's default, or settles it so the user no longer needs to answer, return its id in settles and say what you did in notes.\n` : ''}
 Set up: worktree ${w.id}-fix${i}, detached at ${O}/${w.branch} (expected ${prev}; if it moved, an earlier attempt of this step pushed it: continue from it); push back to ${w.branch}.
 Critical and major: fix bugs with a test you ran RED before the fix and green after; answer every kind "question" with a defensible reason or a change; delete what the over-engineering findings say to delete.
 ${ESCALATE}
@@ -728,6 +732,11 @@ Return status, ok, verified sha, tests, gateTail, one answer per finding id, sha
         if (!fix) return stop(unusable(`fix c${i}`, w.branch, `${tag} fix c${i}`))
         absorb(fix)
         if (!pushed(fix, `fix c${i}`)) return blocked(`fix c${i}`, fix)
+        const settledQ = asked.filter(q => fix.settles?.includes(q.id)).map(q => q.q)
+        if (settledQ.length) {
+          out.questions = out.questions.filter(q => !settledQ.includes(q.q))
+          out.notes.push(...settledQ.map(q => `fix c${i} settled the open question: ${q}`))
+        }
         // a claimed fix outside files[] is the whole-branch pass's once this cycle's validator verifies the claim; a rejected one stays in the cycles
         const claimed = w.files ? found.filter(f => blocking(f) && fix.answers.some(a => a.id === f.id && a.action === 'carried')) : []
         const allowed = [...new Set([...(w.files || []), ...(mergedInto[w.repo] || []).flatMap(x => x.files || [])])].join(', ')

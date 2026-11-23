@@ -458,7 +458,11 @@ branch, never a new fix-up workstream. An author blocked only on an optional
 sub-part, with every other part done, the gate green, the head pushed and each
 question's default implemented, returns `blocked` with `ok: true`: the run
 continues to review and merge with the defaults and carries the questions;
-its `status` reads `done`, and a note says it continued on the default.
+its `status` reads `done`, and a note says it continued on the default. A later
+fix of the same workstream sees the open questions by id (`Q1`, …); one it
+acts on (takes an option other than the default, or makes moot) it returns in
+`settles`, and that question leaves `questions` with a note `fix c<n> settled
+the open question: …`, so the user is never asked about work already done.
 
 **Fixes outside `files[]` go to the whole-branch pass:** when a workstream has
 `files[]`, its fixer answers a critical or major whose only fix lies outside the
@@ -548,7 +552,8 @@ The workflow returns:
   it; it may be absent from `open` (a minor nobody re-raised, or an escalation
   awaiting the user). Count a carried minor once.
 
-`questions` (`{q, options, default}`) are only what the user must decide; `notes`
+`questions` (`{q, options, default}`) are only what the user must decide (a
+workstream question a later fix of it `settles` is already dropped); `notes`
 are deviations and things not run; `escalations` are what the script itself
 saw go wrong (dead agents after 2 replacements, a validator that never ran its gate in 3 attempts, a push step that "returned no usable result 3 times (died or malformed sha); check origin/<branch> for an unvalidated push", SHA mismatches between agents,
 cap or budget stops, failed merges, a finding that survived its opus fix — each
