@@ -1,4 +1,4 @@
-// A resume probe unique per call (so a second resume never replays the first's git state) and author questions a later fix settled.
+// A resume probe unique per call (so a second resume never replays the first's git state) and soft-block questions a later validated fix settled.
 // Every scenario fails against the 0.4.0 script except the ones marked (control).
 import { Run } from './run.mjs'
 import assert from 'node:assert'
@@ -108,6 +108,22 @@ await t('2e (control) a validator\'s brief-conflict question is never offered to
   const { r, prompts } = await go({ cycles: 1, workstreams: [ws('a')] }, { 'a validate c1': (p, k) => k === 1 ? { open: [F('v1-F1')], questions: [conflict] } : { verified: ['v1-F1'] }, 'a fix c1': () => ({ settles: ['Q1'] }) })
   assert(prompts['a fix c1'] && !prompts['a fix c1'].includes(conflict.q), 'not listed')
   assert(r.questions.some(q => q.q === `a: ${conflict.q}`), JSON.stringify(r.questions)) })
+
+await t('2f a settle the delta validator rejects is not applied: fix c2 reverts, the question stays and is offered again', async () => {
+  const { r, prompts } = await go({ cycles: 1, workstreams: [ws('a')] }, { ...fixWith({ settles: ['Q1'] }),
+    'a validate c1': () => ({ verified: ['c1-F1'], open: [{ ...F('v1-R1'), kind: 'regression' }] }), 'a validate c2': () => ({ verified: ['v1-R1'] }),
+    'a fix c2': () => ({ answers: [{ id: 'v1-R1', action: 'fixed', note: 'reverted the flip' }] }) })
+  assert(W(r, 'a').merged && prompts['a fix c2']?.includes(optional.q), 'offered to fix c2')
+  assert(r.questions.some(q => q.q === `a: ${optional.q}`) && !W(r, 'a').notes.some(x => /settled the open question/.test(x)), JSON.stringify(r.questions)) })
+await t('2g an escalation question is never offered as settleable: a later settles leaves it with the user', async () => {
+  const esc = Q('c1-F1: the brief and the repo disagree on the field name')
+  const { r, prompts } = await go({ cycles: 1, workstreams: [ws('a')] }, {
+    'a review c1': () => ({ findings: [F('c1-F1'), F('c1-F2', 'major', 'y.py:4')] }),
+    'a fix c1': () => ({ answers: [{ id: 'c1-F1', action: 'escalated', note: 'brief vs repo' }, { id: 'c1-F2', action: 'fixed', note: 'n' }], questions: [esc] }),
+    'a validate c1': () => ({ verified: ['c1-F1'], open: [F('c1-F2', 'major', 'y.py:4')] }), 'a validate c2': () => ({ verified: ['c1-F2'] }),
+    'a fix c2': () => ({ settles: ['Q1'] }) })
+  assert(prompts['a fix c2'] && !prompts['a fix c2'].includes(esc.q), 'not listed')
+  assert(r.questions.some(q => q.q === `a: ${esc.q}`), JSON.stringify(r.questions)) })
 
 // ---- docs and version ----
 await t('6a SKILL.md states the per-call probe and settled questions; plugin.json is 0.4.1', async () => {
