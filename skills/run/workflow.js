@@ -1064,6 +1064,15 @@ sha = the commit you checked. verdict pass only if nothing critical or major is 
     res.sha = checked
   }
   for (const x of merged) res.notes.push(...dropSettled(x, softAsked.filter(q => q.w === x), wbSettles).map(q => `whole-branch fix r${res.fixRounds} settled the open question of ${x.id}: ${q}`))
+  // a question that names a handed finding this pass fixed (recheck-verified, promoted) asks about done work
+  for (const x of merged) for (const h of x.handed || []) {
+    const id = `${x.id}:${h.id}`
+    if (book.find(e => e.id === id)?.status !== 'fixed') continue
+    const gone = [...x.questions.filter(q => names(q.q, h.id) || names(q.q, id)), ...res.questions.filter(q => names(q.q, id))]
+    x.questions = x.questions.filter(q => !gone.includes(q))
+    res.questions = res.questions.filter(q => !gone.includes(q))
+    res.notes.push(...gone.map(q => `whole-branch fix r${res.fixRounds} fixed ${id}; dropped the question about it: ${q.q}`))
+  }
   return res
 }
 
