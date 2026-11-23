@@ -486,7 +486,8 @@ starts with <id>, or any that starts with <ws id>:<id>, is settled`, and the
 coordinator drops the question it held.
 A question about it that does not start with the id stays, and so does one
 about a file a brief names by path, directory or glob as not to be edited: the
-handed rule spares that file, so its finding is escalated, not fixed. So does a
+handed rule spares that file, so its finding is escalated, not fixed (a clause
+that names no path, directory or glob spares none). So does a
 question a clean-review validator asks before any finding is carried: it names
 no handed finding yet. A run that reuses a finding id across calls (an earlier
 call's `c1-F1` and a new `c1-F1` in a later one) can make the earlier-call note
