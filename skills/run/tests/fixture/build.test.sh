@@ -379,12 +379,32 @@ eq "flow files[]" "$(arg "$tmp/out/flow.json" '[w["files"] for w in a["workstrea
 eq "flow: no after and no humanCheck by default (the scenario adds them)" "$(arg "$tmp/out/flow.json" '[(w.get("after"), w.get("humanCheck")) for w in a["workstreams"]]')" "[(None, None), (None, None), (None, None)]"
 arg "$tmp/out/flow.json" 'a["workstreams"][0]["brief"]' | grep -qF 'same shape as ledger.api.total' || fail "alpha-discount brief does not tie its result to ledger.api.total"
 ! arg "$tmp/out/flow.json" 'a["workstreams"][0]["brief"]' | grep -qiE 'test_api|total_cents|rename' || fail "alpha-discount brief names the rename or the stale test"
-# the stale assertion: a pre-existing test in alpha-cents' file pins the old field of the discount result through a stub, green whatever ledger.discount does
+# the stale assertion: a pre-existing test in alpha-cents' file calls the real discounted_total and pins its old field; it skips while the function is absent
 git clone -q "$tmp/eval/f/dest/remotes/alpha.git" "$tmp/trees/f"
-grep -qF '"discounted_total", create=True, return_value={"total": 900}' "$tmp/trees/f/tests/test_api.py" || fail "no stubbed discount-shape test in tests/test_api.py"
-printf '\n\ndef discounted_total(entries, code):\n    return {"total_cents": 0}\n' >> "$tmp/trees/f/ledger/discount.py"
-eq "the stubbed discount-shape test stays green on a renamed result" "$( (cd "$tmp/trees/f" && python3 -m unittest -q tests.test_api >/dev/null 2>&1) && echo green || echo red)" green
-echo "ok --flow: baseline before the cents rename (total in alpha, its contract and smoke, beta), gates green but known-red, smoke 0; three workstreams (alpha-discount, alpha-cents on opus, beta-cents), each with files[], no after, no humanCheck, no base, no smoke; tests/test_api.py holds a stubbed discount-shape test that stays green on a renamed result; telling dest paths refused"
+variant() { # [python appended to ledger/discount.py] [rename]: a fresh copy of the baseline tree, printed
+  local t; t=$(mktemp -d "$tmp/trees/f-XXXXXX")
+  cp -R "$tmp/trees/f/." "$t"
+  [ -z "${1:-}" ] || printf '\n\n%s\n' "$1" >> "$t/ledger/discount.py"
+  [ -z "${2:-}" ] || sed -i.bak 's/{"total": /{"total_cents": /' "$t/ledger/api.py"
+  echo "$t"
+}
+shape() { # as variant: the outcome of test_discounted_total_shape there (ok, FAIL, ERROR or skipped)
+  local t; t=$(variant "$@")
+  (cd "$t" && python3 -m unittest -v tests.test_api 2>&1) | sed -nE 's/^test_discounted_total_shape .*\.\.\. (ok|FAIL|ERROR|skipped).*/\1/p'
+}
+REAL=$'from ledger.api import total\n\ndef discounted_total(entries, code):\n    (field, cents), = total([{"amount": apply(code, sum(e["amount"] for e in entries))}]).items()\n    return {field: cents}'
+api=$(cat "$tmp/trees/f/tests/test_api.py")
+no_hints "baseline tests/test_api.py" "$api" "$META_HINTS"
+! grep -qE 'mock|patch|create=True' <<<"$api" || fail "tests/test_api.py stubs the discount result instead of calling it"
+eq "the discount-shape test skips while discounted_total is absent" "$(shape)" skipped
+eq "alpha-cents' rename alone leaves it skipped (its gate stays green)" "$(shape "" rename)" skipped
+eq "a correct discounted_total after the rename (total_cents) turns it red" "$(shape "$REAL" rename)" FAIL
+eq "the same function before the rename (total) keeps it green" "$(shape "$REAL")" ok
+eq "a stub that raises is red, never a skip" "$(shape $'def discounted_total(entries, code):\n    raise NotImplementedError')" ERROR
+eq "a non-callable stub is red, never a skip" "$(shape 'discounted_total = None')" ERROR
+eq "S21's scoped alpha-discount gate stays green on that head" "$( (cd "$(variant "$REAL" rename)" && python3 -m unittest tests.test_discount >/dev/null 2>&1) && echo 0 || echo $?)" 0
+eq "after the rename and a correct discounted_total, only that test joins the known-red" "$(gate_failures "$(variant "$REAL" rename)")" "tests.test_api.ApiTest.test_discounted_total_shape $KNOWN_RED"
+echo "ok --flow: baseline before the cents rename (total in alpha, its contract and smoke, beta), gates green but known-red, smoke 0; three workstreams (alpha-discount, alpha-cents on opus, beta-cents), each with files[], no after, no humanCheck, no base, no smoke; tests/test_api.py holds a discount-shape test that skips until discounted_total exists and goes red on a correct one in the renamed shape; telling dest paths refused"
 
 # nothing outside the temp dir: sandboxed HOME/TMPDIR/cwd stay empty, this checkout and the global git config untouched
 for s in home tmp cwd; do eq "sandbox $s empty" "$(ls -A "$tmp/$s")" ""; done
