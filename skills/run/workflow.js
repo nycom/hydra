@@ -557,9 +557,11 @@ async function runWorkstream(w) {
     const done = mergedInto[w.repo] || []
     const pending = W.filter(x => x.repo === w.repo && x !== w && !done.includes(x) && !(dependsOn(x, w.id) && x.files?.some(f => w.files?.some(g => overlaps(f, g)))))
     return done.length
-      ? `Integration fix: if a critical or major can only be fixed in files owned by workstreams already merged into ${w.featureBranch} — ${owners(done)} — first git merge ${O}/${w.featureBranch} into your branch, then fix those files too (the one exception to your file list; say so in notes).${pending.length ? ` Never touch files owned by workstreams not merged yet: ${owners(pending)}.` : ''}`
+      ? `Integration fix: if a critical or major can only be fixed in files owned by workstreams already merged into ${w.featureBranch} — ${owners(done)} — first git merge ${O}/${w.featureBranch} into your branch, then fix those files too (the one exception to your file list; say so in notes). The exception covers their code, never a pre-existing test the brief does not name: that test stays read-only, and a blocker whose only fix is in one is ${w.files ? 'answered "carried"' : 'status "blocked" with a question'}.${pending.length ? ` Never touch files owned by workstreams not merged yet: ${owners(pending)}.` : ''}`
       : `No workstream has merged into ${w.featureBranch} yet; a blocker outside your files is ${w.files ? 'answered "carried" (see above)' : 'status "blocked" with a question'}.`
   }
+  // the merge backstop refuses other files outside files[], so the hole is a merged sibling's test, which the exception never covers
+  const roGuard = () => w.files && mergedInto[w.repo]?.length ? ` A pre-existing test outside this workstream's files (${w.files.join(', ')}) that the brief does not name is read-only, merged siblings' tests included: an edit to one in this range is a regression whatever the brief seems to justify (major; critical if deleted, renamed or skipped).` : ''
   const authorGate = () => w.quickGate ? GATE(w.quickGate, c.knownRed, w.repo, true) : GATE(w.gate, c.knownRed, w.repo)
   // The first validator of a workstream writes black-box acceptance tests from the brief before it reads the diff.
   let acceptance = true
@@ -689,7 +691,7 @@ The brief:
 ${w.brief}
 
 ${accept(out.sha)}${ACC_RUN(out.sha)}1. Check every acceptance criterion of the brief against the code and a command you ran. ${MERGE_EDITS(c.hot, out.sharedEdits)}${REFUTE} ${CONFLICT}
-2. Prove the new tests: revert the production hunks in your worktree, they must go red; restore them, green. ${TEST_GUARD}
+2. Prove the new tests: revert the production hunks in your worktree, they must go red; restore them, green. ${TEST_GUARD}${roGuard()}
 3. Run the gate and report gate {green, summary, command, flaky}. ${WRAPPED}:
 ${GATE_CMD(w.gate)}
 ${GREEN(c.knownRed, w.repo)} ${FLAKY}
@@ -751,7 +753,7 @@ Findings with the author's claimed resolutions — judge the code first, then re
 ${JSON.stringify(found.map(f => ({ ...f, claim: fix.answers.find(a => a.id === f.id) || 'no answer' })))}
 ${out.handed.length ? `Handed to the whole-branch pass (their fix is outside this workstream's files; not yours to judge, never re-file them): ${out.handed.map(f => f.id).join(', ')}\n` : ''}${ledger.length ? `Verified in earlier cycles (a fix that undoes one is a regression unless escalated): ${JSON.stringify(ledger)}\n` : ''}
 1. ${REFUTE} Where a test is claimed, it must fail at ${prev}, the pre-fix head: run it there in a second worktree at ${w.repo}/.claude/worktrees/${w.id}-val${i}-red (same rules: clear a leftover path first, remove it when done; never mktemp), and green at ${fix.sha}. Reverting the fix hunks in your worktree is the fallback only when that cannot run; state the fallback in evidence. Judge each answer to a question and each declined minor: defensible or not. ${CLAUSES} ${CONFLICT} ${MERGE_EDITS(c.hot, out.sharedEdits)}${EVIDENCE}${claimed.length ? ` A claim "carried" holds only when its fix cannot be made inside the files this workstream may edit (${allowed}): return the id in verified if so, otherwise in open. A pre-existing test the brief does not name is read-only, so it counts as outside them.` : ''}
-2. Hunt regressions the fixes introduced (they routinely plant new bugs: data loss, broken callers, weakened tests). ${TEST_GUARD}${first ? ` ${fullGuard(fix.sha)}` : ''}
+2. Hunt regressions the fixes introduced (they routinely plant new bugs: data loss, broken callers, weakened tests). ${TEST_GUARD}${roGuard()}${first ? ` ${fullGuard(fix.sha)}` : ''}
 3. Run the gate and report gate {green, summary, command, flaky}. ${WRAPPED}:
 ${GATE_CMD(w.gate)}
 ${GREEN(c.knownRed, w.repo)} ${FLAKY}

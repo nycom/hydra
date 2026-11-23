@@ -167,7 +167,10 @@ Implementation is never below Sonnet.
   blocker can only be fixed in files owned by workstreams **already merged** into
   the feature branch, the fixer first merges `origin/<featureBranch>` into its
   branch and fixes those files too; it never touches files of workstreams not
-  merged yet. The script keeps a run-wide record of who has merged (written
+  merged yet. The exception covers the merged siblings' code, never their
+  pre-existing tests: a pre-existing test the brief does not name stays
+  read-only there too, and a blocker whose only fix is in one is `"carried"`
+  (`blocked` with a question when the workstream has no `files[]`). The script keeps a run-wide record of who has merged (written
   inside the per-repo merge lock), names both groups in the fix prompt, and the
   merge backstop allows this workstream's `files[]` plus those of workstreams
   already merged at merge time.
@@ -475,7 +478,11 @@ files it may edit (a pre-existing test, a file the integration-fix exception
 does not give it, which includes any file before a sibling has merged)
 `"carried"`; for such a workstream the fix prompt never also tells it to block.
 Code in an already-merged sibling's files stays the fixer's through the
-integration-fix exception. The delta validator checks each claim against those
+integration-fix exception, never their pre-existing tests. Once a sibling has
+merged, every workstream validator also files an edit to a pre-existing test
+outside `files[]` that the brief does not name as a regression (major;
+critical if deleted, renamed or skipped), claimed or not; before that the merge
+backstop refuses it. The delta validator checks each claim against those
 files; a claim it does not verify (silence included) goes back to the fixer
 for another cycle, counted by the usual stop rules. A verified one leaves the workstream's cycles (ledger
 status `carried`, listed in `workstreams[].handed`) and joins its repo's
