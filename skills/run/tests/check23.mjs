@@ -137,12 +137,12 @@ await t('3b (control) a whole-branch settle whose pass fails is not applied', as
   assert(r.repos[0].verdict === 'fail' && r.questions.some(q => q.q === `a: ${optional.q}`), JSON.stringify(r.questions)) })
 
 // ---- docs and version ----
-await t('6a SKILL.md states the per-call probe and settled questions; plugin.json is 0.4.1', async () => {
+await t('6a SKILL.md states the per-call probe and settled questions; plugin.json is at least 0.4.1', async () => {
   const s = readFileSync(new URL('../SKILL.md', import.meta.url), 'utf8')
   const row = s.split('\n').find(l => l.startsWith('| `resume` |'))
   assert(/call ordinal/.test(row) && /digest/.test(row) && !/its prompt names that id, so it always runs live/.test(row), 'resume row')
   assert(/`settles`/.test(s), 'settled questions')
-  assert.equal(JSON.parse(readFileSync(new URL('../../../.claude-plugin/plugin.json', import.meta.url), 'utf8')).version, '0.4.1') })
+  const v = JSON.parse(readFileSync(new URL('../../../.claude-plugin/plugin.json', import.meta.url), 'utf8')).version.split('.').map(Number); assert(v[0] > 0 || v[1] > 4 || (v[1] === 4 && v[2] >= 1), 'at least 0.4.1') })
 
 if (fails.length) { console.error(fails.join('\n')); process.exit(1) }
 console.log('check23 ok')
