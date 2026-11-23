@@ -158,6 +158,9 @@ Implementation is never below Sonnet.
   script rejects overlapping sets in one repo up front, and the merge rejects a
   branch that edited outside its set. Give every workstream a `files[]` when any
   has one: the integration rule below can only name files that were declared.
+  Overlap is allowed when one workstream is ordered `after` the other (directly
+  or through a chain): they never run at once, and the later one's backstop
+  allows the earlier one's files. Use it for several workstreams on one large file.
 - **Integration fixes at the seams:** every workstream validator trial-merges
   `origin/<featureBranch>` (never committed) and runs the gate there too; a
   failure the merge introduces is a regression of kind `integration`. When a
@@ -304,20 +307,23 @@ Workflow({
 | `wbRounds` | `2` | whole-branch fix rounds, each pushed to a side branch `<featureBranch>--wbfix<round>` and promoted onto the feature branch only after a passing recheck; `0` = no fix rounds (findings returned unfixed; the repo verdict is `fail` while any is critical or major); pair with `docsRepos: []` for a review-only pass (a failing repo skips docs regardless) |
 | `stopRule` | none | non-empty string naming the wrong actions. A blocker is a regression vs the base or one of these; a miss the base also has is a known gap and minor. It reshapes the severity text for every reviewer and validator, and fixers decline known gaps. It applies run-wide (every workstream, the shared-edits check, docs validate): in a mixed run, name "an unmet brief criterion" in the rule, or split the run |
 | `acceptance` | none | absolute path to the approved case table. Validators run each row this change touches black-box at their sha; reviewers block only on a broken row or a regression vs the base, and a failing row blocks even when the base fails it. Security, data loss and a red gate stay critical. A missing file is a critical finding from validators and `blocked` for authors and fixers; reviewers get no missing-file instruction |
-| `decisionLog` | none | absolute path to the log of the user's answers; binding for every agent through the hard rules (a missing file is critical, or `blocked` (or `ok=false` with notes) for any agent that pushes). Setting it also turns on the drift audit: one read-only `fable` agent after the repos are final, skipped when nothing shipped, during a `humanCheck` pause or an `incomplete` repo, or when the token reserve is short. Result `drift: {verdict: pass\|drift\|failed\|died\|skipped, items: [{repo, where, change}], sections, notes}` (`failed` = the agent could not read the log or a repo; its items are dropped); each item becomes a revert-by-default question, and a `died`, `failed` or reserve-`skipped` audit adds one question whose default re-runs `stage: "wholeBranch"` to audit drift |
+| `decisionLog` | none | absolute path to the log of the user's answers; binding for every agent through the hard rules (a missing file is critical, or `blocked` (or `ok=false` with notes) for any agent that pushes). Setting it also turns on the drift audit: one read-only `fable` agent after the repos are final, skipped when nothing shipped, during a `humanCheck` pause or an `incomplete` repo, or when the token reserve is short. Result `drift: {verdict: pass\|drift\|failed\|died\|skipped, items: [{repo, where, change}], sections, notes}` (`failed` = the agent could not read the log or a repo; its items are kept under `drift.unconfirmed`, never questions); each item becomes a revert-by-default question, and a `died`, `failed` or reserve-`skipped` audit adds one question whose default re-runs `stage: "wholeBranch"` to audit drift |
 | `wbReviewModel` | repo's highest `reviewModel` | `sonnet`, `opus` or `fable`; overrides only the integrated whole-branch review model, not the workstream reviews |
 | `tokenBudget` | `null` | output-token cap for this run; the user's "+Nk" turn target also applies. Spend is counted from the script's start, so a `resumeFromRunId` crash recovery starts a fresh `tokenBudget` |
 | `tokenReserve` | `600000` | before each new cycle, each whole-branch fix round, the contract check and docs: if less than this is left, nothing new starts; the item is reported not merged / failed with the reason |
 | `localOnly` | `false` | every fetch, push and `ls-remote` targets the remote `hydra-local`, a bare repo on local disk you set up (see Local-only mode); agents are told never to touch `origin` or any other remote and to run no `gh`; every hygiene section also checks that no run branch has a remote-tracking ref on any other remote; the docs step skips its PR-body update |
 | `humanChecks` | none | the user's answers on the re-run after a `humanCheck` pause: `{"<workstream id>": {sha, answer}}` or an array of those, one per check so far; `sha` = the workstream head the check was asked about (`humanCheck[].sha`, 7-40 hex; the feature-branch commit to look at is `humanCheck[].checkAt`), `answer` = `ok` (case and trailing punctuation ignored: `OK.`, `Ok!`) or the problem in words. An answer applies only to that workstream head, once, earliest first, so a re-merge with no new workstream commit keeps it however the feature tip moved. Keys must name a workstream with a `humanCheck`. The paused result's `humanCheck[].answer` gives the exact value to pass |
 | `resume` | none | on every `resumeFromRunId` call: the id of the run being resumed. One read-only probe per repo (`<repo> state`, sonnet) reads git before any stage; its prompt names that id, so it always runs live and every later call runs live too. A workstream whose branch head is already an ancestor of the feature branch is carried `merged: true` with no agent of its own (dependents start, its human check binds to that head); any other workstream runs from implement, which continues its unmerged branch. A dead probe falls back to implement, which also reports an already-merged branch as success (`alreadyMerged`), never `blocked` |
+| `stepTool` | none | a tool name (`/^[\w-]+$/`). When set, every worker prompt ends with a paragraph telling the worker to report its steps with that tool and to send `failed` only when its own attempt failed (findings and a red gate it was asked to run are results). Unset: prompts are unchanged. Adds about 55 tokens per agent |
 | `decisions` | none | the user's answers to blocked workstreams' questions, on a re-run with `resumeFromRunId` and `resume`: `{"<workstream id>": "answer in words"}`. The answer is appended to that workstream's brief, so the same workstream resumes at implement and its validators' test guard accepts a pre-existing test edit the answer authorises (the author lists each as "authorised test edit: <path>"). The blocked result's `workstreams[].decision.answer` gives the exact value to pass |
 | `carryForward` | none | on a resume (requires `resume`): the `carryForward` object of the result being resumed, passed back verbatim. It holds what git cannot say: per workstream the findings ledger (settled entries stay settled for the reviewers), the carried minors and the findings handed to the whole-branch pass; per repo the shared-edits findings and, for a repo whose whole-branch pass already passed, that result. Every full-stage result carries it, whatever its verdict (a whole-branch `fail` from an infra fault or the budget is resumable too). Restored ids get a `p:` prefix (`p:c1-F1`, `p:S-a-m1-F1`, whole-branch `a:p:c1-F1`), so a restarted review's or re-merge's new ids never collide with them. A `passed` entry must be a passed repo result (verdict `pass`, a 7-40 hex sha, its arrays), else the args check throws; a kept pass's ledger keeps the ids of the call that ran it, one `p:` fewer than the workstream ledgers of the call that keeps it. A handed finding that a whole-branch pass settled leaves `carryForward`, and a blocker still open when the resumed call stopped goes back to the restarted workstream's first review as a carried finding, which only a validator clears. Without `carryForward` a resume logs that nothing is restored and carries merged workstreams with empty ledgers, so a handed major or a shared-edits blocker would vanish into a `pass`. A kept pass is reused when the probe finds the feature branch still at its `sha` and no merge landed in this call; otherwise the pass runs again |
+| `dropped` | none | workstream ids the user dropped (unknown ids throw; a workstream `after` a dropped one throws unless dropped too). A dropped workstream runs no agent and reads `status: "dropped"`, `dropped: true`; the rest merges and its repo's whole-branch pass runs without it (a repo whose every workstream is dropped stays `skipped`). Whole-branch and drift prompts leave its brief out and say it is not on the branch. Result: top-level `dropped: [ids]` and the repo note `not done (dropped): <ids>`. A dropped workstream the resume probe finds already merged is carried as merged, with an escalation that it stays on the branch. Its unmerged branch stays on the remote: delete it if unwanted |
 | `workstreams[].after` | none | workstream ids (same repo only; unknown ids, itself and cycles throw) that must merge into the feature branch before this one starts implementing; it branches from the head that carries them. A predecessor that does not merge leaves it NOT started. Workstreams without `after` run in parallel as before |
 | `workstreams[].lite` | `false` | for small pure files: implement, then the clean-review validator alone (acceptance tests, full-range test guard, gate, trial merge); no reviewer ever runs. A critical or major it files gets a fix and a delta validation per cycle, capped by `maxCycles` as usual. Still merged, and covered by the whole-branch pass. A lite workstream alone on its untouched base gets no reviewer at all: the integrated review is skipped too, so only validators see it |
 | `workstreams[].humanCheck` | none | instructions for the user's by-eye check. Once this workstream merges, its repo's whole-branch pass waits for the answer; other merges do not (see Human checks) |
-| `workstreams[].files` | none | allowed paths; overlap within a repo throws; merge rejects edits outside |
-| `workstreams[].checks` | none | extra commands (an e2e login, a contract probe) the author, fixer and both workstream validators run via `run-cmd.mjs` with a 540 s cap, reporting the exit code per command; a red or timed-out check is critical. The `gate` itself never gets a deadline |
+| `workstreams[].files` | none | allowed paths; overlap within a repo throws unless one workstream is ordered `after` the other; merge rejects edits outside |
+| `workstreams[].checks` | none | extra commands (an e2e login, a contract probe) the author, fixer and both workstream validators run via `run-cmd.mjs` with a 540 s cap, reporting the exit code per command in the typed `checkExits` field; the whole-branch validator and each recheck run the checks of every merged, not-dropped workstream (each command once). The script rates the validators' exits: a red or timed-out check that is not known-red turns the gate red, a critical; a red check is never rerun (no flaky rule). A validator red where the author or fixer of that head reported 0 is labelled a false green. A missing or short `checkExits` from a validator is an attempt that never ran its gate. The merge and docs steps run no checks. The `gate` itself never gets a deadline |
+| `workstreams[].knownRedChecks` | none | entries of that workstream's `checks` that are red at the base (any other entry throws): their exit is reported, never a finding. On the merged tip it is the union over the merged workstreams |
 | `workstreams[].quickGate` | none | a faster gate the author and fixer run before each push, and reviewers use for probes. The full `gate` stays mandatory for both workstream validators, the merge, whole-branch fix rounds and rechecks, and docs |
 | `workstreams[].reviewModel` | sonnet→`opus`, opus→`fable` | review model; whole-branch review uses the repo's highest unless `wbReviewModel` is set |
 | `repos[].knownRed` | `[]` | exact test ids red at the base; any other failure is red |
@@ -326,6 +332,7 @@ Workflow({
 | `repos[].smoke` | none | the safe local boot recipe the whole-branch validator and each whole-branch recheck run via `run-cmd.mjs` (own process group, hard timeout, leftover processes killed); a failed or timed-out smoke is critical; none = smoke skipped |
 | `repos[].smokeTimeout` | `540` | smoke hard cap in seconds, an integer from 1 to 590 (stays under the agent shell's 600 s foreground limit) |
 | `repos[].copyExcluded` | `[]` | paths inside the repo, git-ignored (e.g. in `.git/info/exclude`), that the gate needs, such as a local preview test. Every agent copies them from the user's checkout into each worktree it creates, before any gate, only after `git check-ignore` confirms they are ignored; absolute paths, `~` and `..` throw. Hygiene checks no commit carries them |
+| `repos[].commitPrefix` | none | a non-empty string without a newline or a quote, e.g. `"chore: "`, put before the merge step's fixed commit subjects (shared-file edits, regenerated files) and the docs step's graph refresh; the merge commit subject is unchanged |
 | `repos[].reviewSharedEdits` | `false` | after a merge that applied shared-file edits, one opus `validator` checks exactly those commits (each edit against its intent, the gate, hygiene) inside the merge lock, so before the next merge lands; its findings (and a red gate) join the repo's whole-branch fix rounds. Opt-in, not automatic: defaults stay as before, and it costs one opus agent per such merge while the whole-branch validator already reruns every suite. Turn it on when shared edits are code-like (generated clients, lockfiles, contract digests) |
 | `docsRepos[].gate` | the repo's workstream gates | gate for a docs-only repo |
 
@@ -355,12 +362,28 @@ agents on 3-5 min gates. Estimate ×3 when the exit is "no reviewer finds a
 major" on language or heuristic rules.
 
 **Progress panel** (when `mcp__savvy-progress__*` exists; skip silently
-otherwise): before the call, `progress` with `title`, `total` = workstreams,
-`phase: "delegate"` (its enum is plan | design | delegate | review | close), one task per workstream id (`tier`: `careful` for opus,
-`medium` for sonnet). The workflow's own progress tree shows per-agent detail.
-After it returns: `done` = merged workstreams, `phase: "close"`, then
-`finished: true` (after a `humanCheck` pause, keep `phase: "delegate"` and
-leave it unfinished until the resumed run returns).
+otherwise). Before the first Workflow call: `progress` with `title`, `total` =
+workstreams, `phase: "delegate"`, one task per workstream, its `title` the
+workstream id verbatim (`tier`: `careful` for opus, `medium` for sonnet). Never
+name a workstream exactly like its repo directory or `health`; an id that is
+another id plus a word is matched by the longest title. A rejected merge is
+ticked at once and `done` never goes down, so the bar can read one high until
+that workstream merges: never lower `done` to correct it. Call `progress` after every Workflow return
+(the first call, each resume, each `stage: "wholeBranch"` re-run): `done` =
+workstreams with `merged: true` so far. Phase: `"delegate"` while a workstream
+is unmerged or a `humanCheck` or block decision is pending, `phase: "review"` while
+fix-ups and `wholeBranch` re-runs remain, `phase: "close"` on the final return; only
+the enum plan | design | delegate | review | close. Send `finished: true` once,
+after the last return, when nothing is left to re-run, even if the panel
+finished itself (it never does with a dropped or unmerged workstream). A
+dropped workstream: lower `total` by the dropped count and leave it out of
+`tasks`; never lower `done`. The workflow's own progress tree shows per-agent
+detail.
+
+**Step reports** (`stepTool`, optional): when a progress panel offers a step
+tool, read the `tools:` line of the implementer, reviewer and validator agent
+files; only if all three list it, pass its name as `stepTool`. Workers then
+report their steps with it.
 
 **Local-only mode** (`localOnly: true`, e.g. a public fork whose pushes the
 user approves by hand): nothing reaches the network. Per touched repo
@@ -386,7 +409,7 @@ configured remote) leaves none and is invisible to it. Pushing to `origin` stays
 user's step; remove `hydra-local` (`git remote remove`, then the bare repo)
 only when they are done with it.
 
-**Human checks** (`workstreams[].humanCheck`): a check never holds a merge.
+**Human checks** (`workstreams[].humanCheck`): a check never holds a merge. Ask each through AskUserQuestion. If the `progress` tool's schema has `blocked`, set it to the pending question while you wait on the user outside AskUserQuestion (a by-eye check), and send the next call without it.
 Every workstream of the repo merges; then the repo's whole-branch pass does not
 run (`verdict: "paused"`) while any of its checks is unanswered, and contracts
 and docs wait for every repo, so all of a repo's checks are asked in the one
@@ -429,12 +452,13 @@ workstream unmerged gets no whole-branch pass (`verdict: "incomplete"`,
 
 **A block the user can answer resumes in place:** an author or fixer that
 returns `blocked` with questions leaves `workstreams[].decision: {questions,
-answer}`; ask the user and re-run with `decisions.<id>` (see the args table),
+answer}`; ask the user through AskUserQuestion and re-run with `decisions.<id>` (see the args table),
 `resumeFromRunId`, `resume` and `carryForward`: that same workstream resumes at implement on its
 branch, never a new fix-up workstream. An author blocked only on an optional
 sub-part, with every other part done, the gate green, the head pushed and each
 question's default implemented, returns `blocked` with `ok: true`: the run
-continues to review and merge with the defaults and carries the questions.
+continues to review and merge with the defaults and carries the questions;
+its `status` reads `done`, and a note says it continued on the default.
 
 **Fixes outside `files[]` go to the whole-branch pass:** when a workstream has
 `files[]`, its fixer answers a critical or major whose only fix lies outside the
@@ -442,11 +466,14 @@ files it may edit (a pre-existing test, a file the integration-fix exception
 does not give it, which includes any file before a sibling has merged)
 `"carried"`; for such a workstream the fix prompt never also tells it to block.
 Code in an already-merged sibling's files stays the fixer's through the
-integration-fix exception. The finding leaves the workstream's cycles (ledger
+integration-fix exception. The delta validator checks each claim against those
+files; a claim it does not verify (silence included) goes back to the fixer
+for another cycle, counted by the usual stop rules. A verified one leaves the workstream's cycles (ledger
 status `carried`, listed in `workstreams[].handed`) and joins its repo's
 whole-branch findings as `<ws id>:<id>`, where the whole-branch fixer fixes it;
-that fixer's notes name the run's workstreams whose briefs read the files it
-changed.
+that fixer's notes list the files it changed (`changed: <path>`); carry the new
+behaviour into every brief you write afterwards that reads one of them, in this
+run's fix-ups, a later run or a later slice.
 
 **Gate wrapper:** every gate an agent runs goes through one fixed wrapper,
 `bash -c 'set -eo pipefail\n<gate>'; echo "gate exit=$?"`, so a failure behind a
@@ -454,13 +481,15 @@ pipe or a `;` chain is red, and only `gate exit=0` is green. A non-zero exit
 whose every failure is allowed by the green rules (known-red, known-flaky, or
 proven flaky by the rerun rule) is not red, but the wrapper stopped there, so the
 agent runs each later command through the wrapper too and judges them all.
-Nothing is pushed on a red gate.
+Nothing is pushed on a red gate. A gate must not pipe into `head`, `grep -q` or any
+reader that exits early: the writer gets SIGPIPE (exit 141) and the gate reads red;
+use `tail`, or redirect to a file. The script rejects the first two.
 
 ## 4. Final call (coordinator)
 
 The workflow returns:
 
-- top level: `{stage, budget, cycles, maxCycles, questions, workstreams, repos, drift, crossRepo, otherDocs}`, plus `humanCheck` only when the run paused for one (see Human checks), and `carryForward` on every full-stage result: pass it back verbatim on any resume of it;
+- top level: `{stage, budget, cycles, maxCycles, questions, dropped, workstreams, repos, drift, crossRepo, otherDocs}`, plus `humanCheck` only when the run paused for one (see Human checks), and `carryForward` on every full-stage result: pass it back verbatim on any resume of it;
   `questions` collects every question of the run: first one entry when `crossRepo` has an open critical or major,
   whatever its verdict says (contracts have no fix loop, so it carries the contract
   check's recipe, its `sections`, else the findings' issues, and the user decides),
@@ -498,10 +527,13 @@ The workflow returns:
   `escalations` and `docs.notes`; so does a docs agent that died 3 times (plus
   an escalation). Docs are skipped (`docs.notes`: `skipped: …`) when the repo's
   whole-branch pass failed
-- `drift`: `{verdict: pass|drift|failed|died|skipped, items: [{repo, where, change}], sections, notes}`,
-  always present (`{verdict: 'skipped', items: [], sections: '', notes: []}` without `decisionLog`; see its args row); each item is also a question, revert by default;
+- `drift`: `{verdict: pass|drift|failed|died|skipped, items: [{repo, where, change}], unconfirmed, sections, notes}`,
+  always present (`{verdict: 'skipped', items: [], unconfirmed: [], sections: '', notes: []}` without `decisionLog`; see its args row); each item is also a question, revert by default;
   with `decisionLog` set, a `died`, `failed` or reserve-`skipped` audit adds the question
-  `drift audit <verdict>: <why>` (default: re-run stage wholeBranch to audit drift)
+  `drift audit <verdict>: <why>` (default: re-run stage wholeBranch to audit drift); a `failed`
+  audit's list is kept as `unconfirmed` (no questions) and the question ends with its count
+- `dropped`: the ids of the workstreams the user dropped (`dropped` arg); list each as
+  not done in your report
 - `crossRepo`: `{verdict, sections, findings, ledger}` when 2+ repos, else `null`
 - `otherDocs`: `[{repo, featureBranch, docs, findings, flaky}]` for docs-only repos
 - `findings` (and `crossRepo.ledger`): the structured ledger next to the
@@ -523,7 +555,9 @@ cap or budget stops, failed merges, a finding that survived its opus fix — eac
 says NOT merged; unpromoted side branches). Then:
 
 - `git ls-remote` every returned `finalSha` against its feature branch before
-  believing it.
+  believing it. Then run each merged workstream's `checks` once yourself at `finalSha`
+  in a throwaway worktree (`node <skill dir>/run-cmd.mjs 540 '<cmd>'`); a red one
+  not in its `knownRedChecks` is a critical: fix-up, then `stage: "wholeBranch"`.
 - Read it; spot-check anything `open`, `extended`, unmerged, a non-`pass`
   verdict, `docs.ok: false`, or a `crossRepo` finding against the code (and the
   docs diffs — docs must describe what shipped, including every review-round
@@ -564,6 +598,9 @@ says NOT merged; unpromoted side branches). Then:
   likely the wrong shape, not the code) before another run.
 - **Drift items:** revert by default; keep one only on the user's word, then
   log it.
+- **A finding stuck after its opus round:** the drop option names its re-run,
+  `dropped: ["<id>"]`; "accept it as known debt" has no scripted path in this
+  release.
 - **Known-gaps promote:** when the rounds run out with the last recheck green
   and only non-regression, non-integration, non-critical majors open, a question offers to
   fast-forward the feature branch to the checked head; the default is leave
@@ -581,7 +618,7 @@ says NOT merged; unpromoted side branches). Then:
   stale `<featureBranch>--wbfix*` refs.
 - **Reviewer tiering:** intermediate `wholeBranch` passes run with
   `wbReviewModel: "opus"`; the top reviewer runs only on the final pass, the one expected to close with no majors left.
-- Escalate to the user **only** the top-level `questions` (it already holds every workstream and repo question; plus anything else code, spec or
+- Escalate to the user **only** the top-level `questions`, asked through AskUserQuestion (it already holds every workstream and repo question; plus anything else code, spec or
   plan can't resolve) — collected and asked **once**, at the end; the retro's
   ranked list (§5) joins that same ask, after the questions.
 
@@ -589,6 +626,8 @@ says NOT merged; unpromoted side branches). Then:
 
 - Feature branches green and verified on the remote; update the plan doc status
   (phases done, debt carried); docs sync done per repo.
+- A run with `dropped` workstreams: the PR body carries a **Not done** list with
+  each dropped workstream and its one-line goal.
 - Run `python3 <skill dir>/stale_sweep.py --dry-run`; if it lists
   stuck wait loops or orphaned runners in agent worktrees, run it again without
   `--dry-run`.

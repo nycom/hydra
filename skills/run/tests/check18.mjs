@@ -133,13 +133,14 @@ await t('3c a hard block still stops (control), and decisions for an unknown wor
 
 // ---- 4. a fix outside files[] is handed to the whole-branch pass ----
 const outside = { 'a review c1': () => ({ findings: [F('c1-F1', 'major', 'b/util.js:9')] }), 'a fix c1': () => ({ answers: [{ id: 'c1-F1', action: 'carried', note: 'the fix flips a pre-existing assertion in b/util.test.js' }] }) }
+const outsideOk = { ...outside, 'a validate c1': () => ({ verified: ['c1-F1'] }) } // the delta validator verifies the claim
 await t('4a a carried finding stops counting: the workstream merges on the next clean review, not at the cap, and the whole-branch fixer gets it', async () => {
-  const { r, order, prompts } = await go({ cycles: null, workstreams: [ws('a'), ws('b')] }, outside)
+  const { r, order, prompts } = await go({ cycles: null, workstreams: [ws('a'), ws('b')] }, outsideOk)
   const a = W(r, 'a')
   assert(a.merged && a.cyclesRun === 2 && a.handed.length === 1 && a.findings.find(e => e.id === 'c1-F1')?.status === 'carried', JSON.stringify(a))
-  assert(/answer it "carried"/.test(prompts['a fix c1']) && /Handed to the whole-branch pass .*c1-F1/.test(prompts['a validate c1']))
+  assert(/answer it "carried"/.test(prompts['a fix c1']) && /A claim "carried" holds only when its fix cannot be made inside the files this workstream may edit/.test(prompts['a validate c1']))
   assert(!/Needing anything else is status "blocked"|a blocker outside your files is status "blocked"/.test(prompts['a fix c1']) && /a blocker outside your files is answered "carried"/.test(prompts['a fix c1']), 'the fix prompt never also tells a files[] workstream to block on an out-of-files fix')
-  assert(order.includes('one fix r1') && prompts['one fix r1'].includes('"a:c1-F1"') && /name each workstream of this run whose brief reads or edits a file you changed/.test(prompts['one fix r1']), order.join()) })
+  assert(order.includes('one fix r1') && prompts['one fix r1'].includes('"a:c1-F1"') && /list each file you changed as "changed: <path>"/.test(prompts['one fix r1']), order.join()) })
 await t('4b (control) with no files[] declared, "carried" is not offered and the finding stays open', async () => {
   const { r, prompts } = await go({ cycles: 1, maxCycles: 1, workstreams: [ws('a', { files: undefined })] }, outside)
   assert(!/answer it "carried"/.test(prompts['a fix c1']) && /a blocker outside your files is status "blocked"/.test(prompts['a fix c1']) && !W(r, 'a').merged) })
@@ -164,7 +165,7 @@ await t('5c (control) a healthy probe lets the third attempt run', async () => {
 // ---- 7. a resume keeps what git cannot say (carryForward) ----
 await t('7a a finding handed over in call 1 reaches the whole-branch fixer in the resume, never a silent pass', async () => {
   const args = x => ({ cycles: null, workstreams: [ws('a'), ws('b')], ...x })
-  const { r: r1 } = await go(args(), { ...outside, 'b review c1': () => null })
+  const { r: r1 } = await go(args(), { ...outsideOk, 'b review c1': () => null })
   assert(r1.repos[0].verdict === 'incomplete' && r1.carryForward?.workstreams?.a?.handed?.length === 1, JSON.stringify(r1.carryForward))
   const { r, prompts } = await go(args({ resume: 'run-5', carryForward: r1.carryForward }), state({ id: 'a', head: W(r1, 'a').validatedSha, merged: true }))
   assert(W(r, 'a').merged && W(r, 'b').merged && (prompts['one fix r1'] || '').includes('"a:p:c1-F1"'), Object.keys(prompts).join())
@@ -217,7 +218,7 @@ await t('8a a restarted workstream whose new c1-F1 shares an id with a restored 
   assert(W(r, 'a').findings.some(e => e.id === 'p:c1-F1' && e.status === 'carried') && W(r, 'a').findings.some(e => e.id === 'c1-F1' && e.status === 'open')) })
 await t('8b a whole-branch fail the escalation calls resumable carries the handed finding into that resume', async () => {
   const args = x => ({ cycles: null, workstreams: [ws('a'), ws('b')], ...x })
-  const { r: r1 } = await go(args(), { ...outside, 'one validate': () => null, 'health one validate': () => null })
+  const { r: r1 } = await go(args(), { ...outsideOk, 'one validate': () => null, 'health one validate': () => null })
   assert(r1.repos[0].verdict === 'fail' && r1.repos[0].escalations.some(e => /carryForward = this result's carryForward/.test(e)) && r1.carryForward?.workstreams?.a?.handed?.length === 1, JSON.stringify(r1.repos[0].escalations))
   const { r, prompts } = await go(args({ resume: 'run-12', carryForward: r1.carryForward }), { ...state({ id: 'a', head: W(r1, 'a').validatedSha, merged: true }, { id: 'b', head: W(r1, 'b').validatedSha, merged: true }), 'one recheck r1': () => ({ verified: ['a:p:c1-F1'] }) })
   assert((prompts['one fix r1'] || '').includes('"a:p:c1-F1"') && r.repos[0].verdict === 'pass', Object.keys(prompts).join()) })
@@ -245,7 +246,7 @@ await t('9a a pass on a 12-hex whole-branch sha emits a carryForward its resume 
   assert(r.repos.length === 2, 'the resume ran instead of throwing on its own carryForward') })
 await t('9b a handed finding the resumed whole-branch pass fixed leaves the next carryForward', async () => {
   const args = x => ({ cycles: null, workstreams: [ws('a'), ws('b')], ...x })
-  const { r: r1 } = await go(args(), { ...outside, 'one validate': () => null, 'health one validate': () => null })
+  const { r: r1 } = await go(args(), { ...outsideOk, 'one validate': () => null, 'health one validate': () => null })
   const { r } = await go(args({ resume: 'run-15', carryForward: r1.carryForward }), { ...state({ id: 'a', head: W(r1, 'a').validatedSha, merged: true }, { id: 'b', head: W(r1, 'b').validatedSha, merged: true }), 'one recheck r1': () => ({ verified: ['a:p:c1-F1'] }) })
   assert(r.repos[0].verdict === 'pass' && r.carryForward.workstreams.a.handed.length === 0, JSON.stringify(r.carryForward.workstreams.a)) })
 await t('9c a blocker open when the resumed call stopped goes to the restarted review as carried, and only a validator clears it', async () => {
@@ -256,11 +257,11 @@ await t('9c a blocker open when the resumed call stopped goes to the restarted r
   assert(W(r, 'a').merged && W(r, 'a').findings.find(e => e.id === 'p:c1-F2')?.status === 'fixed', JSON.stringify(W(r, 'a').findings)) })
 
 // ---- docs and version ----
-await t('6a SKILL.md documents resume, decisions, the head-bound checks and the handed findings; plugin.json is 0.3.10', async () => {
+await t('6a SKILL.md documents resume, decisions, the head-bound checks and the handed findings; plugin.json is 0.4.0', async () => {
   const s = readFileSync(new URL('../SKILL.md', import.meta.url), 'utf8')
   for (const k of ['resume', 'decisions', 'carryForward']) assert(new RegExp('\\| `' + k + '` \\|').test(s), k)
   assert(/one `p:` fewer than the workstream ledgers/.test(s) && /`checkAt`/.test(s) && /"carried"/.test(s) && /`incomplete`/.test(s) && /health probe/.test(s) && /gate exit=/.test(s))
-  assert.equal(JSON.parse(readFileSync(new URL('../../../.claude-plugin/plugin.json', import.meta.url), 'utf8')).version, '0.3.10') })
+  assert.equal(JSON.parse(readFileSync(new URL('../../../.claude-plugin/plugin.json', import.meta.url), 'utf8')).version, '0.4.0') })
 await t('6b fixture-scenarios.md carries S18-S21 and the S13 pipe seed', async () => {
   const s = readFileSync(new URL('./fixture-scenarios.md', import.meta.url), 'utf8')
   for (const k of ['S18', 'S19', 'S20', 'S21']) assert(new RegExp(`\\| ${k} \\|`).test(s), k)

@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# Builds the hydra live-eval fixture for S15/S16/S17 (see ../fixture-scenarios.md):
+# Builds the hydra live-eval fixture for S15-S21 (see ../fixture-scenarios.md):
 # bare remotes <dest>/remotes/{alpha,beta}.git, working clones <dest>/{alpha,beta},
 # branches main, feat/eval-base and feat/eval. Prints the Workflow args as JSON on stdout.
-#   build.sh <dest> [--seed|--control|--impossible|--ws-seed|--ws-control] [--force]
+#   build.sh <dest> [--seed|--control|--impossible|--ws-seed|--ws-control|--flow] [--force]
 set -euo pipefail
 
-usage() { echo "usage: build.sh <dest> [--seed|--control|--impossible|--ws-seed|--ws-control] [--force]" >&2; exit 2; }
+usage() { echo "usage: build.sh <dest> [--seed|--control|--impossible|--ws-seed|--ws-control|--flow] [--force]" >&2; exit 2; }
 dest='' mode='' force=''
 for a in "$@"; do
   case $a in
-    --seed|--control|--impossible|--ws-seed|--ws-control) [ -z "$mode" ] || usage; mode=${a#--} ;;
+    --seed|--control|--impossible|--ws-seed|--ws-control|--flow) [ -z "$mode" ] || usage; mode=${a#--} ;;
     --force) force=1 ;;
     -*) usage ;;
     *) [ -z "$dest" ] || usage; dest=$a ;;
@@ -58,6 +58,24 @@ baseline() { # per-mode edits to $repo's Initial import itself: they predate eve
     sub beta/client.py 'return payload[TOTAL_FIELD]' 'return int(payload[TOTAL_FIELD])'
     sub tests/test_client.py 'total_cents({"total_cents": 350})' 'total_cents({"total_cents": "350"})'
     sub tests/test_client.py '{TOTAL_FIELD}: integer"' '{TOTAL_FIELD}: string"'
+  elif [ "$mode" = flow ] && [ "$repo" = beta ]; then # before the cents rename: beta's copy and client read "total"
+    sub vendor/alpha-contract.yaml '    total_cents: integer' '    total: integer'
+    sub beta/client.py 'TOTAL_FIELD = "total_cents"' 'TOTAL_FIELD = "total"'
+    sub tests/test_client.py 'total_cents({"total_cents": 350})' 'total_cents({"total": 350})'
+  elif [ "$mode" = flow ]; then # before the cents rename: alpha's total, contract and smoke say "total"
+    sub ledger/api.py '{"total_cents": ' '{"total": '
+    sub contract.yaml '    total_cents: integer' '    total: integer'
+    sub scripts/smoke.sh 'body.get("total_cents")' 'body.get("total")'
+    sub scripts/smoke.sh 'expected total_cents=350' 'expected total=350'
+    sub scripts/smoke.sh 'smoke ok: total_cents=350' 'smoke ok: total=350'
+    # S21: alpha-cents' test file pins the old field of the discount result through a stub, so it stays green whatever alpha-discount does
+    sub tests/test_api.py $'import unittest\n\nfrom ledger.api import' $'import unittest\nfrom unittest import mock\n\nfrom ledger import discount\nfrom ledger.api import'
+    cat >> "$dest/alpha/tests/test_api.py" <<'EOF'
+
+    def test_discounted_total_shape(self):
+        with mock.patch.object(discount, "discounted_total", create=True, return_value={"total": 900}):
+            self.assertEqual(list(discount.discounted_total([{"amount": 10000}], "SAVE10")), ["total"])
+EOF
   elif [ "$mode" = ws-seed ] || [ "$mode" = ws-control ]; then
     [ "$repo" = alpha ] || return 0
     cat > "$dest/alpha/tests/test_report.py" <<'EOF'
@@ -284,6 +302,31 @@ if mode in ("seed", "control", "ws-seed", "ws-control"):
             "ledger/report.py exists on this branch, so the tests import it directly.")
         args["workstreams"] = [a]
         args["repos"], args["docsRepos"] = args["repos"][:1], args["docsRepos"][:1]
+elif mode == "flow":  # S18, S19, S21: each scenario adds its own after/humanCheck (fixture-scenarios.md)
+    args["workstreams"] = [{
+        "id": "alpha-discount", "repo": alpha, "featureBranch": "feat/eval",
+        "branch": "feat/eval--alpha-discount", "model": "sonnet", "gate": gate,
+        "files": ["ledger/discount.py", "tests/test_discount.py"],
+        "brief": "Add discounted_total(entries, code) to ledger/discount.py: apply the code with apply(code, amount) "
+                 "to the entries' summed amount and answer in the same shape as ledger.api.total. No discount takes "
+                 "more than LEDGER_MAX_DISCOUNT off, a new module constant of 500 (tenths of a cent). Add tests to "
+                 "tests/test_discount.py. Shared edit: README needs a line under Modules for discounted_total(entries, code) "
+                 "and LEDGER_MAX_DISCOUNT.",
+    }, {
+        "id": "alpha-cents", "repo": alpha, "featureBranch": "feat/eval",
+        "branch": "feat/eval--alpha-cents", "model": "opus", "gate": gate,
+        "files": ["ledger/api.py", "tests/test_api.py", "scripts/smoke.sh"],
+        "brief": "Rename the field of ledger.api.total's response from total to total_cents; the value stays whole cents. "
+                 "Update scripts/smoke.sh to the new name and add a test to tests/test_api.py that pins the field name. "
+                 "Shared edits: contract.yaml's total response field becomes total_cents, and README's Modules line for "
+                 "ledger/api.py says total(entries) returns {\"total_cents\": <whole cents>}.",
+    }, {
+        "id": "beta-cents", "repo": beta, "featureBranch": "feat/eval",
+        "branch": "feat/eval--beta-cents", "model": "sonnet", "gate": gate,
+        "files": ["vendor/alpha-contract.yaml", "beta/client.py", "tests/test_client.py"],
+        "brief": "alpha renames its total response field from total to total_cents (alpha's contract.yaml). Update the "
+                 "vendored copy vendor/alpha-contract.yaml, beta.client.TOTAL_FIELD and tests/test_client.py to read total_cents.",
+    }]
 elif mode == "impossible":
     args["workstreams"] = [{
         "id": "alpha-rounding", "repo": alpha, "featureBranch": "feat/eval",
@@ -293,7 +336,7 @@ elif mode == "impossible":
     }]
 else:
     args["workstreams"] = []  # baseline only: add a workstream before the Workflow call
-if mode not in ("seed", "control", "ws-seed", "ws-control"):
+if mode not in ("seed", "control", "ws-seed", "ws-control", "flow"):  # flow: no false-green scenario, so no smoke and no skillDir
     args["repos"][0]["smoke"] = "bash scripts/smoke.sh"
     args = {"skillDir": "<fill: plugin skill base dir>", **args}
 print(json.dumps(args, indent=2))

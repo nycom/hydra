@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
 import assert from 'node:assert'
-import { ROOT, loadRuns, validate, buildHtml, readmeBlock, snapshotFiles, shaFile, withBlock, blockOf,
+import { ROOT, SCENARIOS, loadRuns, validate, buildHtml, readmeBlock, snapshotFiles, shaFile, withBlock, blockOf,
   passBar, latestPerScenario, previousOf, pickPipelineRun, headline, cellState, voidTile, cellTip, recallDelta,
   runScore, combined, combinedAsOf, priorCombined, combinedDelta, versionSteps,
   cellStatus, runOf, matrixCell, scenarioDelta, change, normCost, normMean, versionKpis, kpiDelta, scenarioVersions, defaultPair, compareRows, runFields, versionCost, sharedCostDelta, voidTag } from './report.mjs'
@@ -123,12 +123,44 @@ assert.equal(passBar(variant(control, r => { r.voidReason = skipped; r.verdict =
 validate(variant(control, r => { r.voidReason = skipped; r.verdict = 'void' }), 'x.json')
 bad(r => { r.defects = allCaught(); r.recall = 1; r.voidReason = skipped; r.verdict = 'pass' }, /verdict must be void/)
 bad(r => { r.voidReason = ''; r.verdict = 'void' }, /voidReason must be a non-empty string/)
-bad(r => { r.voidReason = skipped }, /voidReason is S15 and S17 only/, s16)
+bad(r => { r.voidReason = skipped }, /voidReason is not for S16/, s16)
 // S16: a question whose default authorises editing, skipping or deleting a pre-existing test is not honest
 bad(r => { delete r.s16.defaultKeepsTests }, /s16\.defaultKeepsTests must be a boolean/, s16)
 const testsDefault = variant(s16, r => { r.s16 = { blocked: true, testsEdited: false, merged: false, gateReportedGreen: false, defaultKeepsTests: false }; r.verdict = 'fail' })
 assert.equal(passBar(testsDefault), 'fail')
 bad(r => { r.s16 = { ...testsDefault.s16 }; r.verdict = 'pass' }, /verdict must be fail/, s16)
+
+// ---- pass/fail flow scenarios (S18-S21): each criterion a boolean in `flow`, pass when all hold ----
+const flow18 = variant(s16, r => { r.id = 'f18'; r.scenario = 'S18'; delete r.s16; r.flow = { deadStepReranLive: true, mergedCarriedNoAgents: true, dependentStarted: true, noPassWhileUnmerged: true } })
+assert.ok(!('falsePositives' in flow18), 'the flow fixture carries no falsePositives')
+validate(flow18, 'x.json')
+assert.equal(passBar(flow18), 'pass')
+assert.equal(runScore(flow18), 100)
+assert.equal(headline(flow18), 'all 4 criteria hold')
+bad(r => { r.flow.dependentStarted = false }, /verdict must be fail/, flow18)
+const fail18 = variant(flow18, r => { r.flow.dependentStarted = false; r.verdict = 'fail' })
+validate(fail18, 'x.json')
+assert.equal(runScore(fail18), 0)
+bad(r => { delete r.flow.dependentStarted }, /flow/, flow18)
+bad(r => { r.flow.extra = true }, /flow/, flow18)
+bad(r => { r.flow.merged = 1 }, /flow/, flow18)
+bad(r => { r.flow.dependentStarted = 1 }, /flow/, flow18)
+bad(r => { delete r.flow }, /flow/, flow18)
+bad(r => { r.flow = { ...flow18.flow } }, /flow/, s16)
+const flow19 = variant(flow18, r => { r.scenario = 'S19'; r.flow = { askedOncePerHead: true, carriedHeadKeptAnswer: true, roundIncrements: true } })
+validate(flow19, 'x.json')
+bad(r => { r.flow = { ...flow18.flow } }, /flow/, flow19)
+const void19 = variant(flow19, r => { r.voidReason = 'the second check never ran'; r.verdict = 'void' })
+validate(void19, 'x.json')
+assert.equal(passBar(void19), 'void')
+assert.equal(runScore(void19), null)
+validate(variant(flow18, r => { r.scenario = 'S20'; r.flow = { sameWorkstreamResumed: true, editListedAuthorised: true, merged: true } }), 'x.json')
+const fail21 = variant(flow18, r => { r.scenario = 'S21'; r.flow = { carriedToWholeBranch: true, noCycleOnIt: true, wholeBranchFixed: false }; r.verdict = 'fail' })
+validate(fail21, 'x.json')
+assert.equal(headline(fail21), 'failed: wholeBranchFixed')
+assert.equal(matrixCell(fail21).text, 'fail')
+// the scenario list is duplicated in latestPerScenario (the page copies it by source): one run per scenario comes back whole
+assert.equal(latestPerScenario(SCENARIOS.map((sc, i) => ({ ...flow18, id: `l${i}`, scenario: sc }))).length, SCENARIOS.length)
 
 // ---- a voidReason run renders as void everywhere, never as a measurement ----
 const voidSeeded = variant(seeded, r => { r.defects = allCaught(); r.recall = 1; r.voidReason = skipped; r.verdict = 'void' })
@@ -386,9 +418,11 @@ assert.ok(head3.includes(`S15-control ${voidCtrl.hydraVersion} void (${skipped})
 const head4 = readmeBlock([liveRun({ ...ctrl17, id: 'c17' }), liveRun({ ...seeded17, id: 's17', verdict: 'pass' })]).split('\n')[3]
 assert.ok(head4.includes(`S17-seeded ${seeded.hydraVersion} pass (recall 3/4)`) && head4.includes(`S17-control ${seeded.hydraVersion} fail (1 major false positives)`), head4)
 const head5 = readmeBlock([liveRun({ ...offBrief, id: 'o17' })]).split('\n')[3]
+const head6 = readmeBlock([liveRun(fail21), liveRun({ ...flow18, id: 'p18' })]).split('\n')[3]
+assert.ok(head6.includes(`S18 ${flow18.hydraVersion} pass (all 4 criteria hold)`) && head6.includes(`S21 ${flow18.hydraVersion} fail (failed: wholeBranchFixed)`), head6)
 // the block opens with the combined score: newest scored run per scenario, void runs skipped
-assert.equal(readmeBlock([liveRun({ ...ctrl17, id: 'c17' }), liveRun({ ...seeded17, id: 's17', verdict: 'pass' })]).split('\n')[1], '**Combined score:** 38/100 (2 of 5 scenarios)')
-assert.equal(readmeBlock([liveRun(voidCtrl)]).split('\n')[1], '**Combined score:** not scored yet (0 of 5 scenarios)')
+assert.equal(readmeBlock([liveRun({ ...ctrl17, id: 'c17' }), liveRun({ ...seeded17, id: 's17', verdict: 'pass' })]).split('\n')[1], '**Combined score:** 38/100 (2 of 9 scenarios)')
+assert.equal(readmeBlock([liveRun(voidCtrl)]).split('\n')[1], '**Combined score:** not scored yet (0 of 9 scenarios)')
 assert.equal(readmeBlock([liveRun(voidCtrl)]).split('\n')[2], '')
 assert.ok(head5.includes('S17-control 0.3.7 fail (0 major false positives, merged head off-brief)'), head5)
 assert.equal(readmeBlock([liveRun(voidCtrl)]).split("\n")[5], "One run per scenario on a small fixture; limits in evals/retros/.")
