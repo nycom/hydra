@@ -1247,7 +1247,8 @@ return {
   ...(STAGE !== 'wholeBranch' && { carryForward: {
     call: CALL,
     workstreams: Object.fromEntries(wsResults.map(w => {
-      const settled = repoResults.find(r => r.repo === byId[w.id].repo)?.findings || [] // a handed finding the whole-branch pass settled leaves
+      const rr = repoResults.find(r => r.repo === byId[w.id].repo)
+      const settled = rr?.verdict === 'pass' ? rr.findings : [] // a handed finding leaves only once its pass passed: a failed one promoted nothing
       return [w.id, { handed: (w.handed || []).filter(f => !settled.some(e => e.id === `${w.id}:${f.id}` && STATUS.includes(e.status) && e.status !== 'carried')), open: w.open || [], findings: w.findings || [] }]
     })),
     repos: Object.fromEntries(repoResults.map(r => [r.repo, { shared: sharedFound[r.repo] || [], passed: r.verdict === 'pass' ? r : null }])),
