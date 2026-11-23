@@ -1,0 +1,62 @@
+{
+  "id": "2026-11-23-s21-v0.4.2-rerun",
+  "date": "2026-11-23",
+  "hydraVersion": "0.4.2",
+  "scenario": "S21",
+  "verdict": "pass",
+  "reason": "review c1 filed the stale test as a critical, the fixer carried it out of files[], the workstream merged after one cycle, and the whole-branch fixer flipped the assertion so alpha passes with only the known-red failing.",
+  "flow": {
+    "carriedToWholeBranch": true,
+    "noCycleOnIt": true,
+    "wholeBranchFixed": true
+  },
+  "cost": {
+    "outputTokens": 71404,
+    "contextTokens": 4277090,
+    "agents": 24,
+    "wallMinutes": 9.3,
+    "byStage": {
+      "implement": {
+        "tokens": 7260,
+        "agents": 3,
+        "contextTokens": 526412
+      },
+      "review": {
+        "tokens": 7735,
+        "agents": 3,
+        "contextTokens": 454711
+      },
+      "fix": {
+        "tokens": 1133,
+        "agents": 1,
+        "contextTokens": 46908
+      },
+      "validate": {
+        "tokens": 17014,
+        "agents": 3,
+        "contextTokens": 963615
+      },
+      "merge": {
+        "tokens": 6072,
+        "agents": 3,
+        "contextTokens": 381709
+      },
+      "wholeBranch": {
+        "tokens": 21455,
+        "agents": 6,
+        "contextTokens": 1100599
+      },
+      "contracts": {
+        "tokens": 3525,
+        "agents": 1,
+        "contextTokens": 189378
+      },
+      "docs": {
+        "tokens": 7210,
+        "agents": 4,
+        "contextTokens": 613758
+      }
+    }
+  },
+  "notes": "Void re-run of run 2026-11-23-s21-v0.4.2 (S21 voided there under reason 1); same printed --flow args with alpha-discount given after [alpha-cents] and the scoped gate python3 -m unittest tests.test_discount, brief and fixture unchanged. One call, cycles 1, 24 agents, none died (cost.mjs failed [] unfinished []). Models: authors alpha-cents opus, alpha-discount sonnet, beta-cents sonnet; workstream reviewers alpha-cents fable, alpha-discount opus, beta-cents opus; workstream validators opus; workstream fixer alpha-discount sonnet; merge sonnet; whole-branch reviewer alpha fable, whole-branch validators opus (alpha, beta), whole-branch fixer and recheck opus; promote sonnet; contracts opus; docs sonnet, docs validate opus, docs promote sonnet. Claude Code 2.1.330. Fixture HEAD (feat/eval at build, equal to main and feat/eval-base): alpha 43bee80, beta 3fa223e. Concurrency: 3 sessions (S18 and S19 ran alongside). savvy-progress 03477f432a5f, pane plugin f6ed06fa8d9f. Stale test: alpha-cents' rename commit 22b346c only added test_total_field_name and left test_discounted_total_shape alone (void reason 3 no). alpha-discount's author ran only its scoped gate, noted nothing about the stale test and returned done ok true at 1e02827 (void reason 1 no). Review c1 (opus) filed it as c1-F1 critical regression (void reason 2 no). Fixer c1 answered carried (the test is on origin/main, read-only, outside files[]), the c1 delta validator verified the carried claim and asked one soft-block question (default: keep the test, the whole-branch pass decides). alpha-discount merged (d26ca59, README 234a559), cyclesRun 1, open empty, handed holds it. Whole-branch: alpha review W-F1 critical and alpha validate V-F1 critical plus V-G (gate exit 1) filed it again; the validator called the merge blocked on the pending question. Fixer r1 changed the assertion to list(total(...)) (now total_cents), citing the handed finding, and answered fixed for W-F1, V-F1, V-G and alpha-discount:c1-F1; recheck r1 passed and said the edit settles the pending question in favour of the brief. alpha feat/eval b1ff415 (ls-remote verified), discover 26 tests with only the known-red failing; beta feat/eval 46e003e (verified); crossRepo pass. Soft-block question: settled in substance by the whole-branch fix, but it still reaches the user in the top-level questions (moot at the end of the run). Ledger: alpha-cents c1-F1 and beta-cents c1-F1/v1-F1 (minor, contract.yaml shared edit not yet applied) stay open per workstream and fixed per repo with beta fixRounds 0, as in the r2b run. beta docs promote could not delete feat/eval--docs (permission classifier denied the push --delete). Answer-key grep clean (300 agent tool calls: 276 Bash, 24 StructuredOutput; no reads of tests/fixture, fixture-scenarios, evals/ or the plugin, no network calls)."
+}
