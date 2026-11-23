@@ -175,7 +175,7 @@ await t('4b a hard-blocked author resumed with that answer reaches the carry and
 await t('3a SKILL.md states the drop; plugin.json is at least 0.4.3', async () => {
   const s = readFileSync(new URL('../SKILL.md', import.meta.url), 'utf8')
   assert(/dropped the question about it/.test(s), 'the drop note')
-  assert(/drop a held question that starts with an id such a note names/i.test(s) && /a question from an earlier call that starts with/.test(s), 'the held-question drop')
+  assert(/drop\s+a\s+held\s+question\s+that\s+starts\s+with\s+an\s+id\s+such\s+a\s+note\s+names/.test(s) && /a\s+question\s+from\s+an\s+earlier\s+call\s+that\s+starts\s+with/.test(s), 'the held-question drop')
   assert(s.includes('a file a brief names by path, directory or glob as not to be edited') && !/may not stop that fix/.test(s), 'the widened carve-out')
   const v = JSON.parse(readFileSync(new URL('../../../.claude-plugin/plugin.json', import.meta.url), 'utf8')).version.split('.').map(Number); assert(v[0] > 0 || v[1] > 4 || (v[1] === 4 && v[2] >= 3), 'at least 0.4.3') })
 

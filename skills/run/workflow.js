@@ -1072,6 +1072,10 @@ sha = the commit you checked. verdict pass only if nothing critical or major is 
     x.questions = x.questions.filter(q => !gone.includes(q))
     res.questions = res.questions.filter(q => !gone.includes(q))
     res.notes.push(...gone.map(q => `whole-branch fix r${res.fixRounds} fixed ${id}; dropped the question about it: ${q.q}`))
+    // handed in an earlier call (p: ids): its question is held by the coordinator, not in this result, so name it
+    const earlier = []
+    for (let s = h.id; s.startsWith('p:');) earlier.push(s = s.slice(2))
+    if (earlier.length) res.notes.push(`whole-branch fix r${res.fixRounds} fixed ${id}: a question from an earlier call that starts with ${earlier.flatMap(e => [e, `${x.id}:${e}`]).join(' or ')} is settled`)
   }
   return res
 }
