@@ -1034,7 +1034,8 @@ sha = the commit you checked. verdict pass only if nothing critical or major is 
     const hit = [...new Set(re.findings.filter(f => blocking(f) && f.kind === 'regression' && !findings.some(g => g.id === f.id || g.also?.id === f.id) && asked.has(fileOf(f))).map(fileOf))]
     if (hit.length) res.churn.push({ round, files: hit })
     const action = (...ids) => ids.map(id => fix.answers.find(a => a.id === id)?.action).find(Boolean) || 'fixed'
-    for (const id of re.verified) settle(book, id, action(id))
+    // only an id this round was asked about: a missing answer reads as fixed, which would flip an earlier escalation
+    for (const id of re.verified) if (findings.some(f => f.id === id || f.also?.id === id)) settle(book, id, action(id))
     // an absorbed finding settles with its kept entry; if the recheck returned it open, track() below re-opens it
     for (const [id, a] of Object.entries(alsoOf)) if (re.verified.includes(id)) settle(book, a.id, action(a.id, id))
     settleGate(book, re.gate)
