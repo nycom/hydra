@@ -125,6 +125,17 @@ await t('2g an escalation question is never offered as settleable: a later settl
   assert(prompts['a fix c2'] && !prompts['a fix c2'].includes(esc.q), 'not listed')
   assert(r.questions.some(q => q.q === `a: ${esc.q}`), JSON.stringify(r.questions)) })
 
+// ---- 3. the whole-branch fixer can settle a workstream's open soft-block question ----
+const wbSoft = { 'a implement': () => ({ status: 'blocked', ok: true, questions: [optional] }), 'one validate': () => ({ verdict: 'fail', findings: [F('V-F1')] }) }
+await t('3a the whole-branch fixer sees the open soft-block questions; a settle the recheck passes drops it with a repo note', async () => {
+  const { r, prompts } = await go({ cycles: 1, workstreams: [ws('a')] }, { ...wbSoft, 'one fix r1': () => ({ answers: [{ id: 'V-F1', action: 'fixed', note: 'flipped' }], settles: ['a:Q1'] }), 'one recheck r1': () => ({ verified: ['V-F1'] }) })
+  assert(prompts['one fix r1']?.includes('"id":"a:Q1"') && /settles/.test(prompts['one fix r1']), 'listed to the whole-branch fixer')
+  assert(r.repos[0].verdict === 'pass' && !r.questions.some(q => q.q.includes(optional.q)), JSON.stringify(r.questions))
+  assert(r.repos[0].notes.some(x => /settled the open question/.test(x) && x.includes(optional.q)), JSON.stringify(r.repos[0].notes)) })
+await t('3b (control) a whole-branch settle whose pass fails is not applied', async () => {
+  const { r } = await go({ cycles: 1, workstreams: [ws('a')] }, { ...wbSoft, 'one fix r1': () => ({ settles: ['a:Q1'] }), 'one fix r2': () => ({ settles: ['a:Q1'] }), 'one recheck r1': () => ({ verdict: 'fail', findings: [F('V-F1')] }), 'one recheck r2': () => ({ verdict: 'fail', findings: [F('V-F1')] }) })
+  assert(r.repos[0].verdict === 'fail' && r.questions.some(q => q.q === `a: ${optional.q}`), JSON.stringify(r.questions)) })
+
 // ---- docs and version ----
 await t('6a SKILL.md states the per-call probe and settled questions; plugin.json is 0.4.1', async () => {
   const s = readFileSync(new URL('../SKILL.md', import.meta.url), 'utf8')

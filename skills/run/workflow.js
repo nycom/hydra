@@ -432,6 +432,7 @@ const askEscalated = (fs, fix) => fs.flatMap(f => { const a = fix.answers.find(x
 const SETTLES = 'If a change you make takes an option other than a question\'s default, or settles it so the user no longer needs to answer, return its id in settles and say what you did in notes.'
 // drops from w.questions the listed questions whose id a validated fix returned in settles; returns their texts
 const dropSettled = (w, asked, ids = []) => { const qs = asked.filter(q => ids.includes(q.id)).map(q => q.q); if (qs.length) w.questions = w.questions.filter(q => !qs.includes(q.q)); return qs }
+const softOf = {} // workstream id -> its soft-block questions, for the whole-branch fixer
 const UNRUN = /^\W*(skip(ped)?|not run|none|n\/?a)\b/i // a prefix: "skipped: clean review" never ran; "OK (skipped=1)" did
 const unran = {} // label -> attempts that returned without running the gate, for the caller's escalation
 // After a step's first replacement dies, one cheap probe tells a dead environment (expired auth, no tool access) from a dead agent:
@@ -526,7 +527,7 @@ async function runWorkstream(w) {
   // blockers open when the resumed call stopped: a restarted review re-checks them, and only a validator clears them
   const reopened = (cf?.findings || []).filter(e => e.status === 'open' && e.severity !== 'minor').map(({ id, severity, kind, where, issue }) => ({ id, severity, kind, where, issue, evidence: 'open when the resumed run stopped' }))
   let authored = [] // the last author's or fixer's checkExits, for the false-green label
-  const softQs = [] // soft-block questions (optional, run continued on the default): a later validated fix that acts on one settles it
+  const softQs = softOf[w.id] = [] // soft-block questions (optional, run continued on the default): a later validated fix that acts on one settles it
   const absorb = r => {
     authored = r.checkExits
     out.sharedEdits = r.sharedEdits // each author returns the complete current list
@@ -919,6 +920,8 @@ async function runRepo(r, mine) {
   // the merged tip re-runs the checks of every merged workstream (a dropped one already merged stays on the branch), each command once
   const onTip = merged.map(w => byId[w.id])
   const tip = { checks: [...new Set(onTip.flatMap(w => w.checks || []))], knownRedChecks: [...new Set(onTip.flatMap(w => w.knownRedChecks || []))] }
+  const softAsked = merged.flatMap(w => (softOf[w.id] || []).filter(q => w.questions.includes(q)).map((q, k) => ({ w, id: `${w.id}:Q${k + 1}`, q: q.q, options: q.options, default: q.default })))
+  let wbSettles = [] // the last fix round's settles: it counts only once the pass ends clean and promoted
 
   const [rev, val] = await parallel([
     async () => solo ? { findings: [], seams: `skipped: ${merged[0].id} is the only workstream and merged onto ${r.featureBranch} at its base; no seam to check` } : step(
@@ -979,7 +982,7 @@ sha = the ${O}/${r.featureBranch} commit you validated. Ids: V-F1, V-F2, ...; qu
       `Whole-branch fix round ${round} on ${r.repo}, feature branch ${r.featureBranch}. Findings:
 ${JSON.stringify(findings)}
 ${ALSO(findings)}
-Set up: worktree wb-fix${round}, detached at ${head} (fetch first); push to the side branch ${side}, never to ${r.featureBranch}: it fast-forwards to your fix only after the recheck passes. If ${O}/${side} already exists and contains ${head}, an earlier attempt of this step pushed it: continue from it; if it does not contain ${head}, it is a leftover of an earlier run: delete it first (git push ${O} --delete ${side}).
+${softAsked.length ? `Optional questions the workstreams raised earlier (they continued on the defaults), still open for the user:\n${JSON.stringify(softAsked.map(({ w, ...q }) => q))}\n${SETTLES}\n` : ''}Set up: worktree wb-fix${round}, detached at ${head} (fetch first); push to the side branch ${side}, never to ${r.featureBranch}: it fast-forwards to your fix only after the recheck passes. If ${O}/${side} already exists and contains ${head}, an earlier attempt of this step pushed it: continue from it; if it does not contain ${head}, it is a leftover of an earlier run: delete it first (git push ${O} --delete ${side}).
 Critical and major: resolve every one (red-verified tests for bug fixes; defensible answers to questions; delete what over-engineering findings name). ${ESCALATE}${STOP_FIX && ' ' + STOP_FIX.trim()} Minor, including those carried from the workstream cycles: fix only if it is a one-liner, otherwise decline with a reason. Minimal fixes.
 Nothing to change (all answered, declined or escalated): no commit, no push, sha = ${head} (or the ${O}/${side} head if an earlier attempt pushed it), ok = true.
 Never merge a workstream branch: an unmerged workstream is the coordinator's call. If you change the source of a generated file, ${c.regen ? `rerun: ${c.regen}` : 'regenerate it with the repo\'s own script'}.
@@ -994,6 +997,7 @@ Return status, ok, verified sha, tests, gateTail, one answer per finding id, que
     res.notes.push(...fix.notes)
     if (!fix.ok || fix.status !== 'done') return fail(`whole-branch fix r${round} ${fix.status}: ${fix.tests}`)
     if (!same(head, fix.sha)) sides.push(side)
+    wbSettles = fix.settles || []
 
     const re = judged(await step(
       `Re-check whole-branch fix round ${round} on ${r.repo}, feature branch ${r.featureBranch}: git fetch${FETCH}, then the delta ${head}..${fix.sha}. Trust nothing the author claims.
@@ -1053,6 +1057,7 @@ sha = the commit you checked. verdict pass only if nothing critical or major is 
     if (why) return fail(`whole-branch fixes not promoted: ${why}`)
     res.sha = checked
   }
+  for (const x of merged) res.notes.push(...dropSettled(x, softAsked.filter(q => q.w === x), wbSettles).map(q => `whole-branch fix r${res.fixRounds} settled the open question of ${x.id}: ${q}`))
   return res
 }
 

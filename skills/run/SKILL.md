@@ -459,11 +459,13 @@ sub-part, with every other part done, the gate green, the head pushed and each
 question's default implemented, returns `blocked` with `ok: true`: the run
 continues to review and merge with the defaults and carries the questions;
 its `status` reads `done`, and a note says it continued on the default. Later
-fixes see these optional questions while they are open, by id (`Q1`, …); one a fix acts on
+fixes see these optional questions while they are open, by id (`Q1`, … for the
+workstream's fixers, `<id>:Q<n>` for the whole-branch fixer); one a fix acts on
 (takes an option other than the default, or makes moot) it returns in
 `settles`. The question leaves `questions`, with a note `fix c<n> settled the
-open question: …`, only once that fix is validated: its delta validator
-leaves nothing blocking. Otherwise it stays open and the
+open question: …` (or the whole-branch round's, in the repo's `notes`), only
+once that fix is validated: its delta validator leaves nothing blocking, or the
+whole-branch pass ends with its fixes promoted. Otherwise it stays open and the
 next fixer sees it again. Escalations and validator questions are never
 offered: they stay the user's.
 
