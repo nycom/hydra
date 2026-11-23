@@ -1,4 +1,4 @@
-// A merged sibling's pre-existing tests stay read-only under the integration-fix exception, and every workstream validator holds the rule.
+// A merged sibling's base tests stay read-only under the integration-fix exception (tests it added in this run do not), and every workstream validator holds the rule.
 // Every scenario fails against the 0.4.1 script except the ones marked (control).
 import { Run } from './run.mjs'
 import assert from 'node:assert'
@@ -59,10 +59,10 @@ const review = { 'd review c1': () => ({ findings: [F('c1-F1', 'critical', 'test
 const line = (p, start) => p.split('\n').find(l => l.startsWith(start)) || ''
 const RULE = /pre-existing test outside this workstream's files .*that the brief does not name is read-only.*is a regression/
 
-await t('a the integration exception keeps a merged sibling\'s pre-existing tests read-only and routes their only fix to "carried"', async () => {
+await t('a the integration exception offers a sibling\'s tests added in this run, keeps its base tests read-only and routes their only fix to "carried"', async () => {
   const { prompts } = await go(flow(), review)
   const s = line(prompts['d fix c1'] || '', 'Integration fix:')
-  assert(/covers their code, never a pre-existing test the brief does not name/.test(s) && /stays read-only/.test(s) && /answered "carried"/.test(s), s) })
+  assert(/covers their code and the tests they added in this run, never a test file that already exists on origin\/main and the brief does not name/.test(s) && /stays read-only/.test(s) && /answered "carried"/.test(s), s) })
 await t('b the delta validator carries the read-only rule with nothing claimed "carried"', async () => {
   const { prompts } = await go(flow(), review)
   const p = prompts['d validate c1'] || ''
@@ -80,7 +80,7 @@ await t('d (control) a workstream with no files[] gets no files-based rule', asy
   assert(prompts['a validate c1'] && !RULE.test(prompts['a validate c1'])) })
 await t('e SKILL.md states the carve-out; plugin.json is at least 0.4.2', async () => {
   const s = readFileSync(new URL('../SKILL.md', import.meta.url), 'utf8')
-  assert(/never their pre-existing tests/.test(s.replace(/\s+/g, ' ')), 'SKILL.md carve-out')
+  assert(/tests they added in this run/.test(s.replace(/\s+/g, ' ')) && /already exists on the run's base/.test(s.replace(/\s+/g, ' ')), 'SKILL.md carve-out')
   const v = JSON.parse(readFileSync(new URL('../../../.claude-plugin/plugin.json', import.meta.url), 'utf8')).version.split('.').map(Number); assert(v[0] > 0 || v[1] > 4 || (v[1] === 4 && v[2] >= 2), 'at least 0.4.2') })
 
 if (fails.length) { console.error(fails.join('\n')); process.exit(1) }

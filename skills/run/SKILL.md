@@ -167,8 +167,9 @@ Implementation is never below Sonnet.
   blocker can only be fixed in files owned by workstreams **already merged** into
   the feature branch, the fixer first merges `origin/<featureBranch>` into its
   branch and fixes those files too; it never touches files of workstreams not
-  merged yet. The exception covers the merged siblings' code, never their
-  pre-existing tests: a pre-existing test the brief does not name stays
+  merged yet. The exception covers the merged siblings' code and the tests
+  they added in this run, never a test file that already exists on the run's
+  base (`origin/<base>`) and that the brief does not name: that test stays
   read-only there too, and a blocker whose only fix is in one is `"carried"`
   (`blocked` with a question when the workstream has no `files[]`). The script keeps a run-wide record of who has merged (written
   inside the per-repo merge lock), names both groups in the fix prompt, and the
