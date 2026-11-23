@@ -560,9 +560,10 @@ async function runWorkstream(w) {
       ? `Integration fix: if a critical or major can only be fixed in files owned by workstreams already merged into ${w.featureBranch} — ${owners(done)} — first git merge ${O}/${w.featureBranch} into your branch, then fix those files too (the one exception to your file list; say so in notes). The exception covers their code and the tests they added in this run, which are not pre-existing, never a test that is already on ${O}/${w.base} and the brief does not name (git show ${O}/${w.base}:<path> has it): that test stays read-only, and a blocker whose only fix is in one is ${w.files ? 'answered "carried"' : 'status "blocked" with a question'}.${pending.length ? ` Never touch files owned by workstreams not merged yet: ${owners(pending)}.` : ''}`
       : `No workstream has merged into ${w.featureBranch} yet; a blocker outside your files is ${w.files ? 'answered "carried" (see above)' : 'status "blocked" with a question'}.`
   }
-  // read-only = on the run's base; a test a sibling added in this run is its owner's code. No files[]: only merged siblings' files are guarded
+  // read-only = on the run's base; a test a sibling added in this run is its owner's code. No files[]: only merged siblings' declared files are guarded
   const roGuard = () => {
-    const where = w.files ? `outside this workstream's files (${w.files.join(', ')})` : mergedInto[w.repo]?.length && `in the files of ${owners(mergedInto[w.repo])}`
+    const sibs = (mergedInto[w.repo] || []).filter(x => x.files)
+    const where = w.files ? `outside this workstream's files (${w.files.join(', ')})` : sibs.length && `in the files of ${owners(sibs)}`
     return where ? ` Read-only unless the brief names it: any test already on ${O}/${w.base} (git show ${O}/${w.base}:<path> has it) ${where}; editing one is a major regression, whatever the brief seems to justify.` : ''
   }
   const authorGate = () => w.quickGate ? GATE(w.quickGate, c.knownRed, w.repo, true) : GATE(w.gate, c.knownRed, w.repo)
@@ -730,7 +731,7 @@ ${ESCALATE}
 ${ACC_READ}${STOP_FIX}${RO_TESTS}
 Minor: fix only if it is a one-liner inside your files, otherwise decline with a reason — declining is a valid outcome.
 Keep fixes minimal and inside this workstream's files.
-${w.files ? 'A critical or major whose only fix lies outside the files you may edit (a pre-existing test, or a file the integration-fix exception below does not give you): change nothing for it and answer it "carried", naming that file in the note; once the validator agrees, the whole-branch pass fixes it and it leaves your cycles.\n' : ''}Nothing to change (all answered, declined or escalated): no commit, no push, sha = the current ${O}/${w.branch} head (${prev} unless an earlier attempt moved it), ok = true.
+${w.files ? 'A critical or major whose only fix lies outside the files you may edit (a pre-existing test, or a file the integration-fix exception below does not give you): change nothing for it and answer it "carried" (not blocked, not escalated), naming that file in the note; once the validator agrees, the whole-branch pass fixes it and it leaves your cycles.\n' : ''}Nothing to change (all answered, declined or escalated): no commit, no push, sha = the current ${O}/${w.branch} head (${prev} unless an earlier attempt moved it), ok = true.
 ${SHARED(c, w.files, true)}
 ${integration()}
 sharedEdits: return the complete current list; it replaces the earlier one${out.sharedEdits.length ? `, so keep every entry still needed from:\n${JSON.stringify(out.sharedEdits)}` : ''}.
@@ -987,7 +988,7 @@ sha = the ${O}/${r.featureBranch} commit you validated. Ids: V-F1, V-F2, ...; qu
       `Whole-branch fix round ${round} on ${r.repo}, feature branch ${r.featureBranch}. Findings:
 ${JSON.stringify(findings)}
 ${ALSO(findings)}
-${softAsked.length ? `Optional questions the workstreams raised earlier (they continued on the defaults), still open for the user:\n${JSON.stringify(softAsked.map(({ w, ...q }) => q))}\n${SETTLES}\n` : ''}Set up: worktree wb-fix${round}, detached at ${head} (fetch first); push to the side branch ${side}, never to ${r.featureBranch}: it fast-forwards to your fix only after the recheck passes. If ${O}/${side} already exists and contains ${head}, an earlier attempt of this step pushed it: continue from it; if it does not contain ${head}, it is a leftover of an earlier run: delete it first (git push ${O} --delete ${side}).
+${(x => x.length ? `Handed findings (${x.join(', ')}) are this pass's to fix in any file, pre-existing tests included (never escalated for that).\n` : '')(handed.filter(h => findings.some(f => f.id === h.id)).map(h => h.id))}${softAsked.length ? `Optional questions the workstreams raised earlier (they continued on the defaults), still open for the user:\n${JSON.stringify(softAsked.map(({ w, ...q }) => q))}\n${SETTLES}\n` : ''}Set up: worktree wb-fix${round}, detached at ${head} (fetch first); push to the side branch ${side}, never to ${r.featureBranch}: it fast-forwards to your fix only after the recheck passes. If ${O}/${side} already exists and contains ${head}, an earlier attempt of this step pushed it: continue from it; if it does not contain ${head}, it is a leftover of an earlier run: delete it first (git push ${O} --delete ${side}).
 Critical and major: resolve every one (red-verified tests for bug fixes; defensible answers to questions; delete what over-engineering findings name). ${ESCALATE}${STOP_FIX && ' ' + STOP_FIX.trim()} Minor, including those carried from the workstream cycles: fix only if it is a one-liner, otherwise decline with a reason. Minimal fixes.
 Nothing to change (all answered, declined or escalated): no commit, no push, sha = ${head} (or the ${O}/${side} head if an earlier attempt pushed it), ok = true.
 Never merge a workstream branch: an unmerged workstream is the coordinator's call. If you change the source of a generated file, ${c.regen ? `rerun: ${c.regen}` : 'regenerate it with the repo\'s own script'}.

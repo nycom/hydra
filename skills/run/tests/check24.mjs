@@ -57,12 +57,12 @@ const HA = SHA(1001)
 const flow = x => ({ cycles: 1, workstreams: [ws('d', { files: ['ledger/discount.py', 'tests/test_discount.py'], after: ['c'] }), ws('c', { files: ['ledger/api.py', 'tests/test_api.py'] })], ...x })
 const review = { 'd review c1': () => ({ findings: [F('c1-F1', 'critical', 'tests/test_api.py:20')] }), 'd validate c1': () => ({ verified: ['c1-F1'] }) }
 const line = (p, start) => p.split('\n').find(l => l.startsWith(start)) || ''
-const RULE = /Read-only unless the brief names it: any test already on origin\/main \(git show origin\/main:<path> has it\) .*editing one is a major regression/
+const RULE = /Read-only unless the brief names it: any test already on \S+ .*editing one is a major regression/
 
 await t('a the integration exception offers a sibling\'s tests added in this run, keeps its base tests read-only and routes their only fix to "carried"', async () => {
   const { prompts } = await go(flow(), review)
   const s = line(prompts['d fix c1'] || '', 'Integration fix:')
-  assert(/covers their code and the tests they added in this run, which are not pre-existing, never a test that is already on origin\/main and the brief does not name \(git show origin\/main:<path> has it\)/.test(s) && /stays read-only/.test(s) && /answered "carried"/.test(s), s) })
+  assert(/the tests they added in this run, which are not pre-existing/.test(s) && /never a test that is already on origin\/main and the brief does not name/.test(s) && /stays read-only/.test(s) && /answered "carried"/.test(s), s) })
 await t('b the delta validator carries the read-only rule with nothing claimed "carried"', async () => {
   const { prompts } = await go(flow(), review)
   const p = prompts['d validate c1'] || ''
@@ -98,6 +98,29 @@ await t('e SKILL.md states the carve-out; plugin.json is at least 0.4.2', async 
   const s = readFileSync(new URL('../SKILL.md', import.meta.url), 'utf8')
   assert(/tests they added in this run/.test(s.replace(/\s+/g, ' ')) && /test that already exists on the run's base/.test(s.replace(/\s+/g, ' ')) && !/test file that already exists/.test(s.replace(/\s+/g, ' ')), 'SKILL.md carve-out')
   const v = JSON.parse(readFileSync(new URL('../../../.claude-plugin/plugin.json', import.meta.url), 'utf8')).version.split('.').map(Number); assert(v[0] > 0 || v[1] > 4 || (v[1] === 4 && v[2] >= 2), 'at least 0.4.2') })
+
+// ---- the whole-PR review: one answer per case, one anchor, the whole-branch fixer's licence ----
+const anchors = { exception: /never a test that is already on (\S+) and/, guard: /any test already on (\S+) \(git show/, claim: /Pre-existing means on (\S+?):/ }
+await t('f the exception, the read-only rule and the claim sentence all name the same base ref', async () => {
+  const dev = x => ws(x.id, { base: 'develop', ...x })
+  const { prompts } = await go({ cycles: 1, localOnly: true, workstreams: [dev({ id: 'd', files: ['ledger/discount.py', 'tests/test_discount.py'], after: ['c'] }), dev({ id: 'c', files: ['ledger/api.py', 'tests/test_api.py'] })] },
+    { ...review, 'd fix c1': () => ({ answers: [{ id: 'c1-F1', action: 'carried', note: 'tests/test_api.py' }] }) })
+  const got = { exception: (line(prompts['d fix c1'] || '', 'Integration fix:').match(anchors.exception) || [])[1], guard: ((prompts['d validate c1'] || '').match(anchors.guard) || [])[1], claim: ((prompts['d validate c1'] || '').match(anchors.claim) || [])[1] }
+  assert.deepEqual(got, { exception: 'hydra-local/develop', guard: 'hydra-local/develop', claim: 'hydra-local/develop' }) })
+await t('g a files[] fixer answers a fix outside its files "carried", not blocked and not escalated', async () => {
+  const { prompts } = await go(flow(), review)
+  assert(/answer it "carried" \(not blocked, not escalated\), naming that file in the note/.test(prompts['d fix c1'] || ''), 'precedence') })
+await t('h the whole-branch fixer is told handed findings are its to fix in any file, pre-existing tests included', async () => {
+  const sc = { ...review, 'd fix c1': () => ({ answers: [{ id: 'c1-F1', action: 'carried', note: 'tests/test_api.py' }] }) }
+  const { prompts } = await go(flow(), sc)
+  assert(/Handed findings \(d:c1-F1\) are this pass's to fix in any file, pre-existing tests included \(never escalated for that\)/.test(prompts['one fix r1'] || ''), Object.keys(prompts).join()) })
+await t('h2 (control) with nothing handed the whole-branch fixer gets no such sentence', async () => {
+  const { prompts } = await go({ cycles: 1, workstreams: [ws('a')] }, { 'one validate': () => ({ verdict: 'fail', findings: [F('V-F1')] }), 'one recheck r1': () => ({ verified: ['V-F1'] }) })
+  assert(prompts['one fix r1'] && !/Handed findings/.test(prompts['one fix r1'])) })
+await t('i no files[] here and none on the merged siblings: no read-only sentence', async () => {
+  const { prompts } = await go(flow({ workstreams: [ws('d', { files: undefined, after: ['c'] }), ws('c', { files: undefined })] }), {})
+  const p = prompts['d validate c1'] || ''
+  assert(p && !RULE.test(p) && !/no files\[\] declared\)/.test(p.split('Read-only unless')[1] || ''), 'sentence') })
 
 if (fails.length) { console.error(fails.join('\n')); process.exit(1) }
 console.log('check24 ok')
