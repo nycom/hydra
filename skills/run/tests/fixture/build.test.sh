@@ -402,6 +402,7 @@ eq "a correct discounted_total after the rename (total_cents) turns it red" "$(s
 eq "the same function before the rename (total) keeps it green" "$(shape "$REAL")" ok
 eq "a stub that raises is red, never a skip" "$(shape $'def discounted_total(entries, code):\n    raise NotImplementedError')" ERROR
 eq "a non-callable stub is red, never a skip" "$(shape 'discounted_total = None')" ERROR
+eq "S21's scoped alpha-discount gate stays green on that head" "$( (cd "$(variant "$REAL" rename)" && python3 -m unittest tests.test_discount >/dev/null 2>&1) && echo 0 || echo $?)" 0
 eq "after the rename and a correct discounted_total, only that test joins the known-red" "$(gate_failures "$(variant "$REAL" rename)")" "tests.test_api.ApiTest.test_discounted_total_shape $KNOWN_RED"
 echo "ok --flow: baseline before the cents rename (total in alpha, its contract and smoke, beta), gates green but known-red, smoke 0; three workstreams (alpha-discount, alpha-cents on opus, beta-cents), each with files[], no after, no humanCheck, no base, no smoke; tests/test_api.py holds a discount-shape test that skips until discounted_total exists and goes red on a correct one in the renamed shape; telling dest paths refused"
 
