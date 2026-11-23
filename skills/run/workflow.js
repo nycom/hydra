@@ -557,13 +557,13 @@ async function runWorkstream(w) {
     const done = mergedInto[w.repo] || []
     const pending = W.filter(x => x.repo === w.repo && x !== w && !done.includes(x) && !(dependsOn(x, w.id) && x.files?.some(f => w.files?.some(g => overlaps(f, g)))))
     return done.length
-      ? `Integration fix: if a critical or major can only be fixed in files owned by workstreams already merged into ${w.featureBranch} — ${owners(done)} — first git merge ${O}/${w.featureBranch} into your branch, then fix those files too (the one exception to your file list; say so in notes). The exception covers their code and the tests they added in this run, never a test file that already exists on ${O}/${w.base} and the brief does not name (git cat-file -e ${O}/${w.base}:<path> succeeds): that test stays read-only, and a blocker whose only fix is in one is ${w.files ? 'answered "carried"' : 'status "blocked" with a question'}.${pending.length ? ` Never touch files owned by workstreams not merged yet: ${owners(pending)}.` : ''}`
+      ? `Integration fix: if a critical or major can only be fixed in files owned by workstreams already merged into ${w.featureBranch} — ${owners(done)} — first git merge ${O}/${w.featureBranch} into your branch, then fix those files too (the one exception to your file list; say so in notes). The exception covers their code and the tests they added in this run, which are not pre-existing, never a test that is already on ${O}/${w.base} and the brief does not name (git show ${O}/${w.base}:<path> has it): that test stays read-only, and a blocker whose only fix is in one is ${w.files ? 'answered "carried"' : 'status "blocked" with a question'}.${pending.length ? ` Never touch files owned by workstreams not merged yet: ${owners(pending)}.` : ''}`
       : `No workstream has merged into ${w.featureBranch} yet; a blocker outside your files is ${w.files ? 'answered "carried" (see above)' : 'status "blocked" with a question'}.`
   }
   // read-only = on the run's base; a test a sibling added in this run is its owner's code. No files[]: only merged siblings' files are guarded
   const roGuard = () => {
     const where = w.files ? `outside this workstream's files (${w.files.join(', ')})` : mergedInto[w.repo]?.length && `in the files of ${owners(mergedInto[w.repo])}`
-    return where ? ` Read-only unless the brief names it: any test file on ${O}/${w.base} ${where}; editing one is a major regression, whatever the brief seems to justify.` : ''
+    return where ? ` Read-only unless the brief names it: any test already on ${O}/${w.base} (git show ${O}/${w.base}:<path> has it) ${where}; editing one is a major regression, whatever the brief seems to justify.` : ''
   }
   const authorGate = () => w.quickGate ? GATE(w.quickGate, c.knownRed, w.repo, true) : GATE(w.gate, c.knownRed, w.repo)
   // The first validator of a workstream writes black-box acceptance tests from the brief before it reads the diff.

@@ -168,7 +168,7 @@ Implementation is never below Sonnet.
   the feature branch, the fixer first merges `origin/<featureBranch>` into its
   branch and fixes those files too; it never touches files of workstreams not
   merged yet. The exception covers the merged siblings' code and the tests
-  they added in this run, never a test file that already exists on the run's
+  they added in this run, never a test that already exists on the run's
   base (`origin/<base>`) and that the brief does not name: that test stays
   read-only there too, and a blocker whose only fix is in one is `"carried"`
   (`blocked` with a question when the workstream has no `files[]`). The script keeps a run-wide record of who has merged (written
@@ -480,7 +480,7 @@ does not give it, which includes any file before a sibling has merged)
 `"carried"`; for such a workstream the fix prompt never also tells it to block.
 Code in an already-merged sibling's files stays the fixer's through the
 integration-fix exception, and so do the tests it added in this run, never a
-test file that already exists on the run's base. Every workstream validator
+test that already exists on the run's base. Every workstream validator
 also files an edit to such a base test that the brief does not name as a
 major regression (a deletion or skip stays critical under the test-integrity
 check), claimed or not:

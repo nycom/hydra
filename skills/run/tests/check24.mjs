@@ -57,12 +57,12 @@ const HA = SHA(1001)
 const flow = x => ({ cycles: 1, workstreams: [ws('d', { files: ['ledger/discount.py', 'tests/test_discount.py'], after: ['c'] }), ws('c', { files: ['ledger/api.py', 'tests/test_api.py'] })], ...x })
 const review = { 'd review c1': () => ({ findings: [F('c1-F1', 'critical', 'tests/test_api.py:20')] }), 'd validate c1': () => ({ verified: ['c1-F1'] }) }
 const line = (p, start) => p.split('\n').find(l => l.startsWith(start)) || ''
-const RULE = /Read-only unless the brief names it: any test file on origin\/main .*editing one is a major regression/
+const RULE = /Read-only unless the brief names it: any test already on origin\/main \(git show origin\/main:<path> has it\) .*editing one is a major regression/
 
 await t('a the integration exception offers a sibling\'s tests added in this run, keeps its base tests read-only and routes their only fix to "carried"', async () => {
   const { prompts } = await go(flow(), review)
   const s = line(prompts['d fix c1'] || '', 'Integration fix:')
-  assert(/covers their code and the tests they added in this run, never a test file that already exists on origin\/main and the brief does not name/.test(s) && /stays read-only/.test(s) && /answered "carried"/.test(s), s) })
+  assert(/covers their code and the tests they added in this run, which are not pre-existing, never a test that is already on origin\/main and the brief does not name \(git show origin\/main:<path> has it\)/.test(s) && /stays read-only/.test(s) && /answered "carried"/.test(s), s) })
 await t('b the delta validator carries the read-only rule with nothing claimed "carried"', async () => {
   const { prompts } = await go(flow(), review)
   const p = prompts['d validate c1'] || ''
@@ -71,6 +71,11 @@ await t('b the delta validator carries the read-only rule with nothing claimed "
 await t('b2 the clean-review validator carries it too', async () => {
   const { prompts } = await go(flow(), {})
   assert(RULE.test(prompts['d validate c1'] || ''), 'rule missing') })
+await t('a2 a test a sibling added in this run to a file that is on the base is judged per test: offered under the exception, not guarded', async () => {
+  const { prompts } = await go(flow(), review)
+  const s = line(prompts['d fix c1'] || '', 'Integration fix:'), v = prompts['d validate c1'] || ''
+  assert(!/test file/.test(s) && /never a test that is already on origin\/main/.test(s), s)
+  assert(!/any test file on/.test(v) && /any test already on origin\/main \(git show origin\/main:<path> has it\)/.test(v), 'guard is per file') })
 await t('b3 a workstream with files[] gets the rule before any sibling merged (the backstop is computed later, at merge time)', async () => {
   const { prompts } = await go({ cycles: 1, workstreams: [ws('a')] }, {})
   assert(RULE.test(prompts['a validate c1'] || '') && prompts['a validate c1'].includes("outside this workstream's files (a/)"), 'rule missing') })
@@ -91,7 +96,7 @@ await t('d (control) a workstream with no files[] gets no files-based rule', asy
   assert(prompts['a validate c1'] && !RULE.test(prompts['a validate c1'])) })
 await t('e SKILL.md states the carve-out; plugin.json is at least 0.4.2', async () => {
   const s = readFileSync(new URL('../SKILL.md', import.meta.url), 'utf8')
-  assert(/tests they added in this run/.test(s.replace(/\s+/g, ' ')) && /already exists on the run's base/.test(s.replace(/\s+/g, ' ')), 'SKILL.md carve-out')
+  assert(/tests they added in this run/.test(s.replace(/\s+/g, ' ')) && /test that already exists on the run's base/.test(s.replace(/\s+/g, ' ')) && !/test file that already exists/.test(s.replace(/\s+/g, ' ')), 'SKILL.md carve-out')
   const v = JSON.parse(readFileSync(new URL('../../../.claude-plugin/plugin.json', import.meta.url), 'utf8')).version.split('.').map(Number); assert(v[0] > 0 || v[1] > 4 || (v[1] === 4 && v[2] >= 2), 'at least 0.4.2') })
 
 if (fails.length) { console.error(fails.join('\n')); process.exit(1) }
