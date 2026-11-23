@@ -110,11 +110,12 @@ await t('2e (control) a validator\'s brief-conflict question is never offered to
   assert(r.questions.some(q => q.q === `a: ${conflict.q}`), JSON.stringify(r.questions)) })
 
 // ---- docs and version ----
-await t('6a SKILL.md states the per-call probe and settled questions', async () => {
+await t('6a SKILL.md states the per-call probe and settled questions; plugin.json is 0.4.1', async () => {
   const s = readFileSync(new URL('../SKILL.md', import.meta.url), 'utf8')
   const row = s.split('\n').find(l => l.startsWith('| `resume` |'))
   assert(/call ordinal/.test(row) && /digest/.test(row) && !/its prompt names that id, so it always runs live/.test(row), 'resume row')
-  assert(/`settles`/.test(s), 'settled questions') })
+  assert(/`settles`/.test(s), 'settled questions')
+  assert.equal(JSON.parse(readFileSync(new URL('../../../.claude-plugin/plugin.json', import.meta.url), 'utf8')).version, '0.4.1') })
 
 if (fails.length) { console.error(fails.join('\n')); process.exit(1) }
 console.log('check23 ok')
