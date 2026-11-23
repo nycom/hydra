@@ -62,7 +62,7 @@ for (const [id, a] of Object.entries(HUMAN)) {
   // each answer names the sha the user checked, so it never applies to a different commit (a resume whose cache missed)
   if (![].concat(a).length || ![].concat(a).every(x => x && /^[0-9a-f]{7,40}$/.test(x.sha) && typeof x.answer === 'string' && x.answer.trim())) throw new Error(`humanChecks.${id}: {sha, answer} or an array of them: sha = the checked commit (7-40 hex), answer = "ok" or the problem in words`)
 }
-// resume: the id of the run a resumeFromRunId call resumes; it makes the git-state probe's prompt new, so the probe always runs live
+// resume: the id of the run a resumeFromRunId call resumes; with the call ordinal and the input digest it makes the git-state probe's prompt new, so the probe runs live
 if (A.resume != null && !(typeof A.resume === 'string' && A.resume.trim())) throw new Error('resume must be the id of the run being resumed (a non-empty string)')
 const DECIDE = A.decisions || {}
 if (typeof DECIDE !== 'object' || Array.isArray(DECIDE)) throw new Error('decisions must be an object {<workstream id>: answer}')
@@ -136,6 +136,9 @@ for (const [who, g] of [...W.flatMap(w => [[`workstream ${w.id}`, w.gate], [`wor
 const CF = A.carryForward || {}
 if (typeof CF !== 'object' || Array.isArray(CF)) throw new Error('carryForward must be the carryForward object of the result being resumed')
 if (A.carryForward && !A.resume) throw new Error('carryForward is only for a resume: set resume too')
+if (CF.call != null && !(Number.isInteger(CF.call) && CF.call >= 1)) throw new Error('carryForward.call must be a positive integer (the call that returned it)')
+// this call's ordinal: resumeFromRunId keeps the run id, so the probe tells a 2nd resume from the 1st by it
+const CALL = (CF.call ?? 0) + 1
 for (const [id, x] of Object.entries(CF.workstreams || {})) {
   if (!byId[id]) throw new Error(`carryForward.workstreams.${id}: no workstream ${id}`)
   for (const k of ['handed', 'open', 'findings']) if (x[k] != null && !Array.isArray(x[k])) throw new Error(`carryForward.workstreams.${id}.${k} must be an array`)
@@ -1046,13 +1049,18 @@ sha = the commit you checked. verdict pass only if nothing critical or major is 
 
 // ---- wiring ---------------------------------------------------------------
 log(`${STAGE === 'wholeBranch' ? 'whole-branch re-validation' : `${W.length} workstream(s)`} across ${REPOS.length} repo(s); cycles=${CYCLES ?? 'converge'} (hard cap ${CAP})`)
-// resume: one read-only probe per repo rebuilds each workstream's state from git before any stage; its prompt names the resumed run, so it never replays a cached state
+// resume: one read-only probe per repo rebuilds each workstream's state from git before any stage. Its prompt names the resumed run,
+// this call's ordinal and a digest of this call's resume inputs, so a later resume of the same run never replays an earlier probe's state.
+// shortcut: two calls with byte-identical args (a call that returned no result, re-run with the same carryForward) share a probe; a per-call nonce would fix it, if the tool ever gives one.
 const RESUMED = {} // workstream id -> {head, merged, featureSha}
 const featureShaOf = {} // repo -> its feature-branch head when the probe read it
+// FNV-1a: a short, stable fingerprint; the script has no crypto
+const digest = s => { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x01000193); return (h >>> 0).toString(16).padStart(8, '0') }
 if (A.resume && STAGE !== 'wholeBranch') {
   if (!A.carryForward) log(`resume of ${A.resume} without carryForward: ledgers, handed and shared-edits findings and passed whole-branch passes of the resumed run are not restored`)
+  const inputs = digest(JSON.stringify([HUMAN, DECIDE, CF]))
   const states = await parallel(REPOS.map(r => () => step(
-    `Resume of run ${A.resume}: read the git state of ${r.repo}; change nothing. git -C ${r.repo} fetch ${O}; featureSha = git -C ${r.repo} rev-parse ${O}/${r.featureBranch}. For each workstream branch below: head = git -C ${r.repo} rev-parse ${O}/<branch> (empty if the branch does not exist on ${O}); merged = true only if head is non-empty and git -C ${r.repo} merge-base --is-ancestor <head> ${O}/${r.featureBranch} succeeds.
+    `Resume of run ${A.resume}, call ${CALL} (inputs ${inputs}): read the git state of ${r.repo}; change nothing. git -C ${r.repo} fetch ${O}; featureSha = git -C ${r.repo} rev-parse ${O}/${r.featureBranch}. For each workstream branch below: head = git -C ${r.repo} rev-parse ${O}/<branch> (empty if the branch does not exist on ${O}); merged = true only if head is non-empty and git -C ${r.repo} merge-base --is-ancestor <head> ${O}/${r.featureBranch} succeeds.
 ${r.ws.map(w => `${w.id}: ${w.branch}`).join('\n')}
 No worktree, no checkout, no commits, no pushes; never touch the user's checkout. ${HARD}`,
     { label: `${name(r.repo)} state`, phase: 'Implement', model: 'sonnet', effort: 'low', schema: STATE }, true)))
@@ -1204,6 +1212,7 @@ return {
   ...(humanPending.length && { humanCheck: humanPending }), // the run paused: ask the user, then re-run with humanChecks
   // every full-stage result hands over what git cannot say, since any of them may be resumed; pass it back verbatim as carryForward
   ...(STAGE !== 'wholeBranch' && { carryForward: {
+    call: CALL,
     workstreams: Object.fromEntries(wsResults.map(w => {
       const settled = repoResults.find(r => r.repo === byId[w.id].repo)?.findings || [] // a handed finding the whole-branch pass settled leaves
       return [w.id, { handed: (w.handed || []).filter(f => !settled.some(e => e.id === `${w.id}:${f.id}` && STATUS.includes(e.status) && e.status !== 'carried')), open: w.open || [], findings: w.findings || [] }]
