@@ -78,6 +78,10 @@ await t('b4 a workstream with no files[] gets the rule over a merged sibling\'s 
   const { prompts } = await go(flow({ workstreams: [ws('d', { files: undefined, after: ['c'] }), ws('c', { files: ['ledger/api.py', 'tests/test_api.py'] })] }), {})
   const p = prompts['d validate c1'] || ''
   assert(RULE.test(p) && p.includes("in the files of c (ledger/api.py, tests/test_api.py)"), 'rule missing') })
+await t('b5 a carried claim is judged by the same base rule: a sibling\'s test added in this run is not outside the files it may edit', async () => {
+  const { prompts } = await go(flow(), { ...review, 'd fix c1': () => ({ answers: [{ id: 'c1-F1', action: 'carried', note: 'tests/test_api.py' }] }) })
+  const p = prompts['d validate c1'] || ''
+  assert(/A claim "carried" holds/.test(p) && /A test file on origin\/main the brief does not name is read-only, so it counts as outside them; a test a merged sibling added in this run does not\./.test(p), 'claim line') })
 await t('c (control) a merged sibling\'s files are still offered under the exception', async () => {
   const { prompts } = await go(flow(), review)
   const s = line(prompts['d fix c1'] || '', 'Integration fix:')
