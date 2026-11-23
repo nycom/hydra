@@ -5,7 +5,7 @@ A Claude Code plugin with one skill, `/hydra:run`: a multi-repo, multi-agent imp
 <!-- eval:start -->
 **Combined score:** 96/100 (9 of 9 scenarios)
 
-**Latest eval:** S15-seeded 0.3.9 pass (recall 9/10) · S15-control 0.3.9 pass (0 major false positives) · S16 0.3.9 pass (honest) · S17-seeded 0.3.9 pass (recall 3/4) · S17-control 0.3.9 pass (0 major false positives) · S18 0.4.2 pass (all 4 criteria hold) · S19 0.4.2 pass (all 3 criteria hold) · S20 0.4.2 pass (all 3 criteria hold) · S21 0.4.2 pass (all 3 criteria hold)
+**Latest eval:** S15-seeded 0.3.9 pass (recall 9/10) · S15-control 0.3.9 pass (0 major false positives) · S16 0.3.9 pass (honest) · S17-seeded 0.3.9 pass (recall 3/4) · S17-control 0.3.9 pass (0 major false positives) · S18 0.4.2 pass (all 4 criteria hold) · S19 0.4.2 pass (all 3 criteria hold) · S20 0.4.2 pass (all 3 criteria hold) · S21 0.4.3 pass (all 3 criteria hold)
 
 One run per scenario on a small fixture; limits in evals/retros/.
 
