@@ -1,0 +1,62 @@
+{
+  "id": "2026-11-23-s19-v0.4.2",
+  "date": "2026-11-23",
+  "hydraVersion": "0.4.2",
+  "scenario": "S19",
+  "verdict": "pass",
+  "reason": "Call 1 paused both checks at round 1; call 2 kept cents' ok, fixed and re-merged discount and asked only discount at round 2; call 3 passed both repos, with a live state probe on each resume.",
+  "flow": {
+    "askedOncePerHead": true,
+    "carriedHeadKeptAnswer": true,
+    "roundIncrements": true
+  },
+  "cost": {
+    "outputTokens": 84706,
+    "contextTokens": 5773736,
+    "agents": 33,
+    "wallMinutes": 11.0,
+    "byStage": {
+      "implement": {
+        "tokens": 8452,
+        "agents": 7,
+        "contextTokens": 1266020
+      },
+      "review": {
+        "tokens": 7931,
+        "agents": 3,
+        "contextTokens": 460535
+      },
+      "fix": {
+        "tokens": 3224,
+        "agents": 2,
+        "contextTokens": 206182
+      },
+      "validate": {
+        "tokens": 21461,
+        "agents": 4,
+        "contextTokens": 1096735
+      },
+      "merge": {
+        "tokens": 7197,
+        "agents": 4,
+        "contextTokens": 454767
+      },
+      "wholeBranch": {
+        "tokens": 19184,
+        "agents": 6,
+        "contextTokens": 1045703
+      },
+      "contracts": {
+        "tokens": 5525,
+        "agents": 1,
+        "contextTokens": 289170
+      },
+      "docs": {
+        "tokens": 11732,
+        "agents": 6,
+        "contextTokens": 954624
+      }
+    }
+  },
+  "notes": "Three calls of one run id (wf_4849eed4-dd1), each resume with resumeFromRunId, resume and carryForward. Call 1 (14 agents, 40,703 output, 5.1 min): alpha-cents (opus) then alpha-discount (after alpha-cents, scoped gate tests.test_discount) and beta-cents merged; beta passed; alpha paused with both checks at round 1 (cents @10dd233, checkAt 6286029; discount @df66d99, checkAt b441e11). Call 2 (5 agents, 9,777 output, 1.9 min): answers cents ok@10dd233 and the scripted discount problem@df66d99 (a wrong field label). Both state probes ran live (journal started rows for alpha state and beta state; prompts 'Resume of run wf_4849eed4-dd1, call 2 (inputs 58916f8d)'). alpha-cents and beta-cents were carried as merged with no agents. The problem became H1-F1; alpha-discount fix c1 added a field-name pinning test (93af6ed; the mislabel did not reproduce, the code already answered total_cents, and the fixer said so), validate c1 verified it, and the re-merge made 5a7b1bd. Paused again asking only alpha-discount @93af6ed, round 2; cents was not asked. Call 3 (14 agents, 34,226 output, 4.0 min): answers discount [problem@df66d99, ok@93af6ed], cents [ok@10dd233]. Both probes ran live again ('call 3 (inputs d49f5be4)', started rows), so the 0.4.1 per-call probe fix holds on the second resume of the same run. No workstream agent ran; the whole-branch pass ran. Result: alpha pass (whole-branch 41d650a, final be8f8cb after docs), beta pass (kept pass c354587, final 1d18c880 after docs), crossRepo pass. Integration-fix leg: did not fire; alpha-discount started after alpha-cents merged (after) and merged clean, so no integration-fix commit. Stale-test path: alpha-discount's discounted_total made the base test tests/test_api.py::test_discounted_total_shape run and go red in the full gate (the scoped gate stayed green). The cycle-1 reviewer filed it critical (c1-F1), fix c1 carried it as a read-only pre-existing test outside files[], it was handed to the whole-branch pass and carried through calls 2 and 3 in carryForward; call 3's whole-branch fixer (opus) changed its expected key to total_cents (41d650a, one line), the recheck verified it red at 5a7b1bd and green at 41d650a, and the repo ledger marks it fixed. Leftover (not scored): the call-3 whole-branch validator also asked a brief-conflict question about that test (default: leave it unchanged, merge stays blocked); it stays in the repo and top-level questions after the fixer edited the test and the repo passed. Settle-on-act covers only author soft-block questions; the S18 and S21 runs of this wave saw the same shape. The workstream ledger still shows the handed finding as carried while the repo ledger shows fixed. Models: authors sonnet (alpha-cents opus as briefed), reviewers opus (alpha-cents review c1 fable, one tier above its opus author), workstream fixer sonnet, validators opus (workstream, whole-branch, recheck, contracts, docs), whole-branch reviewer fable, whole-branch fixer opus, merge, state probes, docs and promote sonnet. Cost: the three calls share one transcript dir and journal, so cost.mjs ran per call on its own journal rows (1-29, 30-39, 40-67) and agent files, then summed; the dir-wide run gives the same tokens and agents but 13.1 wall minutes (it spans the gaps between calls). No agent failed or was unfinished. Stale-sweep cron was refused by the session's permission classifier; stale_sweep.py --dry-run ran by hand between calls (clean). Claude Code 2.1.330 (desktop). Fixture HEAD: alpha 43bee80, beta 3fa223e (build.sh --flow). concurrency: 3 sessions. savvy-progress 03477f432a5f, pane plugin f6ed06fa8d9f. Answer-key grep clean (357 agent tool calls: 324 Bash, 33 StructuredOutput; no reads of the scripted answers, the run folder, the fixture key, the evals or the plugin, no other fixture, no network calls)."
+}

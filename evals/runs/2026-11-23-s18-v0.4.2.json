@@ -1,0 +1,63 @@
+{
+  "id": "2026-11-23-s18-v0.4.2",
+  "date": "2026-11-23",
+  "hydraVersion": "0.4.2",
+  "scenario": "S18",
+  "verdict": "pass",
+  "reason": "Call 1's alpha-discount review c1 died on every attempt while alpha-cents and beta-cents merged and alpha stopped incomplete; the resumed call 2 carried both merged workstreams with no agents, re-ran the dead review live and merged alpha-discount.",
+  "flow": {
+    "deadStepReranLive": true,
+    "mergedCarriedNoAgents": true,
+    "dependentStarted": true,
+    "noPassWhileUnmerged": true
+  },
+  "cost": {
+    "outputTokens": 72296,
+    "contextTokens": 5056536,
+    "agents": 28,
+    "wallMinutes": 9.5,
+    "byStage": {
+      "implement": {
+        "tokens": 9398,
+        "agents": 6,
+        "contextTokens": 1035837
+      },
+      "review": {
+        "tokens": 7914,
+        "agents": 4,
+        "contextTokens": 646547
+      },
+      "fix": {
+        "tokens": 1086,
+        "agents": 1,
+        "contextTokens": 47120
+      },
+      "validate": {
+        "tokens": 16056,
+        "agents": 3,
+        "contextTokens": 953424
+      },
+      "merge": {
+        "tokens": 6080,
+        "agents": 3,
+        "contextTokens": 354823
+      },
+      "wholeBranch": {
+        "tokens": 18983,
+        "agents": 6,
+        "contextTokens": 1039923
+      },
+      "contracts": {
+        "tokens": 6456,
+        "agents": 1,
+        "contextTokens": 430870
+      },
+      "docs": {
+        "tokens": 6323,
+        "agents": 4,
+        "contextTokens": 547992
+      }
+    }
+  },
+  "notes": "Two calls. Call 1 ran a run-local copy with one line changed in step() (`await agent(` became `opts.label.startsWith('alpha-discount review c1') ? null : await agent(`), so every attempt of `alpha-discount review c1` returned null without an agent; the health probe stayed live and passed (`health alpha-discount review c1`, one sonnet agent). Call 1 (11 agents, 29,034 output tokens, 3.0 min): alpha-cents and beta-cents implemented, reviewed, validated and merged; alpha-discount implemented after alpha-cents merged (head ccf4e48), then its review died 3 times (escalation \"review c1 died 3 times; NOT merged\"); alpha verdict incomplete with \"whole-branch pass not run: planned workstream(s) alpha-discount not merged\", finalSha empty, so no alpha whole-branch agent ran; beta's whole-branch validator passed beta (its only planned workstream had merged). Call 2 (17 agents, 43,262 output tokens, 6.5 min) ran an unchanged copy with the same args plus resume, call 1's carryForward verbatim and resumeFromRunId: the tool accepted it under the same run id; the cache served 0 of 11 saved results, so every agent ran live. Both state probes ran live and their prompts name \"call 2\" (with an inputs digest). They found alpha-cents and beta-cents merged and carried them with no agent (notes: \"already merged into feat/eval ... carried as merged, no stage re-run\"); no alpha-cents or beta-cents implement, review, validate or merge agent ran in call 2. alpha-discount ran implement (continued its unmerged branch, nothing new to push, head ccf4e48), review c1 live (opus, returned headSha and findings), fix c1, validate c1 and merge, then the alpha whole-branch pass, contracts and docs ran. S21 path walked in call 2 (not an S18 criterion): review c1 filed the stale tests/test_api.py::test_discounted_total_shape as critical c1-F1; fix c1 answered carried (a read-only pre-existing test outside files[]); validate c1 verified it and it was handed; the whole-branch pass (review fable, validator opus, fixer opus, recheck opus, 1 fix round) fixed it, ledger alpha-discount:c1-F1 fixed, along with W-F1, V-F1 and V-G on the same test. alpha-discount cyclesRun 1, open empty. Alpha verdict pass, finalSha 3b83eca; beta verdict pass (whole-branch pass kept from call 1, feat/eval unchanged at 010b73c), docs promoted, finalSha 4e0cbf2; contract check pass. Observation (reporting only, not an S18 criterion): call 2's result.questions still lists alpha-discount validate c1's question \"Should the whole-branch pass edit this read-only pre-existing test?\" with the default \"Leave tests/test_api.py unchanged\", although the whole-branch fixer edited that test and the ledger shows it fixed. The question came from a validator, not an author soft-block, so the settle-on-act rule does not reach it. Likewise, call 1 listed beta-cents validate c1's question on alpha's contract.yaml, which the alpha-cents shared edit made moot at merge. Final: alpha feat/eval 3b83eca, beta feat/eval 4e0cbf2; every workstream head is an ancestor of its feature branch (checked with ls-remote and merge-base). Alpha full suite at 3b83eca: 25 tests, 1 failure (the known-red). The alpha whole-branch side branch feat/eval--wbfix1 stays on the fixture remote: the session's permission classifier denied the promote agent's delete, which it reported and did not work around. Cost is the per-field sum of cost.mjs per call: the resumed call shares call 1's transcript dir and journal with no second launched row, so each call was measured on its own journal rows and agent files (the dir-wide cost.mjs gives the same tokens and agents, but 10.5 wall minutes because it spans the gap between calls). Models: author sonnet (alpha-cents opus as briefed), reviewer opus (alpha-cents review fable, one tier above its opus author), workstream fixer sonnet (alpha-discount fix c1), validators opus (workstream, whole-branch, recheck, contracts, docs), whole-branch reviewer fable, whole-branch fixer opus, merge sonnet, state probes, health probe, docs and promote sonnet. Claude Code 2.1.330 (desktop). Fixture HEAD: alpha 43bee80, beta 3fa223e (build.sh --flow). concurrency: 3 sessions. savvy-progress 03477f432a5f, pane plugin f6ed06fa8d9f. answer-key grep clean (177 agent tool calls, no reads of the fixture key or evals, no network calls)."
+}

@@ -1,0 +1,63 @@
+{
+  "id": "2026-11-23-s21-v0.4.2",
+  "date": "2026-11-23",
+  "hydraVersion": "0.4.2",
+  "scenario": "S21",
+  "verdict": "void",
+  "voidReason": "the author hard-blocked at implement (alpha-discount implement returned status blocked with ok false), so no head was pushed, nothing was reviewed, and the carry leg never ran",
+  "reason": "alpha-discount's author saw that the brief's same-shape rule contradicts the read-only pre-existing test_discounted_total_shape and stopped before writing code with a question, as the implement prompt allows; no cycle, carry or whole-branch fix ran.",
+  "flow": {
+    "carriedToWholeBranch": false,
+    "noCycleOnIt": true,
+    "wholeBranchFixed": false
+  },
+  "cost": {
+    "outputTokens": 30716,
+    "contextTokens": 1871512,
+    "agents": 10,
+    "wallMinutes": 3,
+    "byStage": {
+      "implement": {
+        "tokens": 8679,
+        "agents": 3,
+        "contextTokens": 552594
+      },
+      "review": {
+        "tokens": 4434,
+        "agents": 2,
+        "contextTokens": 278736
+      },
+      "fix": {
+        "tokens": 0,
+        "agents": 0,
+        "contextTokens": 0
+      },
+      "validate": {
+        "tokens": 10756,
+        "agents": 2,
+        "contextTokens": 628083
+      },
+      "merge": {
+        "tokens": 3922,
+        "agents": 2,
+        "contextTokens": 227603
+      },
+      "wholeBranch": {
+        "tokens": 2925,
+        "agents": 1,
+        "contextTokens": 184496
+      },
+      "contracts": {
+        "tokens": 0,
+        "agents": 0,
+        "contextTokens": 0
+      },
+      "docs": {
+        "tokens": 0,
+        "agents": 0,
+        "contextTokens": 0
+      }
+    }
+  },
+  "notes": "First run on 0.4.2, restart round 2. One call, cycles 1, 10 agents, none died (cost.mjs failed [] unfinished []). Models: author alpha-discount sonnet, alpha-cents opus, beta-cents sonnet; reviewer alpha-cents fable, beta-cents opus; validators opus (alpha-cents validate c1, beta-cents validate c1, beta whole-branch validator); merge sonnet; no fixer, no alpha-discount review, no contract check and no docs ran. Claude Code 2.1.330. Fixture HEAD (feat/eval at build, equal to main and feat/eval-base): alpha 43bee80, beta 3fa223e. Concurrency: 2 sessions (S20 ran alongside). savvy-progress 03477f432a5f, pane plugin f6ed06fa8d9f. Args: the printed --flow args with alpha-discount given after [alpha-cents] and the scoped gate python3 -m unittest tests.test_discount; brief unchanged. alpha-cents merged first (alpha feat/eval e3d72b5, contract.yaml and README shared edits applied) and left test_discounted_total_shape unchanged, so void reason 3 did not fire. alpha-discount implement then returned status blocked, ok false, no sha, with one question whose default keeps the test and returns {\"total\": ...} against the brief; nothing pushed, no feat/eval--alpha-discount branch on the remote (ls-remote). Alpha verdict incomplete (whole-branch pass not run), beta verdict pass at c8dc149 (ls-remote verified), crossRepo null (contracts wait for every repo). Stale test: no fixer ever saw it (no answer: carried, blocked, escalated or edited), no whole-branch fixer ran, and no soft-block question existed to settle; the hard-block question is in the top-level questions. Flow values as measured: handed empty and no alpha-discount ledger entries; noCycleOnIt is true only vacuously (cyclesRun 0, open empty). A second top-level question, from beta-cents validate c1, says alpha's contract.yaml still reads total; it was asked before alpha-cents' merge applied the shared edit, and alpha feat/eval now reads total_cents, so it is moot at the end of the run. Answer-key grep clean (74 agent tool calls: 62 Bash, 12 StructuredOutput; no reads of the fixture key, evals or the plugin, no network calls; the only raw transcript hits are the harness cwd metadata)."
+}
