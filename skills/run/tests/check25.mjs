@@ -71,7 +71,8 @@ await t('1a the question leaves questions, with a repo note, once the handed fin
   const { r } = await go(one, carry(stale))
   assert(r.repos[0].verdict === 'pass' && r.repos[0].findings.find(e => e.id === 'a:c1-F1')?.status === 'fixed', 'handed finding fixed')
   assert(!asked(r, stale) && !W(r, 'a').questions.some(q => q.q === stale.q), JSON.stringify(r.questions))
-  assert(r.repos[0].notes.some(x => x.includes('a:c1-F1') && x.includes(stale.q)), JSON.stringify(r.repos[0].notes)) })
+  assert(r.repos[0].notes.some(x => x.includes('a:c1-F1') && x.includes(stale.q)), JSON.stringify(r.repos[0].notes))
+  assert(!r.repos[0].notes.some(x => x.includes('is settled')), 'no earlier-call note for a finding handed in this call') })
 await t('1b (control) a pass that fails keeps the question', async () => {
   const still = () => ({ verdict: 'fail', findings: [{ ...C, id: 'a:c1-F1' }] })
   const { r } = await go(one, carry(stale, { 'one recheck r1': still, 'one recheck r2': still }))
@@ -83,6 +84,16 @@ await t('1c (control) a question that does not start with the handed id stays', 
 await t('1d (control) a handed finding the whole-branch fixer escalated keeps its question', async () => {
   const { r } = await go(one, carry(stale, { 'one fix r1': () => ({ answers: [{ id: 'V-F1', action: 'fixed', note: 'n' }, { id: 'a:c1-F1', action: 'escalated', note: 'brief vs repo' }] }) }))
   assert(asked(r, stale), JSON.stringify(r.questions)) })
+await t('1v a handed finding escalated in round 1 stays escalated when a later recheck lists it again unasked', async () => {
+  const other = F('V-F1', 'major', 'a/x.js:1'), escQ = Q('a:c1-F1: may b/old.test.js change?')
+  const { r } = await go(one, carry(stale, {
+    'one validate': () => ({ verdict: 'fail', findings: [other] }),
+    'one fix r1': () => ({ answers: [{ id: 'V-F1', action: 'fixed', note: 'n' }, { id: 'a:c1-F1', action: 'escalated', note: 'brief vs repo' }], questions: [escQ] }),
+    'one recheck r1': () => ({ verdict: 'fail', verified: ['a:c1-F1'], findings: [other] }),
+    'one fix r2': () => ({ answers: [{ id: 'V-F1', action: 'fixed', note: 'n' }] }),
+    'one recheck r2': () => ({ verified: ['V-F1', 'a:c1-F1'] }) }))
+  assert(r.repos[0].findings.find(e => e.id === 'a:c1-F1')?.status !== 'fixed', JSON.stringify(r.repos[0].findings))
+  assert(asked(r, stale) && r.questions.some(q => q.q === `one: ${escQ.q}`), JSON.stringify(r.questions)) })
 await t('1e (control) the whole-branch fixer is still never shown a validator question', async () => {
   const { prompts } = await go(one, carry(stale))
   assert(prompts['one fix r1'] && !prompts['one fix r1'].includes(stale.q) && !/settles/.test(prompts['one fix r1'])) })
@@ -184,7 +195,24 @@ await t('1r a resumed call drops its own question in the p: form', async () => {
   const { r: r1 } = await go(one, carry(stale, { 'one recheck r1': still, 'one recheck r2': still }))
   const pq = Q('a:p:c1-F1: may b/old.test.js change now?')
   const { r } = await resumeAt(r1, one, { ...wb(), 'one validate': () => ({ verdict: 'fail', findings: [F('V-F1', 'critical', 'b/old.test.js:3')], questions: [pq] }) })
-  assert(r.repos[0].verdict === 'pass' && !r.questions.some(q => q.q.includes(pq.q)), JSON.stringify(r.questions)) })
+  assert(r.repos[0].verdict === 'pass' && !r.questions.some(q => q.q.includes(pq.q)), JSON.stringify(r.questions))
+  assert(settled(r).some(x => x.includes(SETTLED_NOTE)), 'the earlier-call note still comes with an in-call drop') })
+await t('1w every handed finding of a workstream drops its own question', async () => {
+  const D = F('c1-F2', 'major', 'b/other.test.js:7'), q2 = Q('c1-F2: may b/other.test.js change?')
+  const { r } = await go(one, carry(stale, { 'a review c1': () => ({ findings: [C, D] }), 'a fix c1': () => ({ answers: ['c1-F1', 'c1-F2'].map(id => ({ id, action: 'carried', note: 'outside a/' })) }), 'a validate c1': () => ({ verified: ['c1-F1', 'c1-F2'], questions: [stale, q2] }),
+    'one fix r1': () => ({ answers: ['V-F1', 'a:c1-F1', 'a:c1-F2'].map(id => ({ id, action: 'fixed', note: 'f' })) }), 'one recheck r1': () => ({ verified: ['V-F1', 'a:c1-F1', 'a:c1-F2'] }) }))
+  assert(r.repos[0].verdict === 'pass' && !asked(r, stale) && !asked(r, q2), JSON.stringify(r.questions)) })
+await t('1x with two workstreams the second one\'s fixed finding drops its questions too', async () => {
+  const X = F('c1-F1', 'critical', 'x/old.test.js:3'), own = w => ({
+    [`${w} review c1`]: () => ({ findings: [X] }),
+    [`${w} fix c1`]: () => ({ answers: [{ id: 'c1-F1', action: 'carried', note: 'x/ is a base test' }] }),
+    [`${w} validate c1`]: () => ({ verified: ['c1-F1'], questions: [Q(`c1-F1: ${w} local`)] }) })
+  const { r } = await go({ cycles: 1, workstreams: [ws('a'), ws('b')] }, { ...own('a'), ...own('b'),
+    'one validate': () => ({ verdict: 'fail', findings: [F('V-F1', 'critical', 'x/old.test.js:3')], questions: [Q('a:c1-F1: wb a'), Q('b:c1-F1: wb b')] }),
+    'one fix r1': () => ({ answers: [{ id: 'V-F1', action: 'fixed', note: 'f' }, { id: 'a:c1-F1', action: 'escalated', note: 'a brief names x/' }, { id: 'b:c1-F1', action: 'fixed', note: 'f' }] }),
+    'one recheck r1': () => ({ verified: ['V-F1', 'a:c1-F1', 'b:c1-F1'] }) })
+  const qs = r.questions.map(q => q.q)
+  assert(r.repos[0].verdict === 'pass' && !qs.includes('b: c1-F1: b local') && !qs.includes('one: b:c1-F1: wb b') && qs.includes('a: c1-F1: a local') && qs.includes('one: a:c1-F1: wb a'), JSON.stringify(qs)) })
 await t('1s (control) a repo question that names the tagged id later in its text stays', async () => {
   const later = Q('the base test b/old.test.js may change (see a:c1-F1)')
   const { r } = await go(one, carry(Q('unrelated'), { 'one validate': () => ({ verdict: 'fail', findings: [F('V-F1', 'critical', 'b/old.test.js:3')], questions: [later] }) }))
@@ -203,7 +231,9 @@ await t('1u two handed findings are both listed in every whole-branch prompt', a
 await t('2a the delta validator that verifies a carried claim is told what that licenses, and to start any question about it with the id', async () => {
   const p = (await go(one, carry(stale))).prompts['a validate c1']
   assert(/Once you verify a "carried" claim, the whole-branch pass fixes that finding in any file, pre-existing tests included \(except a file a brief names by path, directory or glob as not to be edited\); that needs no question\./.test(p), 'licence')
-  assert(/start it with the finding's id \(e\.g\. "c1-F1: \.\.\."\)/.test(p), 'id sentence') })
+  assert(/start it with the finding's id \(e\.g\. "c1-F1: \.\.\."\): it is dropped once that fix is verified\./.test(p), 'id sentence')
+  const p3 = (await go(one, carry(stale, { 'a review c1': () => ({ findings: [{ ...C, id: 'c1-F3' }] }), 'a fix c1': () => ({ answers: [{ id: 'c1-F3', action: 'carried', note: 'outside a/' }] }), 'a validate c1': () => ({ verified: ['c1-F3'] }) }))).prompts['a validate c1']
+  assert(/\(e\.g\. "c1-F3: \.\.\."\)/.test(p3), 'the example is the claimed id') })
 await t('2b (control) with no carried claim the delta validator gets no such sentence', async () => {
   const { prompts } = await go(one, { 'a review c1': () => ({ findings: [F('c1-F1')] }), 'a validate c1': () => ({ verified: ['c1-F1'] }) })
   assert(prompts['a validate c1'] && !/Once you verify a "carried" claim/.test(prompts['a validate c1'])) })
@@ -250,6 +280,7 @@ await t('3a SKILL.md states the drop; plugin.json is at least 0.4.3', async () =
   assert(/under\s+the\s+"<ws\s+id>:\s+"\s+tag\s+that\s+starts\s+with\s+<id>,\s+or\s+any\s+that\s+starts\s+with\s+<ws\s+id>:<id>/.test(s), 'the scoped earlier-call note')
   assert(/clean-review\s+validator\s+asks\s+before\s+any\s+finding\s+is\s+carried/.test(s), 'the clean-review limit')
   assert(/reuses\s+a\s+finding\s+id\s+across\s+calls/.test(s), 'the reused-id limit')
+  assert(/A\s+handed\s+finding\s+that\s+a\s+whole-branch\s+pass\s+ending\s+`pass`\s+settled\s+leaves\s+`carryForward`/.test(s), 'carryForward keeps it until a pass')
   const v = JSON.parse(readFileSync(new URL('../../../.claude-plugin/plugin.json', import.meta.url), 'utf8')).version.split('.').map(Number); assert(v[0] > 0 || v[1] > 4 || (v[1] === 4 && v[2] >= 3), 'at least 0.4.3') })
 
 if (fails.length) { console.error(fails.join('\n')); process.exit(1) }
