@@ -1,0 +1,62 @@
+{
+  "id": "2026-11-23-s21-v0.4.3",
+  "date": "2026-11-23",
+  "hydraVersion": "0.4.3",
+  "scenario": "S21",
+  "verdict": "pass",
+  "reason": "review c1 filed the stale test as a critical, the fixer carried it out of files[] and the delta validator verified it without a question, the workstream merged after one cycle, and the whole-branch fixer flipped the assertion so alpha passes with only the known-red failing and no question left.",
+  "flow": {
+    "carriedToWholeBranch": true,
+    "noCycleOnIt": true,
+    "wholeBranchFixed": true
+  },
+  "cost": {
+    "outputTokens": 71807,
+    "contextTokens": 4454045,
+    "agents": 26,
+    "wallMinutes": 9.4,
+    "byStage": {
+      "implement": {
+        "tokens": 6872,
+        "agents": 3,
+        "contextTokens": 498085
+      },
+      "review": {
+        "tokens": 7285,
+        "agents": 3,
+        "contextTokens": 429395
+      },
+      "fix": {
+        "tokens": 1311,
+        "agents": 1,
+        "contextTokens": 74348
+      },
+      "validate": {
+        "tokens": 14326,
+        "agents": 3,
+        "contextTokens": 708160
+      },
+      "merge": {
+        "tokens": 6295,
+        "agents": 3,
+        "contextTokens": 384771
+      },
+      "wholeBranch": {
+        "tokens": 19766,
+        "agents": 6,
+        "contextTokens": 1276336
+      },
+      "contracts": {
+        "tokens": 4735,
+        "agents": 1,
+        "contextTokens": 198747
+      },
+      "docs": {
+        "tokens": 11217,
+        "agents": 6,
+        "contextTokens": 884203
+      }
+    }
+  },
+  "notes": "First S21 run on 0.4.3; only S21 re-runs on 0.4.3, since only its scenario and scored path changed. One call, no author block, so no resume leg ran; this is a one-call result. Args: the printed --flow args with alpha-discount given after [alpha-cents] and the scoped gate python3 -m unittest tests.test_discount, cycles 1, run from a run-local copy of the installed workflow.js; brief and fixture unchanged, nothing names the stale test. 26 agents, none died (cost.mjs failed [] unfinished []). Models: authors alpha-cents opus, alpha-discount sonnet, beta-cents sonnet; workstream reviewers alpha-cents fable, alpha-discount opus, beta-cents opus; workstream validators opus; workstream fixer alpha-discount sonnet; merge sonnet; whole-branch reviewer alpha fable; whole-branch validators opus (alpha, beta); whole-branch fixer and recheck opus; promote sonnet; contracts opus; docs sonnet, docs validate opus, docs promote sonnet. Claude Code 2.1.330. Fixture HEAD (feat/eval at build, equal to main and feat/eval-base): alpha 43bee80, beta 3fa223e. Concurrency: 1 session. savvy-progress 8884375dd7b3, clawpit d61b76cb88cb (branch build). Stale test by stage: alpha-cents' rename commit d5282e9 only added test_total_field_is_total_cents and left test_discounted_total_shape alone (its author noted the future conflict and did not edit it; void reason 4 no). alpha-discount's author ran only its scoped gate and returned done ok true at 180f219 with no question (no block). Review c1 (opus) filed it as c1-F1 critical integration (void reason 3 no). Fixer c1 answered carried with no edit (the test is on origin/main, the brief does not name it, so it stays read-only even under the integration exception). The c1 delta validator verified the carried claim and asked no question (questions []), where 0.4.2's asked a soft-block one. alpha-discount merged (6b08b51, README c7616f7), cyclesRun 1, not in open, handed holds it. Whole-branch: alpha review W-F1 critical; alpha validate V-F1 critical (opens 'This is handed finding alpha-discount:c1-F1' and says no brief bars edits to tests/test_api.py) plus V-G (gate exit 1), questions []. Fixer r1 flipped the assertion to ['total_cents'] at 20aaeeb, citing the handed finding ('No brief protects that file'), added test_rounds_like_total for the carried minor v1-R1, and answered fixed for W-F1, V-F1, V-G, alpha-discount:v1-R1 and alpha-discount:c1-F1; recheck r1 passed and verified all five. alpha feat/eval 8eddb6e (ls-remote verified), discover 26 tests with only the known-red failing (re-run by hand at 8eddb6e); beta feat/eval 334eab8 (verified); crossRepo pass; drift skipped. 0.4.3 behaviour: no validator, workstream or whole-branch, asked a question about the carried finding, so nothing needed dropping; dropped [] and no settled-question note (the earlier-call note path needs a resume, which did not run). Top-level questions are empty, so no question about a shipped fix reached the user (in 0.4.2 one did). Ledger: the per-workstream open minors (alpha-cents c1-F1, beta-cents c1-F1/v1-F1, alpha-discount v1-R1) are fixed per repo, beta with fixRounds 0, as in the 0.4.2 runs. Cleanup: the alpha promote and both docs promotes could not delete feat/eval--wbfix1 and feat/eval--docs (the permission policy denied push --delete); the coordinator's stale-task sweep cron was also denied and not created; no stuck runner appeared. One agent called a misnamed tool (bash) once, got a tool error and retried with Bash. Answer-key grep clean (170 agent tool calls: 143 Bash, 1 misnamed bash, 26 StructuredOutput; no reads of tests/fixture, fixture-scenarios, evals/ or the plugin, no network calls)."
+}
