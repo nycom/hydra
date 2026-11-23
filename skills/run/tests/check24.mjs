@@ -78,9 +78,10 @@ await t('c (control) a merged sibling\'s files are still offered under the excep
 await t('d (control) a workstream with no files[] gets no files-based rule', async () => {
   const { prompts } = await go({ cycles: 1, workstreams: [ws('a', { files: undefined })] }, {})
   assert(prompts['a validate c1'] && !RULE.test(prompts['a validate c1'])) })
-await t('e SKILL.md states the carve-out', async () => {
+await t('e SKILL.md states the carve-out; plugin.json is at least 0.4.2', async () => {
   const s = readFileSync(new URL('../SKILL.md', import.meta.url), 'utf8')
-  assert(/never their pre-existing tests/.test(s.replace(/\s+/g, ' ')), 'SKILL.md carve-out') })
+  assert(/never their pre-existing tests/.test(s.replace(/\s+/g, ' ')), 'SKILL.md carve-out')
+  const v = JSON.parse(readFileSync(new URL('../../../.claude-plugin/plugin.json', import.meta.url), 'utf8')).version.split('.').map(Number); assert(v[0] > 0 || v[1] > 4 || (v[1] === 4 && v[2] >= 2), 'at least 0.4.2') })
 
 if (fails.length) { console.error(fails.join('\n')); process.exit(1) }
 console.log('check24 ok')
