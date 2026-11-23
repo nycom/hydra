@@ -482,9 +482,9 @@ That drop sees this call's questions only. For a finding handed in an earlier
 call (a `p:` id) the repo note is `whole-branch fix r<n> fixed <ws
 id>:p:<id>: a question from an earlier call that starts with <id> or <ws
 id>:<id> is settled`, and the coordinator drops the question it held.
-A question about it that does not start with the id stays, and the handed rule
-spares only a file a brief names as not to be edited, so a brief that protects
-a directory or a glob may not stop that fix: name the file.
+A question about it that does not start with the id stays, and so does one
+about a file a brief names by path, directory or glob as not to be edited: the
+handed rule spares that file, so its finding is escalated, not fixed.
 
 **Fixes outside `files[]` go to the whole-branch pass:** when a workstream has
 `files[]`, its fixer answers a critical or major whose only fix lies outside the
