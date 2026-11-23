@@ -756,7 +756,7 @@ ${accept(fix.sha)}${ACC_RUN(fix.sha)}${same(prev, fix.sha) ? 'No delta: skip the
 Findings with the author's claimed resolutions — judge the code first, then read each claim:
 ${JSON.stringify(found.map(f => ({ ...f, claim: fix.answers.find(a => a.id === f.id) || 'no answer' })))}
 ${out.handed.length ? `Handed to the whole-branch pass (their fix is outside this workstream's files; not yours to judge, never re-file them): ${out.handed.map(f => f.id).join(', ')}\n` : ''}${ledger.length ? `Verified in earlier cycles (a fix that undoes one is a regression unless escalated): ${JSON.stringify(ledger)}\n` : ''}
-1. ${REFUTE} Where a test is claimed, it must fail at ${prev}, the pre-fix head: run it there in a second worktree at ${w.repo}/.claude/worktrees/${w.id}-val${i}-red (same rules: clear a leftover path first, remove it when done; never mktemp), and green at ${fix.sha}. Reverting the fix hunks in your worktree is the fallback only when that cannot run; state the fallback in evidence. Judge each answer to a question and each declined minor: defensible or not. ${CLAUSES} ${CONFLICT} ${MERGE_EDITS(c.hot, out.sharedEdits)}${EVIDENCE}${claimed.length ? ` A claim "carried" holds only when its fix cannot be made inside the files this workstream may edit (${allowed}): return the id in verified if so, otherwise in open. A pre-existing test the brief does not name is read-only, so it counts as outside them. Pre-existing means on ${O}/${w.base}: a test a merged sibling added in this run does not count.` : ''}
+1. ${REFUTE} Where a test is claimed, it must fail at ${prev}, the pre-fix head: run it there in a second worktree at ${w.repo}/.claude/worktrees/${w.id}-val${i}-red (same rules: clear a leftover path first, remove it when done; never mktemp), and green at ${fix.sha}. Reverting the fix hunks in your worktree is the fallback only when that cannot run; state the fallback in evidence. Judge each answer to a question and each declined minor: defensible or not. ${CLAUSES} ${CONFLICT} ${MERGE_EDITS(c.hot, out.sharedEdits)}${EVIDENCE}${claimed.length ? ` A claim "carried" holds only when its fix cannot be made inside the files this workstream may edit (${allowed}): return the id in verified if so, otherwise in open. A pre-existing test the brief does not name is read-only, so it counts as outside them. Pre-existing means on ${O}/${w.base}: a test a merged sibling added in this run does not count. Once you verify a "carried" claim, the whole-branch pass fixes that finding in any file, pre-existing tests included (except a file a brief names by path, directory or glob as not to be edited); that needs no question. A clause that names no path, directory or glob does not bar a handed fix. If you still ask one about it, start it with the finding's id (e.g. "${claimed[0].id}: ..."): it is dropped once that fix is verified.` : ''}
 2. Hunt regressions the fixes introduced (they routinely plant new bugs: data loss, broken callers, weakened tests). ${TEST_GUARD}${roGuard()}${first ? ` ${fullGuard(fix.sha)}` : ''}
 3. Run the gate and report gate {green, summary, command, flaky}. ${WRAPPED}:
 ${GATE_CMD(w.gate)}
@@ -917,10 +917,10 @@ async function runRepo(r, mine) {
   // one workstream merged onto a feature branch still at its base has no seam: the validator alone covers the branch
   // findings the workstream cycles settled: a whole-branch finding that would reverse one is a question
   const fixedIn = (b, pre = '') => b.filter(e => e.status === 'fixed' && e.where !== 'gate').map(e => ({ id: pre + e.id, where: e.where, issue: e.issue }))
-  const SETTLED = () => {
+  const SETTLED = recheck => {
     const fixed = [...merged.flatMap(w => fixedIn(w.findings || [], `${w.id}:`)), ...fixedIn(book)]
     const asked = [...new Set([...merged.flatMap(w => w.questions || []), ...res.questions].map(q => q.q))]
-    return `${fixed.length ? ` Fixes verified earlier in this run (a finding whose fix would reverse one: file it and name it; the fixer escalates): ${JSON.stringify(fixed)}` : ''}${asked.length ? ` Already asked of the user, never re-ask: ${JSON.stringify(asked)}` : ''}`
+    return `${fixed.length ? ` Fixes verified earlier in this run (a finding whose fix would reverse one: file it and name it; the fixer escalates): ${JSON.stringify(fixed)}` : ''}${asked.length ? ` Already asked of the user, never re-ask: ${JSON.stringify(asked)}` : ''}${handed.length ? ` Handed findings (${handed.map(h => `${h.id} (${h.where})`).join(', ')}) are this pass's to fix in any file, pre-existing tests included, except a file a brief names by path, directory or glob as not to be edited: ${recheck ? 'the hard-clause rule stands for it' : "that one is not this pass's to edit"}. An open question about a handed finding never holds its fix. A clause that names no path, directory or glob does not bar a handed fix.${recheck ? ' For an assertion such a fix changes, the handed finding is the reason the test-integrity check asks for; its other checks still apply.' : ''}` : ''}`
   }
   const solo = merged.length === 1 && same(merged[0].preMergeSha, merged[0].baseAtMerge)
   // the merged tip re-runs the checks of every merged workstream (a dropped one already merged stays on the branch), each command once
@@ -988,7 +988,7 @@ sha = the ${O}/${r.featureBranch} commit you validated. Ids: V-F1, V-F2, ...; qu
       `Whole-branch fix round ${round} on ${r.repo}, feature branch ${r.featureBranch}. Findings:
 ${JSON.stringify(findings)}
 ${ALSO(findings)}
-${(x => x.length ? `Handed findings (${x.join(', ')}) are this pass's to fix in any file, pre-existing tests included (never escalated for that).\n` : '')(handed.filter(h => findings.some(f => f.id === h.id)).map(h => h.id))}${softAsked.length ? `Optional questions the workstreams raised earlier (they continued on the defaults), still open for the user:\n${JSON.stringify(softAsked.map(({ w, ...q }) => q))}\n${SETTLES}\n` : ''}Set up: worktree wb-fix${round}, detached at ${head} (fetch first); push to the side branch ${side}, never to ${r.featureBranch}: it fast-forwards to your fix only after the recheck passes. If ${O}/${side} already exists and contains ${head}, an earlier attempt of this step pushed it: continue from it; if it does not contain ${head}, it is a leftover of an earlier run: delete it first (git push ${O} --delete ${side}).
+${(x => x.length ? `Handed findings (${x.join(', ')}) are this pass's to fix in any file, pre-existing tests included (never escalated for that), unless a finding says a brief names that file by path, directory or glob as not to be edited: escalate that one. A clause that names no path, directory or glob does not bar a handed fix.\n` : '')(handed.filter(h => findings.some(f => f.id === h.id)).map(h => h.id))}${softAsked.length ? `Optional questions the workstreams raised earlier (they continued on the defaults), still open for the user:\n${JSON.stringify(softAsked.map(({ w, ...q }) => q))}\n${SETTLES}\n` : ''}Set up: worktree wb-fix${round}, detached at ${head} (fetch first); push to the side branch ${side}, never to ${r.featureBranch}: it fast-forwards to your fix only after the recheck passes. If ${O}/${side} already exists and contains ${head}, an earlier attempt of this step pushed it: continue from it; if it does not contain ${head}, it is a leftover of an earlier run: delete it first (git push ${O} --delete ${side}).
 Critical and major: resolve every one (red-verified tests for bug fixes; defensible answers to questions; delete what over-engineering findings name). ${ESCALATE}${STOP_FIX && ' ' + STOP_FIX.trim()} Minor, including those carried from the workstream cycles: fix only if it is a one-liner, otherwise decline with a reason. Minimal fixes.
 Nothing to change (all answered, declined or escalated): no commit, no push, sha = ${head} (or the ${O}/${side} head if an earlier attempt pushed it), ok = true.
 Never merge a workstream branch: an unmerged workstream is the coordinator's call. If you change the source of a generated file, ${c.regen ? `rerun: ${c.regen}` : 'regenerate it with the repo\'s own script'}.
@@ -1010,7 +1010,7 @@ Return status, ok, verified sha, tests, gateTail, one answer per finding id, que
 ${ACC_RUN(fix.sha)}${same(head, fix.sha) ? 'No delta: skip the delta hunt and judge the answers and declines; still run every suite, the test-integrity check and hygiene at this head.\n' : ''}Findings with claimed resolutions — judge the code first, then read each claim:
 ${JSON.stringify(findings.map(f => ({ ...f, claim: fix.answers.find(a => a.id === f.id) || 'no answer' })))}
 ${ALSO(findings)}1. ${REFUTE} A claimed test must fail at ${head}, the pre-fix head: run it there in a second worktree at ${r.repo}/.claude/worktrees/wb-recheck${round}-red (same rules: clear a leftover path first, remove it when done; never mktemp), and green at ${fix.sha}. Reverting the fix hunks is the fallback only when that cannot run; state the fallback in evidence. Judge each answer and each declined minor. ${CLAUSES} ${EVIDENCE}
-2. Hunt regressions the fixes introduced. ${TEST_GUARD} ${CONFLICT}${SETTLED()}${A.stopRule ? ' File each break a fix introduced as kind "regression", even when the base lacks the feature.' : ''}
+2. Hunt regressions the fixes introduced. ${TEST_GUARD} ${CONFLICT}${SETTLED(true)}${A.stopRule ? ' File each break a fix introduced as kind "regression", even when the base lacks the feature.' : ''}
 3. Rerun every suite and report gate {green, summary, command, flaky}. ${WRAPPED}:
 ${GATE_CMD(gates)}
 ${GREEN(c.knownRed, r.repo)} ${FLAKY}
@@ -1034,7 +1034,8 @@ sha = the commit you checked. verdict pass only if nothing critical or major is 
     const hit = [...new Set(re.findings.filter(f => blocking(f) && f.kind === 'regression' && !findings.some(g => g.id === f.id || g.also?.id === f.id) && asked.has(fileOf(f))).map(fileOf))]
     if (hit.length) res.churn.push({ round, files: hit })
     const action = (...ids) => ids.map(id => fix.answers.find(a => a.id === id)?.action).find(Boolean) || 'fixed'
-    for (const id of re.verified) settle(book, id, action(id))
+    // only an id this round was asked about: a missing answer reads as fixed, which would flip an earlier escalation
+    for (const id of re.verified) if (findings.some(f => f.id === id || f.also?.id === id)) settle(book, id, action(id))
     // an absorbed finding settles with its kept entry; if the recheck returned it open, track() below re-opens it
     for (const [id, a] of Object.entries(alsoOf)) if (re.verified.includes(id)) settle(book, a.id, action(a.id, id))
     settleGate(book, re.gate)
@@ -1064,6 +1065,19 @@ sha = the commit you checked. verdict pass only if nothing critical or major is 
     res.sha = checked
   }
   for (const x of merged) res.notes.push(...dropSettled(x, softAsked.filter(q => q.w === x), wbSettles).map(q => `whole-branch fix r${res.fixRounds} settled the open question of ${x.id}: ${q}`))
+  // a question that names a handed finding this pass fixed (recheck-verified, promoted) asks about done work
+  for (const x of merged) for (const h of x.handed || []) {
+    const id = `${x.id}:${h.id}`
+    if (book.find(e => e.id === id)?.status !== 'fixed') continue
+    const gone = [...x.questions.filter(q => names(q.q, h.id) || names(q.q, id)), ...res.questions.filter(q => names(q.q, id))]
+    x.questions = x.questions.filter(q => !gone.includes(q))
+    res.questions = res.questions.filter(q => !gone.includes(q))
+    res.notes.push(...gone.map(q => `whole-branch fix r${res.fixRounds} fixed ${id}; dropped the question about it: ${q.q}`))
+    // handed in an earlier call (p: ids): its question is held by the coordinator, not in this result, so name it
+    const earlier = []
+    for (let s = h.id; s.startsWith('p:');) earlier.push(s = s.slice(2))
+    if (earlier.length) res.notes.push(`whole-branch fix r${res.fixRounds} fixed ${id}: a question from an earlier call under the "${x.id}: " tag that starts with ${earlier.join(' or ')}, or any that starts with ${earlier.map(e => `${x.id}:${e}`).join(' or ')}, is settled`)
+  }
   return res
 }
 
@@ -1234,7 +1248,8 @@ return {
   ...(STAGE !== 'wholeBranch' && { carryForward: {
     call: CALL,
     workstreams: Object.fromEntries(wsResults.map(w => {
-      const settled = repoResults.find(r => r.repo === byId[w.id].repo)?.findings || [] // a handed finding the whole-branch pass settled leaves
+      const rr = repoResults.find(r => r.repo === byId[w.id].repo)
+      const settled = rr?.verdict === 'pass' ? rr.findings : [] // a handed finding leaves only once its pass passed: a failed one promoted nothing
       return [w.id, { handed: (w.handed || []).filter(f => !settled.some(e => e.id === `${w.id}:${f.id}` && STATUS.includes(e.status) && e.status !== 'carried')), open: w.open || [], findings: w.findings || [] }]
     })),
     repos: Object.fromEntries(repoResults.map(r => [r.repo, { shared: sharedFound[r.repo] || [], passed: r.verdict === 'pass' ? r : null }])),

@@ -320,7 +320,7 @@ Workflow({
 | `resume` | none | on every `resumeFromRunId` call: the id of the run being resumed. One read-only probe per repo (`<repo> state`, sonnet) reads git before any stage. Its prompt names that id, the call ordinal (`carryForward.call` + 1; every full-stage result's `carryForward` carries its own `call`) and a short digest of this call's `humanChecks`, `decisions` and `carryForward`, so each resume's probe is new and runs live, and every later call runs live too, a second resume of the same run included. Two calls with byte-identical args (a call that returned no result, re-run with the same `carryForward`) share a probe and replay; a resume without `carryForward` has no ordinal, so pass it on every resume. A workstream whose branch head is already an ancestor of the feature branch is carried `merged: true` with no agent of its own (dependents start, its human check binds to that head); any other workstream runs from implement, which continues its unmerged branch. A dead probe falls back to implement, which also reports an already-merged branch as success (`alreadyMerged`), never `blocked` |
 | `stepTool` | none | a tool name (`/^[\w-]+$/`). When set, every worker prompt ends with a paragraph telling the worker to report its steps with that tool and to send `failed` only when its own attempt failed (findings and a red gate it was asked to run are results). Unset: prompts are unchanged. Adds about 55 tokens per agent |
 | `decisions` | none | the user's answers to blocked workstreams' questions, on a re-run with `resumeFromRunId` and `resume`: `{"<workstream id>": "answer in words"}`. The answer is appended to that workstream's brief, so the same workstream resumes at implement and its validators' test guard accepts a pre-existing test edit the answer authorises (the author lists each as "authorised test edit: <path>"). The blocked result's `workstreams[].decision.answer` gives the exact value to pass |
-| `carryForward` | none | on a resume (requires `resume`): the `carryForward` object of the result being resumed, passed back verbatim. It holds what git cannot say: per workstream the findings ledger (settled entries stay settled for the reviewers), the carried minors and the findings handed to the whole-branch pass; per repo the shared-edits findings and, for a repo whose whole-branch pass already passed, that result. Every full-stage result carries it, whatever its verdict (a whole-branch `fail` from an infra fault or the budget is resumable too). Restored ids get a `p:` prefix (`p:c1-F1`, `p:S-a-m1-F1`, whole-branch `a:p:c1-F1`), so a restarted review's or re-merge's new ids never collide with them. A `passed` entry must be a passed repo result (verdict `pass`, a 7-40 hex sha, its arrays), else the args check throws; a kept pass's ledger keeps the ids of the call that ran it, one `p:` fewer than the workstream ledgers of the call that keeps it. A handed finding that a whole-branch pass settled leaves `carryForward`, and a blocker still open when the resumed call stopped goes back to the restarted workstream's first review as a carried finding, which only a validator clears. Without `carryForward` a resume logs that nothing is restored and carries merged workstreams with empty ledgers, so a handed major or a shared-edits blocker would vanish into a `pass`. A kept pass is reused when the probe finds the feature branch still at its `sha` and no merge landed in this call; otherwise the pass runs again |
+| `carryForward` | none | on a resume (requires `resume`): the `carryForward` object of the result being resumed, passed back verbatim. It holds what git cannot say: per workstream the findings ledger (settled entries stay settled for the reviewers), the carried minors and the findings handed to the whole-branch pass; per repo the shared-edits findings and, for a repo whose whole-branch pass already passed, that result. Every full-stage result carries it, whatever its verdict (a whole-branch `fail` from an infra fault or the budget is resumable too). Restored ids get a `p:` prefix (`p:c1-F1`, `p:S-a-m1-F1`, whole-branch `a:p:c1-F1`), so a restarted review's or re-merge's new ids never collide with them. A `passed` entry must be a passed repo result (verdict `pass`, a 7-40 hex sha, its arrays), else the args check throws; a kept pass's ledger keeps the ids of the call that ran it, one `p:` fewer than the workstream ledgers of the call that keeps it. A handed finding that a whole-branch pass ending `pass` settled leaves `carryForward`, and a blocker still open when the resumed call stopped goes back to the restarted workstream's first review as a carried finding, which only a validator clears. Without `carryForward` a resume logs that nothing is restored and carries merged workstreams with empty ledgers, so a handed major or a shared-edits blocker would vanish into a `pass`. A kept pass is reused when the probe finds the feature branch still at its `sha` and no merge landed in this call; otherwise the pass runs again |
 | `dropped` | none | workstream ids the user dropped (unknown ids throw; a workstream `after` a dropped one throws unless dropped too). A dropped workstream runs no agent and reads `status: "dropped"`, `dropped: true`; the rest merges and its repo's whole-branch pass runs without it (a repo whose every workstream is dropped stays `skipped`). Whole-branch and drift prompts leave its brief out and say it is not on the branch. Result: top-level `dropped: [ids]` and the repo note `not done (dropped): <ids>`. A dropped workstream the resume probe finds already merged is carried as merged, with an escalation that it stays on the branch. Its unmerged branch stays on the remote: delete it if unwanted |
 | `workstreams[].after` | none | workstream ids (same repo only; unknown ids, itself and cycles throw) that must merge into the feature branch before this one starts implementing; it branches from the head that carries them. A predecessor that does not merge leaves it NOT started. Workstreams without `after` run in parallel as before |
 | `workstreams[].lite` | `false` | for small pure files: implement, then the clean-review validator alone (acceptance tests, full-range test guard, gate, trial merge); no reviewer ever runs. A critical or major it files gets a fix and a delta validation per cycle, capped by `maxCycles` as usual. Still merged, and covered by the whole-branch pass. A lite workstream alone on its untouched base gets no reviewer at all: the integrated review is skipped too, so only validators see it |
@@ -426,7 +426,11 @@ first). Ask the user per `check`, then re-run with the same args plus
 or the problem}]`, earlier answers first), `resumeFromRunId` = the paused run,
 `resume` = its id and `carryForward` = its `carryForward`. Between the pause and the resume change nothing but
 `humanChecks`: no hand fixes, no brief edits. Hold the paused result's
-`questions` and ask them with the final return's. The resume's git probe
+`questions` and ask them with the final return's. A later call's repo note `… a
+question from an earlier call under the "<ws id>: " tag that starts with <id>,
+or any that starts with <ws id>:<id>, is settled` means the whole-branch pass
+fixed that finding: drop a held question that starts with an id such a note
+names, the bare `<id>` only under that workstream's tag. The resume's git probe
 carries every merged workstream, so nothing is re-implemented and an answer
 reaches its workstream without any replay. An answer binds to the workstream
 head, never the feature tip: a re-merge with no new workstream commit, or a
@@ -471,7 +475,23 @@ open question: …` (or the whole-branch round's, in the repo's `notes`), only
 once that fix is validated: its delta validator leaves nothing blocking, or the
 whole-branch pass ends with its fixes promoted. Otherwise it stays open and the
 next fixer sees it again. Escalations and validator questions are never
-offered: they stay the user's.
+offered: they stay the user's. One exception needs no fixer: a question that
+starts with the id of a handed finding (`<id>` or `<ws id>:<id>`) leaves
+`questions` once the whole-branch pass fixed that finding (repo note
+`whole-branch fix r<n> fixed <ws id>:<id>; dropped the question about it: …`).
+That drop sees this call's questions only. For a finding handed in an earlier
+call (a `p:` id) the repo note is `whole-branch fix r<n> fixed <ws
+id>:p:<id>: a question from an earlier call under the "<ws id>: " tag that
+starts with <id>, or any that starts with <ws id>:<id>, is settled`, and the
+coordinator drops the question it held.
+A question about it that does not start with the id stays, and so does one
+about a file a brief names by path, directory or glob as not to be edited: the
+handed rule spares that file, so its finding is escalated, not fixed (a clause
+that names no path, directory or glob spares none). So does a
+question a clean-review validator asks before any finding is carried: it names
+no handed finding yet. A run that reuses a finding id across calls (an earlier
+call's `c1-F1` and a new `c1-F1` in a later one) can make the earlier-call note
+settle the wrong held question.
 
 **Fixes outside `files[]` go to the whole-branch pass:** when a workstream has
 `files[]`, its fixer answers a critical or major whose only fix lies outside the
@@ -574,7 +594,8 @@ The workflow returns:
   awaiting the user). Count a carried minor once.
 
 `questions` (`{q, options, default}`) are only what the user must decide (an
-optional question a later validated fix `settles` is already dropped); `notes`
+optional question a later validated fix `settles`, or one about a handed finding
+the whole-branch pass fixed, is already dropped); `notes`
 are deviations and things not run; `escalations` are what the script itself
 saw go wrong (dead agents after 2 replacements, a validator that never ran its gate in 3 attempts, a push step that "returned no usable result 3 times (died or malformed sha); check origin/<branch> for an unvalidated push", SHA mismatches between agents,
 cap or budget stops, failed merges, a finding that survived its opus fix — each
