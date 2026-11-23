@@ -479,11 +479,13 @@ files it may edit (a pre-existing test, a file the integration-fix exception
 does not give it, which includes any file before a sibling has merged)
 `"carried"`; for such a workstream the fix prompt never also tells it to block.
 Code in an already-merged sibling's files stays the fixer's through the
-integration-fix exception, never their pre-existing tests. Once a sibling has
-merged, every workstream validator also files an edit to a pre-existing test
-outside `files[]` that the brief does not name as a regression (major;
-critical if deleted, renamed or skipped), claimed or not; before that the merge
-backstop refuses it. The delta validator checks each claim against those
+integration-fix exception, and so do the tests it added in this run, never a
+test file that already exists on the run's base. Every workstream validator
+also files an edit to such a base test that the brief does not name as a
+major regression (a deletion or skip stays critical under the test-integrity
+check), claimed or not:
+for a workstream with `files[]`, any base test outside them; without
+`files[]`, the base tests in merged siblings' files. The delta validator checks each claim against those
 files; a claim it does not verify (silence included) goes back to the fixer
 for another cycle, counted by the usual stop rules. A verified one leaves the workstream's cycles (ledger
 status `carried`, listed in `workstreams[].handed`) and joins its repo's

@@ -57,7 +57,7 @@ const HA = SHA(1001)
 const flow = x => ({ cycles: 1, workstreams: [ws('d', { files: ['ledger/discount.py', 'tests/test_discount.py'], after: ['c'] }), ws('c', { files: ['ledger/api.py', 'tests/test_api.py'] })], ...x })
 const review = { 'd review c1': () => ({ findings: [F('c1-F1', 'critical', 'tests/test_api.py:20')] }), 'd validate c1': () => ({ verified: ['c1-F1'] }) }
 const line = (p, start) => p.split('\n').find(l => l.startsWith(start)) || ''
-const RULE = /pre-existing test outside this workstream's files .*that the brief does not name is read-only.*is a regression/
+const RULE = /Read-only unless the brief names it: any test file on origin\/main .*editing one is a major regression/
 
 await t('a the integration exception offers a sibling\'s tests added in this run, keeps its base tests read-only and routes their only fix to "carried"', async () => {
   const { prompts } = await go(flow(), review)
@@ -71,6 +71,13 @@ await t('b the delta validator carries the read-only rule with nothing claimed "
 await t('b2 the clean-review validator carries it too', async () => {
   const { prompts } = await go(flow(), {})
   assert(RULE.test(prompts['d validate c1'] || ''), 'rule missing') })
+await t('b3 a workstream with files[] gets the rule before any sibling merged (the backstop is computed later, at merge time)', async () => {
+  const { prompts } = await go({ cycles: 1, workstreams: [ws('a')] }, {})
+  assert(RULE.test(prompts['a validate c1'] || '') && prompts['a validate c1'].includes("outside this workstream's files (a/)"), 'rule missing') })
+await t('b4 a workstream with no files[] gets the rule over a merged sibling\'s files', async () => {
+  const { prompts } = await go(flow({ workstreams: [ws('d', { files: undefined, after: ['c'] }), ws('c', { files: ['ledger/api.py', 'tests/test_api.py'] })] }), {})
+  const p = prompts['d validate c1'] || ''
+  assert(RULE.test(p) && p.includes("in the files of c (ledger/api.py, tests/test_api.py)"), 'rule missing') })
 await t('c (control) a merged sibling\'s files are still offered under the exception', async () => {
   const { prompts } = await go(flow(), review)
   const s = line(prompts['d fix c1'] || '', 'Integration fix:')

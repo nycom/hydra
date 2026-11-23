@@ -560,8 +560,11 @@ async function runWorkstream(w) {
       ? `Integration fix: if a critical or major can only be fixed in files owned by workstreams already merged into ${w.featureBranch} — ${owners(done)} — first git merge ${O}/${w.featureBranch} into your branch, then fix those files too (the one exception to your file list; say so in notes). The exception covers their code and the tests they added in this run, never a test file that already exists on ${O}/${w.base} and the brief does not name (git cat-file -e ${O}/${w.base}:<path> succeeds): that test stays read-only, and a blocker whose only fix is in one is ${w.files ? 'answered "carried"' : 'status "blocked" with a question'}.${pending.length ? ` Never touch files owned by workstreams not merged yet: ${owners(pending)}.` : ''}`
       : `No workstream has merged into ${w.featureBranch} yet; a blocker outside your files is ${w.files ? 'answered "carried" (see above)' : 'status "blocked" with a question'}.`
   }
-  // the merge backstop refuses other files outside files[], so the hole is a merged sibling's test, which the exception never covers
-  const roGuard = () => w.files && mergedInto[w.repo]?.length ? ` A pre-existing test outside this workstream's files (${w.files.join(', ')}) that the brief does not name is read-only, merged siblings' tests included: an edit to one in this range is a regression whatever the brief seems to justify (major; critical if deleted, renamed or skipped).` : ''
+  // read-only = on the run's base; a test a sibling added in this run is its owner's code. No files[]: only merged siblings' files are guarded
+  const roGuard = () => {
+    const where = w.files ? `outside this workstream's files (${w.files.join(', ')})` : mergedInto[w.repo]?.length && `in the files of ${owners(mergedInto[w.repo])}`
+    return where ? ` Read-only unless the brief names it: any test file on ${O}/${w.base} ${where}; editing one is a major regression, whatever the brief seems to justify.` : ''
+  }
   const authorGate = () => w.quickGate ? GATE(w.quickGate, c.knownRed, w.repo, true) : GATE(w.gate, c.knownRed, w.repo)
   // The first validator of a workstream writes black-box acceptance tests from the brief before it reads the diff.
   let acceptance = true
