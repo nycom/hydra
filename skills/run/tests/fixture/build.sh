@@ -68,13 +68,14 @@ baseline() { # per-mode edits to $repo's Initial import itself: they predate eve
     sub scripts/smoke.sh 'body.get("total_cents")' 'body.get("total")'
     sub scripts/smoke.sh 'expected total_cents=350' 'expected total=350'
     sub scripts/smoke.sh 'smoke ok: total_cents=350' 'smoke ok: total=350'
-    # S21: alpha-cents' test file pins the old field of the discount result through a stub, so it stays green whatever alpha-discount does
-    sub tests/test_api.py $'import unittest\n\nfrom ledger.api import' $'import unittest\nfrom unittest import mock\n\nfrom ledger import discount\nfrom ledger.api import'
+    # S21: alpha-cents' test file pins the old field of the real discount result; it skips until discounted_total exists, so alpha-cents stays green
+    sub tests/test_api.py $'import unittest\n\nfrom ledger.api import' $'import unittest\n\nfrom ledger import discount\nfrom ledger.api import'
     cat >> "$dest/alpha/tests/test_api.py" <<'EOF'
 
     def test_discounted_total_shape(self):
-        with mock.patch.object(discount, "discounted_total", create=True, return_value={"total": 900}):
-            self.assertEqual(list(discount.discounted_total([{"amount": 10000}], "SAVE10")), ["total"])
+        if not hasattr(discount, "discounted_total"):
+            self.skipTest("ledger.discount has no discounted_total yet")
+        self.assertEqual(list(discount.discounted_total([{"amount": 10000}], "SAVE10")), ["total"])
 EOF
   elif [ "$mode" = ws-seed ] || [ "$mode" = ws-control ]; then
     [ "$repo" = alpha ] || return 0
