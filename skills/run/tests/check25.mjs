@@ -123,7 +123,7 @@ await t('1k (control) a handed finding the whole-branch pass declined or answere
   for (const action of ['declined', 'answered']) {
     const { r } = await go(one, carry(stale, { 'one fix r1': () => ({ answers: [{ id: 'V-F1', action: 'fixed', note: 'n' }, { id: 'a:c1-F1', action, note: 'n' }] }) }))
     assert(r.repos[0].findings.find(e => e.id === 'a:c1-F1')?.status === action && asked(r, stale), `${action}: ${JSON.stringify(r.questions)}`) } })
-await t('1l (control) with two workstreams only the fixed one\'s own and tagged questions leave', async () => {
+await t('1l with two workstreams only the fixed one\'s own and tagged questions leave', async () => {
   const X = F('c1-F1', 'critical', 'x/old.test.js:3'), own = w => ({
     [`${w} review c1`]: () => ({ findings: [X] }),
     [`${w} fix c1`]: () => ({ answers: [{ id: 'c1-F1', action: 'carried', note: 'x/ is a base test' }] }),
@@ -164,6 +164,40 @@ await t('1o a third call names every earlier form of the id', async () => {
   assert(r2.repos[0].verdict === 'fail', 'call 2 fails too')
   const { r } = await resumeAt({ ...r2, workstreams: r1.workstreams }, one, wb('a:p:p:c1-F1'))
   assert(r.repos[0].notes.some(x => x.includes('a question from an earlier call under the "a: " tag that starts with p:c1-F1 or c1-F1, or any that starts with a:p:c1-F1 or a:c1-F1, is settled')), JSON.stringify(r.repos[0].notes)) })
+await t('1p a handed finding fixed in a failed whole-branch pass stays handed, so the resume fixes it and names it', async () => {
+  const other = F('V-F1', 'major', 'a/x.js:1')
+  const { r: r1 } = await go(one, carry(stale, {
+    'one validate': () => ({ verdict: 'fail', findings: [other] }),
+    'one fix r1': () => ({ answers: [{ id: 'a:c1-F1', action: 'fixed', note: 'flipped' }, { id: 'V-F1', action: 'fixed', note: 'n' }] }),
+    'one recheck r1': () => ({ verdict: 'fail', verified: ['a:c1-F1'], findings: [other] }),
+    'one recheck r2': () => ({ verdict: 'fail', findings: [other] }) }))
+  assert(r1.repos[0].verdict === 'fail' && r1.carryForward.workstreams.a.handed.some(h => h.id === 'c1-F1'), JSON.stringify(r1.carryForward.workstreams.a.handed))
+  const { r, prompts } = await resumeAt(r1, one, wb())
+  assert(/Handed findings \(a:p:c1-F1/.test(prompts['one validate']) && /Handed findings \(a:p:c1-F1/.test(prompts['one fix r1']), 'the resume keeps the handed rule')
+  assert(r.repos[0].verdict === 'pass' && r.repos[0].notes.some(x => x.includes(SETTLED_NOTE)), JSON.stringify(r.repos[0].notes)) })
+await t('1q (control) a longer id that shares the prefix stays', async () => {
+  const longer = Q('c1-F10: is the other base test stale too?')
+  const { r } = await go(one, carry(longer))
+  assert(r.repos[0].verdict === 'pass' && asked(r, longer), JSON.stringify(r.questions)) })
+await t('1r a resumed call drops its own question in the p: form', async () => {
+  const still = () => ({ verdict: 'fail', findings: [{ ...C, id: 'a:c1-F1' }] })
+  const { r: r1 } = await go(one, carry(stale, { 'one recheck r1': still, 'one recheck r2': still }))
+  const pq = Q('a:p:c1-F1: may b/old.test.js change now?')
+  const { r } = await resumeAt(r1, one, { ...wb(), 'one validate': () => ({ verdict: 'fail', findings: [F('V-F1', 'critical', 'b/old.test.js:3')], questions: [pq] }) })
+  assert(r.repos[0].verdict === 'pass' && !r.questions.some(q => q.q.includes(pq.q)), JSON.stringify(r.questions)) })
+await t('1s (control) a repo question that names the tagged id later in its text stays', async () => {
+  const later = Q('the base test b/old.test.js may change (see a:c1-F1)')
+  const { r } = await go(one, carry(Q('unrelated'), { 'one validate': () => ({ verdict: 'fail', findings: [F('V-F1', 'critical', 'b/old.test.js:3')], questions: [later] }) }))
+  assert(r.repos[0].verdict === 'pass' && r.questions.some(q => q.q === `one: ${later.q}`), JSON.stringify(r.questions)) })
+await t('1t a handed finding verified with no new commit still drops its question', async () => {
+  const atHead = p => ({ sha: p.match(/detached at ([0-9a-f]{40})/)[1], answers: [{ id: 'V-F1', action: 'answered', note: 'the merge fixed it' }, { id: 'a:c1-F1', action: 'fixed', note: 'the merge fixed it' }] })
+  const { r } = await go(one, carry(stale, { 'one fix r1': atHead }))
+  assert(r.repos[0].verdict === 'pass' && r.repos[0].findings.find(e => e.id === 'a:c1-F1')?.status === 'fixed' && !asked(r, stale), JSON.stringify(r.questions)) })
+await t('1u two handed findings are both listed in every whole-branch prompt', async () => {
+  const D = F('c1-F2', 'major', 'b/other.test.js:7')
+  const { prompts } = await go(one, carry(stale, { 'a review c1': () => ({ findings: [C, D] }), 'a fix c1': () => ({ answers: ['c1-F1', 'c1-F2'].map(id => ({ id, action: 'carried', note: 'outside a/' })) }), 'a validate c1': () => ({ verified: ['c1-F1', 'c1-F2'], questions: [stale] }) }))
+  for (const L of ['one validate', 'one recheck r1']) assert(prompts[L].includes('Handed findings (a:c1-F1 (b/old.test.js:3), a:c1-F2 (b/other.test.js:7))'), L)
+  assert(prompts['one fix r1'].includes('Handed findings (a:c1-F1, a:c1-F2)'), 'fixer') })
 
 // ---- 2. every prompt on the handed path gives the same answer ----
 await t('2a the delta validator that verifies a carried claim is told what that licenses, and to start any question about it with the id', async () => {
@@ -185,6 +219,13 @@ await t('2d (control) with nothing handed neither gets it', async () => {
 await t('2e the whole-branch fixer\'s handed rule escalates only when a finding says a brief names the file', async () => {
   const { prompts } = await go(one, carry(stale))
   assert(/pre-existing tests included \(never escalated for that\), unless a finding says a brief names that file by path, directory or glob as not to be edited: escalate that one\./.test(prompts['one fix r1'])) })
+const RO = 'Make ledger.rounding.round_total round half up. Pre-existing tests are read-only: do not edit, delete, rename or skip them; add new tests as needed.'
+const BAR = 'A clause that names no path, directory or glob does not bar a handed fix.'
+await t('2f a brief clause that protects by class, not by path, does not bar a handed fix in any of the four prompts', async () => {
+  const { prompts } = await go({ cycles: 1, workstreams: [ws('a', { brief: RO })] }, carry(stale))
+  for (const L of ['a validate c1', 'one validate', 'one fix r1', 'one recheck r1']) assert(prompts[L].includes(BAR), L)
+  const plain = (await go({ cycles: 1, workstreams: [ws('a', { brief: RO })] }, { 'a review c1': () => ({ findings: [F('c1-F1')] }), 'a validate c1': () => ({ verified: ['c1-F1'] }), 'one validate': () => ({ verdict: 'fail', findings: [F('V-F1')] }), 'one recheck r1': () => ({ verified: ['V-F1'] }) })).prompts
+  for (const L of ['a validate c1', 'one validate', 'one fix r1', 'one recheck r1']) assert(plain[L] && !plain[L].includes('does not bar a handed fix'), `${L} without a handed finding`) })
 
 // ---- 4. S21's resume leg (spec only: no red test of its own beyond the text pin) ----
 const ANSWER = 'The brief stands as written. Change only this workstream\'s files; a test that then fails is for the later stages.'
@@ -208,6 +249,7 @@ await t('3a SKILL.md states the drop; plugin.json is at least 0.4.3', async () =
   assert(s.includes('a file a brief names by path, directory or glob as not to be edited') && !/may not stop that fix/.test(s), 'the widened carve-out')
   assert(/under\s+the\s+"<ws\s+id>:\s+"\s+tag\s+that\s+starts\s+with\s+<id>,\s+or\s+any\s+that\s+starts\s+with\s+<ws\s+id>:<id>/.test(s), 'the scoped earlier-call note')
   assert(/clean-review\s+validator\s+asks\s+before\s+any\s+finding\s+is\s+carried/.test(s), 'the clean-review limit')
+  assert(/reuses\s+a\s+finding\s+id\s+across\s+calls/.test(s), 'the reused-id limit')
   const v = JSON.parse(readFileSync(new URL('../../../.claude-plugin/plugin.json', import.meta.url), 'utf8')).version.split('.').map(Number); assert(v[0] > 0 || v[1] > 4 || (v[1] === 4 && v[2] >= 3), 'at least 0.4.3') })
 
 if (fails.length) { console.error(fails.join('\n')); process.exit(1) }
