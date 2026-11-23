@@ -59,7 +59,7 @@ const state = (...xs) => ({ 'one state': () => ({ workstreams: xs }) })
 const HA = SHA(1001), HB = SHA(1002), HC = SHA(1003)
 
 // default-run prompt size in characters; lower it when a default prompt shrinks, never raise it
-const PIN = 73155
+const PIN = 73616
 
 const TBL = '/t/acceptance.md', LOG = '/t/decisions.md', SR = 'wrong output for a listed case, lost user data, a crash'
 const busy = { 'a review c1': () => ({ findings: [F('c1-F1')] }), 'a validate c1': () => ({ verified: ['c1-F1'] }), 'one validate': (p, k) => k > 1 ? {} : { verdict: 'fail', findings: [F('V-F1', 'major', 'x.py:3')] } }

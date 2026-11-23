@@ -167,7 +167,11 @@ Implementation is never below Sonnet.
   blocker can only be fixed in files owned by workstreams **already merged** into
   the feature branch, the fixer first merges `origin/<featureBranch>` into its
   branch and fixes those files too; it never touches files of workstreams not
-  merged yet. The script keeps a run-wide record of who has merged (written
+  merged yet. The exception covers the merged siblings' code and the tests
+  they added in this run, never a test that already exists on the run's
+  base (`origin/<base>`) and that the brief does not name: that test stays
+  read-only there too, and a blocker whose only fix is in one is `"carried"`
+  (`blocked` with a question when the workstream has no `files[]`). The script keeps a run-wide record of who has merged (written
   inside the per-repo merge lock), names both groups in the fix prompt, and the
   merge backstop allows this workstream's `files[]` plus those of workstreams
   already merged at merge time.
@@ -473,13 +477,25 @@ offered: they stay the user's.
 `files[]`, its fixer answers a critical or major whose only fix lies outside the
 files it may edit (a pre-existing test, a file the integration-fix exception
 does not give it, which includes any file before a sibling has merged)
-`"carried"`; for such a workstream the fix prompt never also tells it to block.
+`"carried"`, not blocked and not escalated: the fix prompt says so where it
+offers `"carried"`, so it wins over the read-only rule's block and the
+brief-conflict escalation for such a workstream.
 Code in an already-merged sibling's files stays the fixer's through the
-integration-fix exception. The delta validator checks each claim against those
+integration-fix exception, and so do the tests it added in this run, never a
+test that already exists on the run's base. Read-only is judged against
+`base`: a test already on the feature branch but not on `base` counts as added
+in this run, so set `base` to the branch earlier work is on. Every workstream validator
+also files an edit to such a base test that the brief does not name as a
+major regression (a deletion or skip stays critical under the test-integrity
+check), claimed or not:
+for a workstream with `files[]`, any base test outside them; without
+`files[]`, the base tests in merged siblings' files. The delta validator checks each claim against those
 files; a claim it does not verify (silence included) goes back to the fixer
 for another cycle, counted by the usual stop rules. A verified one leaves the workstream's cycles (ledger
 status `carried`, listed in `workstreams[].handed`) and joins its repo's
-whole-branch findings as `<ws id>:<id>`, where the whole-branch fixer fixes it;
+whole-branch findings as `<ws id>:<id>`, where the whole-branch fixer fixes it
+(its prompt says handed findings are its to fix in any file, pre-existing tests
+included);
 that fixer's notes list the files it changed (`changed: <path>`); carry the new
 behaviour into every brief you write afterwards that reads one of them, in this
 run's fix-ups, a later run or a later slice.
