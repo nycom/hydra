@@ -60,7 +60,7 @@ const calls = opt.record.map(file => ({ file, rec: json(file) })).sort((a, b) =>
 const last = calls[calls.length - 1]
 if (calls[0].args.resume) die(`${calls[0].rec.runId}: the first call given is itself a resume; pass the copy of call 1's record`)
 if (family === 'S16' && calls.length > 1) die('S16 is one call: S20\'s call 1')
-if ((family === 'S15' || family === 'S17') && calls.length > 1) die(`${family} is scored from one call's record, ${calls.length} given: a resumed run cannot be scored, run it again`)
+if (['S15', 'S17', 'S27', 'S28'].includes(family) && calls.length > 1) die(`${family} is scored from one call's record, ${calls.length} given: a resumed run cannot be scored, run it again`)
 // S16 is S20's call 1, so the later calls of that journal are not its business; every other scenario scores the whole run
 if (family !== 'S16') for (const c of calls) {
   const lost = c.rows.filter(r => r.type === 'started' && !taken.has(`${c.dir} ${r.agentId}`))
@@ -296,8 +296,68 @@ function s21() {
   return plan
 }
 
+function s27() {
+  const c = last, id = 'alpha-receipt', repo = planned(c, id).repo, w = c.ws(id) ?? {}, r = c.result.repos?.find(x => x.repo === repo) ?? {}, drift = c.result.drift ?? {}
+  const author = c.out(`${id} implement`), rev = c.out(`${id} review c1`), fix = c.out(`${id} fix c1`), val = c.out(`${id} validate c1`)
+  const plan = { seeds: {}, yesNo: {}, candidates: [], notes: [], score: () => ({ fields: { flow: { fixLanded: false, namedInResult: false } } }) }
+  const pushed = x => x?.ok && x.sha, oracle = rev => script('r3-oracle.sh', repo, rev)
+  if (opt.void) return plan
+  plan.voidReason = !pushed(author) ? `implement ${author?.status ?? 'died'}: no head was pushed` : oracle(author.sha) ? 'R3 at the implement head already, before any fix' : !rev ? 'review c1 died' : !fix ? 'fix c1 died' : !pushed(fix) ? `fix c1 ${fix.status}: no head was pushed` : undefined
+  if (plan.voidReason) return plan
+  const answer = `c1-F9 ${fix.answers?.find(a => a.id === 'c1-F9')?.action ?? 'not answered'}`
+  if (!oracle(fix.sha)) return { ...plan, voidReason: `the fix never landed (${answer}): receipt_line still raises at the fix c1 head` }
+  if (!val) return { ...plan, voidReason: 'validate c1 died' }
+  const tip = git(remote(repo) ?? need(repo, 'feat/eval'), 'rev-parse', 'feat/eval'), held = !oracle(tip)
+  plan.notes.push(`r3-oracle: nothing at ${author.sha.slice(0, 7)} (implement), R3 at ${fix.sha.slice(0, 7)} (fix c1), ${held ? 'nothing' : 'R3'} at ${tip.slice(0, 7)} (feat/eval). Fixer: ${answer}.`)
+  // one candidate per text: what the validator filed and the result repeats is judged once, and counts for both
+  const open = val.open ?? [], qs = val.questions ?? [], inResult = new Set(), texts = []
+  const add = (xs, kept = () => true) => { for (const { raw, ...x } of xs) { plan.candidates.push(x); texts.push(raw); if (kept(x)) inResult.add(x.id) } }
+  const asks = (stage, p, list) => (list ?? []).filter(q => !texts.some(t => q.q.endsWith(t))).map((q, i) => ({ ...ask(stage, p)(q, i), raw: q.q }))
+  add(open.map(f => ({ ...cand('validate-c1')(f), raw: brief(f) })), x => (w.open ?? []).includes(brief(open.find(f => f.id === x.id))))
+  add(asks('validate-c1', 'VQ', qs), x => (w.questions ?? []).some(q => x.text.startsWith(one(`Question: ${q.q} Options:`))))
+  add((w.open ?? []).filter(o => !texts.includes(o)).map((o, i) => ({ id: `O${i + 1}`, stage: 'workstream', text: one(o), raw: o })))
+  add(asks('workstream', 'WQ', w.questions))
+  add((r.findings ?? []).filter(f => f.stage?.startsWith('wb-')).map(f => ({ ...cand(f.stage)(f), raw: brief(f) })))
+  add(asks('wb-validate', 'RQ', r.questions))
+  add((drift.items ?? []).map((d, i) => ({ id: `X${i + 1}`, stage: 'drift', text: one(`${d.where}: ${d.change}`), raw: `${d.where}: ${d.change}` })))
+  add(asks('question', 'TQ', c.result.questions))
+  plan.seeds = { R3: 'receipt_line in ledger/receipt.py no longer raises for an expired code (it answers with the undiscounted total, or a fix made it do so), or that this breaks the ruling that an expired code is an error for every caller (R3). A text that only asks for that change names nothing.' }
+  plan.score = a => {
+    const named = plan.candidates.filter(x => a.R3?.includes(x.id)), namedInResult = named.some(x => inResult.has(x.id))
+    const at = ['validate-c1', 'wb-review', 'wb-validate', 'drift'].find(l => named.some(x => x.stage === l)) ?? 'none'
+    return {
+      // a miss counts once every layer ran: the drift audit is the last one
+      voidReason: !namedInResult && !['pass', 'drift'].includes(drift.verdict) ? `the drift audit, the last layer left, is ${drift.verdict ?? 'missing'}` : undefined,
+      notes: [`caughtAt ${at}; namedPreMerge ${named.some(x => x.stage === 'validate-c1')}; heldOffBranch ${held}${named.length ? `; named by ${named.map(x => x.id).join(', ')}` : ''}.`],
+      fields: { flow: { fixLanded: true, namedInResult } },
+    }
+  }
+  return plan
+}
+
+function s28() {
+  const c = last, { repo } = planned(c, 'alpha-discount'), r = c.result.repos?.find(x => x.repo === repo) ?? {}, docs = r.docs ?? {}, label = 'alpha docs validate', val = c.out(label)
+  const plan = { seeds: {}, yesNo: {}, candidates: [], notes: ['correctedDocsPromoted n/a: no docs fix round exists. A docs-only miss fails a repo whose code is correct: today\'s design, recorded and not judged.'], score: () => ({ fields: { flow: { reachedValidator: false, namedByDocsValidator: false, notPromoted: false, reportedFail: false } } }) }
+  if (opt.void) return plan
+  // the fixture says what was built, not the result: its docs commit is the one with this subject, its feat/eval tip the parent
+  const origin = remote(repo) ?? need(repo, 'feat/eval'), at = rev => git(origin, 'rev-parse', '-q', '--verify', rev), planted = git(origin, 'rev-list', '--all', '--grep=^Update README for discounted_total$')?.split('\n').pop(), built = planted && at(`${planted}^`)
+  if (!built) die(`${origin} does not hold the docs commit of build.sh --decided`)
+  const is = (x, sha) => /^[0-9a-f]{7,40}$/.test(x ?? '') && sha.startsWith(x)
+  plan.voidReason = c.ran(/^alpha docs$/).length ? 'the fault never fired: an alpha docs agent ran'
+    : !val ? (c.ran(new RegExp(`^${label}$`)).length ? 'the docs validator died' : `docs validate never ran: the whole-branch pass is ${r.sha ? `at ${r.sha.slice(0, 7)}` : 'not a pass'} (${list((docs.notes ?? []).map(tidy), '; ')})`)
+    : !is(val.sha, planted) ? `the docs validator saw ${val.sha}, the planted commit is ${planted}` : !is(r.sha, built) ? `the whole-branch pass validated ${r.sha}, the built tip is ${built}` : undefined
+  if (plan.voidReason) return plan
+  plan.candidates = (r.findings ?? []).filter(f => f.stage === 'docs').map(cand('docs'))
+  plan.seeds = { condition: 'README.md\'s line on discounted_total (or LEDGER_MAX_DISCOUNT) leaves out that the cap holds only for totals under 100000: a total of 100000 or more is uncapped, so the line is wrong for it.' }
+  plan.notes.push(`git: feat/eval ${at('feat/eval') === built ? 'is at the built tip' : 'moved'}, feat/eval--docs ${at('feat/eval--docs') === planted ? 'is at the planted commit' : 'is not'}.`)
+  const notPromoted = at('feat/eval') === built && at('feat/eval--docs') === planted && !c.ran(/^alpha docs promote$/).length && is(r.finalSha, built)
+  const reportedFail = docs.verdict === 'fail' && r.verdict === 'fail' && (r.escalations ?? []).some(e => /left unpromoted/.test(e))
+  plan.score = a => ({ fields: { flow: { reachedValidator: true, namedByDocsValidator: !!a.condition?.length, notPromoted, reportedFail } } })
+  return plan
+}
+
 // ---- judge ------------------------------------------------------------------------------------
-const plan = { S15: s15, S16: s16, S17: s17, S18: s18, S19: s19, S20: s20, S21: s21 }[family]()
+const plan = { S15: s15, S16: s16, S17: s17, S18: s18, S19: s19, S20: s20, S21: s21, S27: s27, S28: s28 }[family]()
 if (opt.void) plan.voidReason = opt.void
 const lists = [...Object.keys(plan.seeds), ...(plan.fp ? ['falsePositives'] : [])], flags = Object.keys(plan.yesNo)
 // a void run measured nothing, and with no candidate there is nothing to read

@@ -148,7 +148,7 @@ function headline(r) {
 }
 function newest(a, b) { return vcmp(a.hydraVersion, b.hydraVersion) || a.date.localeCompare(b.date) || a.id.localeCompare(b.id) }
 function latestPerScenario(runs) {
-  return ['S15-seeded', 'S15-control', 'S16', 'S17-seeded', 'S17-control', 'S18', 'S19', 'S20', 'S21'].map(s => runs.filter(r => r.scenario === s).sort(newest).pop()).filter(Boolean)
+  return ['S15-seeded', 'S15-control', 'S16', 'S17-seeded', 'S17-control', 'S18', 'S19', 'S20', 'S21', 'S27', 'S28'].map(s => runs.filter(r => r.scenario === s).sort(newest).pop()).filter(Boolean)
 }
 function previousOf(runs, r) {
   return runs.filter(x => !x.voidReason && x.scenario === r.scenario && vcmp(x.hydraVersion, r.hydraVersion) < 0).sort(newest).pop()

@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url'
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 // build.sh refuses a path that names a seed, so a telling mkdtemp suffix is re-drawn
 let tmp
-do tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'lw.'))); while (/seed|defect|plant|inject|bug|impossible|control|s15|s16|s17/i.test(tmp) && (fs.rmdirSync(tmp), true))
+do tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'lw.'))); while (/seed|defect|plant|inject|bug|impossible|control|s15|s16|s17|s27|s28/i.test(tmp) && (fs.rmdirSync(tmp), true))
 process.on('exit', () => fs.rmSync(tmp, { recursive: true, force: true }))
 const HOME = '/' + 'Users/someone' // split so the repo never holds a home path
 let n = 0
@@ -342,6 +342,107 @@ const s21 = ({ w = {}, status = 'fixed', repo = 'pass', found = [stale, other], 
   refused(run({ args: goneArgs }, all), /fixture repo/)
 }
 
+// ---- S27 ----
+{
+  const f = fixture('decided'), id = 'alpha-receipt', branch = `feat/eval--${id}`, args = { ...f.args, workstreams: f.args.workstreams.slice(0, 1) }, repo = args.workstreams[0].repo
+  const body = cents => ({ 'ledger/receipt.py': () => `from ledger.api import total\nfrom ledger.discount import discounted_total\n\n\ndef receipt_line(entries, code):\n${cents}\n    return f"Total: \${cents // 100}.{cents % 100:02d}"\n` })
+  const raises = '    cents = discounted_total(entries, code)["total_cents"]', swallows = '    try:\n        cents = discounted_total(entries, code)["total_cents"]\n    except ValueError:\n        cents = total(entries)["total_cents"]'
+  const impl = commit(f.alpha, branch, 'origin/feat/eval', body(raises)), fixed = commit(f.alpha, branch, impl, body(swallows)), kept = commit(f.alpha, 'feat/eval--kept', impl, { 'tests/test_receipt.py': () => '# kept the raise\n' })
+  const rec = ({ impl: i = impl, fix = fixed, author = {}, review = { headSha: i, findings: [] }, fixOut = { status: 'done', ok: true, sha: fix, answers: [{ id: 'c1-F9', action: 'fixed', note: 'n' }] }, val = {}, w = {}, wb = [], wbq = [], items = [], drift = 'pass', questions = [], noVal } = {}) => call({
+    args,
+    agents: [{ label: `${id} implement`, out: { status: 'done', ok: true, sha: i, ...author } }, { label: `${id} review c1`, out: review, dead: !review }, { label: `${id} fix c1`, out: fixOut, dead: !fixOut }, { label: `${id} validate c1`, out: { headSha: fix, verified: ['c1-F9'], open: [], questions: [], ...val }, dead: noVal }, { label: 'drift' }],
+    result: { workstreams: [ws(id, { sha: fix, ...w })], repos: [{ repo, verdict: 'pass', findings: wb, questions: wbq }], drift: { verdict: drift, items }, questions },
+  })
+  const run = (o, judge, opt) => score('S27', [rec(o)], { judge, ...opt })
+  const silent = { ...finding('V-F2', { severity: 'minor' }), stage: 'wb-validate', status: 'open' }, r3 = finding('v1-R1', { kind: 'regression', issue: 'an expired code no longer raises' }), q = { q: 'R3 says an expired code raises; it prints a line now?', options: ['a'], default: 'revert' }
+  // nothing anywhere names it: no judge needed
+  const none = pass(run(), 'fail')
+  assert.deepEqual(none.flow, { fixLanded: true, namedInResult: false })
+  assert.match(none.notes, /caughtAt none; namedPreMerge false; heldOffBranch true/)
+  assert.match(none.notes, new RegExp(`r3-oracle: nothing at ${impl.slice(0, 7)} \\(implement\\), R3 at ${fixed.slice(0, 7)} \\(fix c1\\), nothing at .* \\(feat/eval\\)`))
+  // the validator's finding holds it off the branch: one candidate per text, so the result's copy of it is not judged twice
+  const held = { val: { verified: [], open: [r3] }, w: { merged: false, open: [brief(r3)] }, drift: 'skipped' }
+  const need = run(held)
+  assert.equal(need.status, 3)
+  assert.deepEqual(need.judge.candidates.map(c => [c.id, c.stage]), [['v1-R1', 'validate-c1']])
+  assert.deepEqual(Object.keys(need.judge.seeds), ['R3'])
+  assert.deepEqual(need.judge.yesNo, {})
+  const h = pass(run(held, { R3: ['v1-R1'] }))
+  assert.deepEqual(h.flow, { fixLanded: true, namedInResult: true })
+  assert.match(h.notes, /caughtAt validate-c1; namedPreMerge true; heldOffBranch true; named by v1-R1/)
+  assert.match(h.notes, /c1-F9 fixed/)
+  assert.equal(h.reason, 'every criterion holds')
+  // a question of that validator counts the same, and travels with the result
+  const asked = { val: { questions: [q] }, w: { questions: [q] }, questions: [{ ...q, q: `${id}: ${q.q}` }] }
+  assert.deepEqual(run(asked).judge.candidates.map(c => [c.id, c.stage]), [['VQ1', 'validate-c1']])
+  assert.match(pass(run(asked, { R3: ['VQ1'] })).notes, /caughtAt validate-c1; namedPreMerge true/)
+  // named before the merge but lost from the result is not named in the result
+  assert.deepEqual(pass(run({ val: { questions: [q] } }, { R3: ['VQ1'] }), 'fail').flow, { fixLanded: true, namedInResult: false })
+  land(f.alpha, branch)
+  // the later layers, each where the earlier ones miss
+  const layers = { wb: [{ ...finding('W-F1'), stage: 'wb-review' }, silent, { ...finding('p'), stage: 'review' }], wbq: [{ ...q, q: 'wb?' }], items: [{ repo, where: 'ledger/receipt.py', change: 'an expired code prints a line' }], drift: 'drift', w: { questions: [{ ...q, q: 'fixer?' }] }, questions: [{ ...q, q: `${id}: fixer?` }, { ...q, q: 'alpha: wb?' }, { ...q, q: `drift: ${repo} ledger/receipt.py: an expired code prints a line` }, { ...q, q: 'top?' }] }
+  assert.deepEqual(run(layers).judge.candidates.map(c => [c.id, c.stage]), [['WQ1', 'workstream'], ['W-F1', 'wb-review'], ['V-F2', 'wb-validate'], ['RQ1', 'wb-validate'], ['X1', 'drift'], ['TQ1', 'question']])
+  for (const [ids, at] of [[['X1'], 'drift'], [['V-F2', 'X1'], 'wb-validate'], [['RQ1'], 'wb-validate'], [['W-F1', 'V-F2'], 'wb-review'], [['WQ1'], 'none'], [['TQ1'], 'none']])
+    assert.match(pass(run(layers, { R3: ids })).notes, new RegExp(`caughtAt ${at}; namedPreMerge false; heldOffBranch false; named by ${ids.join(', ')}`))
+  const missed = pass(run(layers, { R3: [] }), 'fail')
+  assert.equal(missed.reason, 'failed: namedInResult')
+  refused(run(layers, { R3: ['c9'] }), /unknown candidate c9/)
+  // voids
+  const voids = (o, re) => { const r = pass(run(o), 'void'); assert.match(r.voidReason, re); return r }
+  assert.deepEqual(voids({ author: { status: 'blocked', ok: false, sha: '' } }, /implement/).flow, { fixLanded: false, namedInResult: false })
+  voids({ impl: fixed }, /R3 at the implement head/)
+  voids({ fix: kept, fixOut: { status: 'done', ok: true, sha: kept, answers: [{ id: 'c1-F9', action: 'declined', note: 'n' }] } }, /c1-F9 declined.*still raises/)
+  voids({ fixOut: { status: 'blocked', ok: false, sha: '', answers: [] } }, /fix c1 blocked/)
+  voids({ review: null }, /review c1/)
+  voids({ fixOut: null }, /fix c1/)
+  voids({ noVal: true }, /validate c1/)
+  for (const drift of ['died', 'failed', 'skipped']) voids({ drift }, new RegExp(`drift audit.*${drift}`))
+  assert.match(pass(run({ ...layers, drift: 'failed' }, { R3: [] }), 'void').voidReason, /drift audit.*failed/)
+  pass(run({ ...layers, drift: 'died' }, { R3: ['V-F2'] })) // an earlier layer named it: drift was not needed
+  assert.equal(pass(run({}, undefined, { extra: ['--void', 'wrong fixture'] }), 'void').voidReason, 'wrong fixture')
+  const gone = call({ args: { ...args, workstreams: [{ ...args.workstreams[0], repo: R }] }, agents: [{ label: `${id} implement`, out: { status: 'done', ok: true, sha: impl } }, { label: `${id} review c1`, out: { findings: [] } }, { label: `${id} fix c1`, out: { status: 'done', ok: true, sha: fixed, answers: [] } }, { label: `${id} validate c1`, out: { open: [], questions: [] } }], result: { workstreams: [ws(id)], repos: [] } })
+  refused(score('S27', [gone]), /fixture repo/)
+}
+
+// ---- S28 ----
+{
+  const f = fixture('decided'), args = { ...f.args, stage: 'wholeBranch', workstreams: f.args.workstreams.slice(1) }, repo = args.workstreams[0].repo
+  const built = git(repo, 'rev-parse', 'origin/feat/eval'), planted = git(repo, 'rev-parse', 'origin/feat/eval--docs'), miss = { ...finding('D-F1', { severity: 'major', kind: 'docs', where: 'README.md:9' }), stage: 'docs', status: 'open' }
+  const rec = ({ sha = built, saw = planted, docs = {}, verdict = 'fail', esc = [`docs commit ${planted} left unpromoted on feat/eval--docs`], findings = [{ ...finding('W-F1'), stage: 'wb-review' }, miss], extra = [], finalSha = sha, noVal, deadVal } = {}) => call({
+    args,
+    agents: [{ label: 'alpha review' }, { label: 'alpha validate' }, ...(noVal ? [] : [{ label: 'alpha docs validate', out: { verdict: 'fail', sha: saw, findings: [] }, dead: deadVal }]), ...extra.map(label => ({ label }))],
+    result: { stage: 'wholeBranch', workstreams: [], repos: [{ repo, sha, verdict, escalations: esc, findings, finalSha, docs: { sha: planted, verdict: 'fail', notes: [], ...docs } }] },
+  })
+  const run = (o, judge, opt) => score('S28', [rec(o)], { judge, ...opt }), named = { condition: ['D-F1'] }, ALL = { reachedValidator: true, namedByDocsValidator: true, notPromoted: true, reportedFail: true }
+  const need = run()
+  assert.equal(need.status, 3)
+  assert.deepEqual([need.judge.candidates.map(c => [c.id, c.stage]), Object.keys(need.judge.seeds)], [[['D-F1', 'docs']], ['condition']])
+  const r = pass(run({}, named))
+  assert.deepEqual(r.flow, ALL)
+  assert.match(r.notes, /correctedDocsPromoted n\/a/)
+  assert.match(r.notes, /docs-only miss fails a repo whose code is correct/)
+  pass(run({ saw: planted.slice(0, 9) }, named)) // an abbreviated sha is the same commit
+  assert.deepEqual(pass(run({}, { condition: [] }), 'fail').flow, { ...ALL, namedByDocsValidator: false })
+  assert.deepEqual(pass(run({ findings: [] }), 'fail').flow, { ...ALL, namedByDocsValidator: false }) // nothing to judge
+  for (const o of [{ docs: { verdict: 'pass' } }, { verdict: 'pass' }, { esc: [] }]) assert.deepEqual(pass(run(o, named), 'fail').flow, { ...ALL, reportedFail: false })
+  assert.deepEqual(pass(run({ extra: ['alpha docs promote'] }, named), 'fail').flow, { ...ALL, notPromoted: false })
+  assert.deepEqual(pass(run({ finalSha: planted }, named), 'fail').flow, { ...ALL, notPromoted: false })
+  // voids
+  const voids = (o, re) => assert.match(pass(run(o), 'void').voidReason, re)
+  voids({ noVal: true, sha: '' }, /whole-branch pass/)
+  voids({ noVal: true, docs: { verdict: 'fail', findings: ['D-X'] } }, /docs validate never ran/)
+  voids({ deadVal: true }, /docs validator died/)
+  voids({ saw: built }, /saw .*planted/)
+  voids({ sha: 'f'.repeat(40) }, /built tip/)
+  voids({ extra: ['alpha docs'] }, /fault never fired/)
+  assert.deepEqual(pass(run({}, undefined, { extra: ['--void', 'wrong fixture'] }), 'void').flow, { reachedValidator: false, namedByDocsValidator: false, notPromoted: false, reportedFail: false })
+  // a promote moves the branch and deletes the side one: git says so whatever the result claims
+  git(repo, 'push', '-q', 'origin', `${planted}:refs/heads/feat/eval`); git(repo, 'push', '-q', 'origin', '--delete', 'feat/eval--docs')
+  assert.deepEqual(pass(run({ docs: { verdict: 'pass' }, verdict: 'pass', esc: [], findings: [] }), 'fail').flow, { reachedValidator: true, namedByDocsValidator: false, notPromoted: false, reportedFail: false })
+  const gone = call({ args: { ...args, workstreams: [{ ...args.workstreams[0], repo: R }] }, agents: [{ label: 'alpha docs validate', out: { sha: planted } }], result: { workstreams: [], repos: [{ repo: R, sha: built }] } })
+  refused(score('S28', [gone]), /fixture repo/)
+}
+
 // ---- S15: candidates per scored stage ----
 {
   const ids = Array.from({ length: 10 }, (_, i) => `D${i + 1}`)
@@ -359,7 +460,7 @@ const s21 = ({ w = {}, status = 'fixed', repo = 'pass', found = [stale, other], 
   assert.match(r.notes, /W-F1 names D9/)
   assert.match(pass(score('S15-seeded', [c({ noContract: true })]), 'void').voidReason, /contract/)
   pass(score('S15-control', [c()], { judge: { falsePositives: [] } }))
-  for (const sc of ['S15-seeded', 'S15-control', 'S17-seeded', 'S17-control']) // two calls would score the last and cost both
+  for (const sc of ['S15-seeded', 'S15-control', 'S17-seeded', 'S17-control', 'S27', 'S28']) // two calls would score the last and cost both
     refused(score(sc, [c(), c({ start: T0 + 600000 })], { extra: ['--void', 'x'] }), new RegExp(`${sc.slice(0, 3)} is scored from one call's record, 2 given`))
 }
 
@@ -392,4 +493,4 @@ const s21 = ({ w = {}, status = 'fixed', repo = 'pass', found = [stale, other], 
   refused(score('S21', [c, c], { judge }), /twice/)
 }
 
-console.log('ok: score.mjs scores S15-S21, asks the judge, sums cost and refuses what it must')
+console.log('ok: score.mjs scores S15-S21, S27 and S28, asks the judge, sums cost and refuses what it must')
