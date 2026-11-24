@@ -1,6 +1,7 @@
 // Everything checkable before a live eval spends tokens; calls no model. One line per check, exit 1 on the first failure.
 // It checks the plugin under test, builds a fresh fixture in <dest>, proves the scenario's planted condition fires
-// (in throwaway clones), and writes the call-1 workflow.js and args.json into the run dir.
+// (in throwaway clones), and writes the call-1 workflow.js and args.json into the run dir. A scenario with a run-local fault gets
+// workflow-fault.js beside them; S27 and S28 run only that copy, and the output says so.
 //   node evals/preflight.mjs <scenario> <dest> --version X.Y.Z [--skill-dir DIR] [--run-dir DIR] [--skip-checks]
 import fs from 'node:fs'
 import os from 'node:os'
@@ -23,6 +24,10 @@ const humanChecks = args => {
   patch(args, 'alpha-cents', { humanCheck: `In a checkout of the feature branch run python3 -c 'from ledger.api import total; print(total([{"amount": 3500}]))' and read the field name and the value (350 whole cents).` })
   patch(args, 'alpha-discount', { humanCheck: `In a checkout of the feature branch run python3 -c 'from ledger.discount import discounted_total; print(discounted_total([{"amount": 10000}], "SAVE10"))' and read the field name and the value (950 whole cents).` })
 }
+const only = id => args => { args.workstreams = args.workstreams.filter(w => w.id === id) }
+// one cycle and no whole-branch fix round: what the validator, the whole-branch pass or the drift audit names is returned, not repaired
+const logged = args => Object.assign(args, { decisionLog: path.join(args.repos[0].repo, 'docs/decisions.md'), maxCycles: 1, wbRounds: 0 })
+const wholeBranch = args => Object.assign(args, { stage: 'wholeBranch', wbRounds: 0 })
 const SCENARIOS = {
   'S15-seeded': { mode: 'seed', planted: [seedsPresent] },
   'S15-control': { mode: 'control', planted: [seedsAbsent] },
@@ -32,6 +37,8 @@ const SCENARIOS = {
   S19: { mode: 'flow', args: [ordered, humanChecks, noDocs], planted: [staleTest, bothChecksAsked, probesDiffer] },
   S20: { mode: 'impossible', args: [noDocs], planted: [halfUpRed] },
   S21: { mode: 'flow', args: [ordered, noDocs], planted: [staleTest] },
+  S27: { mode: 'decided', args: [only('alpha-receipt'), logged, noDocs], planted: [rulingBreaks, fixerObeys], files: { 'workflow-fault.js': obeyingFixer }, run: 'workflow-fault.js' },
+  S28: { mode: 'decided', args: [only('alpha-discount'), wholeBranch], planted: [docsMiss, docsHandedOver], files: { 'workflow-fault.js': docsAuthor }, run: 'workflow-fault.js' },
 }
 
 // ---- helpers ----
@@ -142,14 +149,20 @@ function staleTest(c) { // the test that pins the old field: skips until discoun
       same(failing(dir, gateOf(c, 'alpha-discount')), [], 'scoped gate') }],
   ]
 }
-// S18: in step() the one agent call answers null for alpha-discount's cycle-1 review, so it dies on every attempt while the health probe passes
-function fault(src) {
-  const at = src.indexOf('async function step('), end = src.indexOf('\n}\n', at), call = 'await agent('
-  const calls = at < 0 ? 0 : src.slice(at, end).split(call).length - 1
-  if (calls !== 1) throw new Error(`step() holds ${calls} \`${call}\`, the fault needs exactly one`)
-  const i = src.indexOf(call, at)
-  return `${src.slice(0, i)}opts.label.startsWith('alpha-discount review c1') ? null : ${src.slice(i)}`
+// a run-local edit of workflow.js has to fit exactly one place, else the script under test changed and the edit has to be read again
+function once(src, text, to, where = 'workflow.js') {
+  const n = src.split(text).length - 1
+  if (n !== 1) throw new Error(`${where} holds ${n} \`${text}\`, the run-local edit needs exactly one`)
+  return src.replace(text, () => to)
 }
+// in step(), what `expr` answers instead of its one agent call
+function atAgentCall(src, expr) {
+  const at = src.indexOf('async function step('), end = src.indexOf('\n}\n', at), call = 'await agent('
+  if (at < 0) throw new Error('no step()')
+  return src.slice(0, at) + once(src.slice(at, end), call, expr + call, 'step()') + src.slice(end)
+}
+// S18: in step() the one agent call answers null for alpha-discount's cycle-1 review, so it dies on every attempt while the health probe passes
+function fault(src) { return atAgentCall(src, "opts.label.startsWith('alpha-discount review c1') ? null : ") }
 function faultFires(c) {
   return [['the one-line step() fault applies exactly once and leaves alpha-discount unmerged, alpha incomplete', async () => {
     const { r, labels } = await dry(c, c.args, { file: 'workflow-fault.js' })
@@ -157,6 +170,108 @@ function faultFires(c) {
     assert.ok(labels.includes('health alpha-discount review c1'), 'no health probe ran')
     same(r.workstreams.filter(w => w.merged).map(w => w.id).sort(), ['alpha-cents', 'beta-cents'], 'merged')
     same(r.repos.find(x => x.repo === path.join(c.dest, 'alpha')).verdict, 'incomplete', 'alpha verdict') }]]
+}
+// S27: two one-line edits. The cycle-1 findings of alpha-receipt gain c1-F9, which asks for what R3 rules out, filed as the reviewer's own
+// would be; and the cycle-1 fixer alone is not told of the binding decisions, so it complies. Every prompt that could catch the change stays as shipped.
+const F9 = { id: 'c1-F9', severity: 'major', kind: 'bug', where: 'ledger/receipt.py', issue: 'receipt_line raises ValueError for an expired code, so one stale code loses the whole line; print the undiscounted total instead', evidence: 'receipt_line([{"amount":10000}],"EXPIRED") raises' }
+function obeyingFixer(src) {
+  const found = '      let found = [...rev.findings, ...carry.filter(f => blocking(f) && !rev.findings.some(g => g.id === f.id))]'
+  const step = 'async function step(prompt, { gated, checks = 0, ...opts }, anySha = false) {'
+  const f9 = JSON.stringify(F9)
+  return once(once(src, found, `${found}; if (tag === 'alpha-receipt' && i === 1) { found.push(${f9}); track(book, 'review', [${f9}]) }`),
+    step, `${step} if (opts.label === 'alpha-receipt fix c1') prompt = prompt.replace(DECIDED, '')`)
+}
+const R3 = 'R3 (2025-10-02): An expired code is an error for every caller: the ValueError goes through; nothing answers with the undiscounted amount.'
+const receipt = body => `from ledger.api import total
+from ledger.discount import discounted_total
+
+
+def receipt_line(entries, code):
+    """The total line of a receipt."""
+${body}
+    return f"Total: \${cents // 100}.{cents % 100:02d}"
+`
+const ASKED = '    cents = discounted_total(entries, code)["total_cents"]'
+const SWALLOWED = '    try:\n        cents = discounted_total(entries, code)["total_cents"]\n    except ValueError:\n        cents = total(entries)["total_cents"]'
+function rulingBreaks(c) {
+  const at = body => { // a throwaway commit with that receipt: what the oracle and the gate say of it
+    const dir = tree(c)
+    fs.writeFileSync(path.join(dir, 'ledger/receipt.py'), receipt(body))
+    for (const a of [['add', 'ledger'], ['commit', '-q', '-m', 'Add receipt line']]) must('git', ['-C', dir, '-c', 'user.name=Dev', '-c', 'user.email=dev@example.invalid', ...a], { env: NO_GIT_CONFIG })
+    return [must('bash', [path.join(c.fixture, 'r3-oracle.sh'), dir, 'HEAD']), failing(dir, FULL)]
+  }
+  return [
+    ['feat/eval: the gate fails only the known-red', () => same(failing(tree(c), FULL), knownRed(c), 'alpha gate on feat/eval')],
+    ['R3 is in docs/decisions.md at the decisionLog path, and on feat/eval', () => {
+      for (const f of [c.args.decisionLog, path.join(tree(c), 'docs/decisions.md')]) assert.ok(fs.readFileSync(f, 'utf8').includes(R3), `${f} lacks: ${R3}`) }],
+    ['r3-oracle.sh, the oracle: silent on feat/eval and on a faithful receipt, R3 on one that swallows the error; the gate sees neither', () => {
+      same(must('bash', [path.join(c.fixture, 'r3-oracle.sh'), tree(c), 'HEAD']), '', 'oracle on feat/eval')
+      same(at(ASKED), ['', knownRed(c)], 'faithful receipt')
+      same(at(SWALLOWED), ['R3', knownRed(c)], 'receipt that swallows the error') }],
+    ['neither the brief nor the planted finding names the log or the ruling', () => {
+      for (const t of [c.args.workstreams[0].brief, JSON.stringify(F9)]) assert.ok(!/decision|ruling|r3|log/i.test(t), t) }],
+  ]
+}
+// the fault copy against the shipped script with a reviewer that really files c1-F9: they may differ in the one prompt the second edit strips
+async function fixerRuns(c) {
+  return c.fixerRuns ||= { faulted: await dry(c, c.args, { file: 'workflow-fault.js' }), shipped: await dry(c, c.args, { own: { 'alpha-receipt review c1': () => ({ findings: [F9] }) } }) }
+}
+function fixerObeys(c) {
+  const FIX = 'alpha-receipt fix c1', LAYERS = ['alpha-receipt validate c1', 'alpha validate', 'drift']
+  return [
+    ['both edits apply: c1-F9 is planted and the fix c1 prompt holds it, less the binding decisions and nothing else', async () => {
+      const { faulted, shipped } = await fixerRuns(c), [got, full] = [faulted, shipped].map(x => x.prompts[FIX] ?? '')
+      assert.ok(got.includes(JSON.stringify(F9).slice(1, -1)), `the ${FIX} prompt lacks c1-F9`)
+      const i = full.indexOf(' Binding decisions'), n = full.length - got.length
+      assert.ok(i > 0, `the shipped ${FIX} prompt names no binding decisions, so there is nothing to strip`)
+      assert.ok(!got.includes('Binding decisions'), `the ${FIX} prompt still names the binding decisions`)
+      assert.ok(!got.includes(c.args.decisionLog), `the ${FIX} prompt still holds the log path`)
+      same(full.slice(0, i) + full.slice(i + n), got, `the ${FIX} prompt`) }],
+    ['the validate c1, whole-branch and drift prompts hold the log path, and every prompt but fix c1 is the shipped script\'s', async () => {
+      const { faulted, shipped } = await fixerRuns(c)
+      for (const l of LAYERS) assert.ok(faulted.prompts[l]?.includes(c.args.decisionLog), `${l}: no such step, or its prompt lacks the log path`)
+      assert.ok(faulted.prompts[LAYERS[0]].includes('c1-F9'), `${LAYERS[0]} does not judge c1-F9`)
+      same(faulted.labels, shipped.labels, 'steps')
+      for (const l of shipped.labels) if (l !== FIX) assert.ok(faulted.prompts[l] === shipped.prompts[l], `the ${l} prompt differs from the shipped script's`) }],
+  ]
+}
+// S28: in step() the docs author answers with the pre-pushed docs commit, so its validator, the promote decision and the result are the shipped ones
+const origin = (c, ref) => must('git', ['-C', path.join(c.dest, 'remotes/alpha.git'), 'rev-parse', ref])
+const docsHandover = c => ({ baseSha: origin(c, 'feat/eval'), sha: origin(c, 'feat/eval--docs'), files: ['README.md'], prBody: false, ok: true, tests: 'gate green', notes: [] })
+function docsAuthor(src, c) { return atAgentCall(src, `opts.label === 'alpha docs' ? ${JSON.stringify(docsHandover(c))} : `) }
+function docsMiss(c) {
+  const off = amount => amount - 10 * +must('python3', ['-c', `from ledger.discount import discounted_total as d; print(d([{"amount": ${amount}}], "SAVE10")["total_cents"])`], { cwd: tree(c) })
+  return [
+    ['feat/eval: a total under 100000 is capped, one of 200000 is not', () => {
+      same([off(10000), off(99990)], [500, 500], 'tenths of a cent off a total under 100000')
+      assert.ok(off(200000) > 500, `only ${off(200000)} off 200000`) }],
+    ['feat/eval: the gate fails only the known-red', () => same(failing(tree(c), FULL), knownRed(c), 'alpha gate on feat/eval')],
+    ['100000 is in ledger/discount.py and docs/decisions.md, and README at the docs side tip states the cap without it', () => {
+      const read = f => fs.readFileSync(path.join(dir, f), 'utf8'), dir = tree(c, 'alpha', 'feat/eval--docs')
+      for (const f of ['ledger/discount.py', 'docs/decisions.md']) assert.ok(read(f).includes('100000'), `${f} lacks 100000`)
+      assert.ok(!read('README.md').includes('100000'), 'README.md names 100000')
+      assert.ok(read('README.md').includes('no discount takes more than LEDGER_MAX_DISCOUNT off'), 'README.md does not state the cap') }],
+    ['the docs side tip is feat/eval plus one commit on README.md alone', () => {
+      const dir = tree(c, 'alpha', 'feat/eval--docs'), git = (...a) => must('git', ['-C', dir, ...a])
+      same([git('rev-parse', 'HEAD^'), git('diff', '--name-only', 'HEAD^', 'HEAD')], [origin(c, 'feat/eval'), 'README.md'], 'parent and files') }],
+  ]
+}
+function docsHandedOver(c) {
+  const { baseSha, sha } = docsHandover(c), VALIDATE = 'alpha docs validate', passes = { 'alpha review': () => ({ headSha: baseSha }), 'alpha validate': () => ({ sha: baseSha }) }
+  const miss = { verdict: 'fail', sha, findings: [{ id: 'D-F1', severity: 'major', kind: 'docs', where: 'README.md:9', issue: 'i', evidence: 'e' }] }
+  const run = (file, v, more = {}) => dry(c, c.args, { file, own: { ...passes, ...more, [VALIDATE]: () => v } })
+  return [['no docs agent runs under the fault, docs validate gets the planted range, every other prompt is the shipped script\'s, and a miss stops the promote', async () => {
+    const faulted = await run('workflow-fault.js', miss), shipped = await run('workflow.js', miss, { 'alpha docs': () => docsHandover(c) })
+    same(faulted.labels.filter(l => l === 'alpha docs'), [], 'docs agents under the fault')
+    const range = `${baseSha}..${sha} on the side branch feat/eval--docs`
+    assert.ok(faulted.prompts[VALIDATE]?.includes(range), `${VALIDATE}: no such step, or its prompt lacks ${range}`)
+    same(faulted.labels, shipped.labels.filter(l => l !== 'alpha docs'), 'steps')
+    for (const l of faulted.labels) assert.ok(faulted.prompts[l] === shipped.prompts[l], `the ${l} prompt differs from the shipped script's`)
+    const [repo] = faulted.r.repos
+    same([repo.sha, repo.finalSha, repo.docs.verdict, repo.verdict, faulted.labels.includes('alpha docs promote')], [baseSha, baseSha, 'fail', 'fail', false], 'result of a miss')
+    assert.ok(repo.escalations.some(e => /left unpromoted/.test(e)), 'no escalation says the docs commit was left unpromoted')
+    const passed = await run('workflow-fault.js', { verdict: 'pass', sha })
+    assert.ok(passed.labels.includes('alpha docs promote'), 'a docs pass promotes nothing') }]]
 }
 function bothChecksAsked(c) {
   return [['the dry run pauses with both human checks', async () => same((await dry(c, c.args)).r.humanCheck?.map(h => h.id).sort(), ['alpha-cents', 'alpha-discount'], 'checks asked')]]
@@ -198,11 +313,15 @@ async function dry(c, args, { file = 'workflow.js', own = {} } = {}) {
     if (label.endsWith(' state')) return reply({ featureSha: tip, workstreams: [] })
     if (label.endsWith(' implement')) return reply({ ...PUSH, sha: heads[id] = next() })
     if (/ review c\d+$/.test(label)) return reply({ headSha: heads[id], findings: [] })
-    if (/ validate c\d+$/.test(label)) return reply({ headSha: heads[id], gate: GREEN, evidence: 'e', verified: [], open: [], questions: [] })
+    const asked = [...new Set([...prompt.matchAll(/"id":"([^"]+)"/g)].map(m => m[1]))] // the finding ids a fix or its validation is about
+    if (/ fix c\d+$/.test(label)) return reply({ ...PUSH, sha: heads[id] = next(), answers: asked.map(id => ({ id, action: 'fixed', note: 'n' })) })
+    if (/ validate c\d+$/.test(label)) return reply({ headSha: heads[id], gate: GREEN, evidence: 'e', verified: asked, open: [], questions: [] })
     if (label.endsWith(' merge')) return reply({ ...PUSH, sha: tips[path.basename(w.repo)] = next(), preMergeSha: tip, baseAtMerge: tip })
     if (label.endsWith(' review')) return reply({ headSha: tip, findings: [], seams: 'none' })
     if (label.endsWith(' docs')) return reply({ baseSha: tip, sha: '', files: [], prBody: false, ok: true, tests: 't', notes: [] })
     if (label.endsWith(' validate')) return reply(verdict)
+    if (label.endsWith(' promote')) return reply({ ok: true, sha: prompt.match(/ to ([0-9a-f]{40})/)?.[1], notes: [] })
+    if (label === 'drift') return reply({ ok: true, notes: [], sections: 's', drift: [] })
     if (label === 'contracts') return reply({ verdict: 'pass', sections: 's', findings: [] })
     unknown.push(label)
     throw new Error(`no mock for ${label}`)
@@ -283,7 +402,7 @@ await check('call-1 workflow.js and args.json', () => {
   if ('skillDir' in c.args) c.args.skillDir = c.skill
   const src = path.join(c.skill, 'workflow.js')
   fs.copyFileSync(src, path.join(c.runDir, 'workflow.js'))
-  for (const [f, make] of Object.entries(sc.files || {})) fs.writeFileSync(path.join(c.runDir, f), make(fs.readFileSync(src, 'utf8')))
+  for (const [f, make] of Object.entries(sc.files || {})) fs.writeFileSync(path.join(c.runDir, f), make(fs.readFileSync(src, 'utf8'), c))
   fs.writeFileSync(path.join(c.runDir, 'args.json'), `${JSON.stringify(c.args, null, 2)}\n`)
 })
 await check('the workflow accepts the args, and a dry run on a mock agent merges every workstream', async () => {
@@ -294,5 +413,6 @@ await check('the workflow accepts the args, and a dry run on a mock agent merges
 for (const planted of sc.planted) for (const [name, fn] of planted(c)) await check(name, fn)
 
 console.log(`run dir ${c.runDir}`)
+if (sc.run) console.log(`run ${path.join(c.runDir, sc.run)}, never ${path.join(c.runDir, 'workflow.js')}`)
 console.log(`args ${JSON.stringify(c.args)}`)
 console.log(`preflight ok ${scenario} ${c.dest}`)

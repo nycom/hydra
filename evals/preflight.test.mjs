@@ -134,6 +134,47 @@ test('preflight', par, async t => {
       assert.deepEqual([a.skillDir, a.docsRepos], [skill, []]) }],
     ['S17-seeded: the oracle finds W1 W2 W3 W4', async () => { assert.match((await passes('S17-seeded')).out, /ok .*W1 W2 W3 W4/) }],
     ['S15-seeded and S15-control', async () => { await passes('S15-seeded'); await passes('S15-control') }],
+    ['S27: one workstream, the log, one cycle, no docs; the fault copy differs in two lines, and the output says to run it', async () => {
+      const r = await passes('S27'), a = r.args(), [w] = a.workstreams
+      assert.deepEqual([a.workstreams.length, w.id, w.files], [1, 'alpha-receipt', ['ledger/receipt.py', 'tests/test_receipt.py']])
+      assert.deepEqual([a.decisionLog, a.cycles, a.maxCycles, a.wbRounds, a.docsRepos, a.stage], [path.join(fs.realpathSync(r.dest), 'alpha/docs/decisions.md'), 1, 1, 0, [], undefined])
+      const [x, y] = ['workflow.js', 'workflow-fault.js'].map(f => fs.readFileSync(path.join(r.runDir, f), 'utf8').split('\n')), changed = y.filter((l, i) => l !== x[i])
+      assert.deepEqual([x.length, changed.length], [y.length, 2])
+      assert.ok(changed.every((l, i) => l.startsWith(['async function step(', '      let found = ['][i])), changed.join('\n'))
+      assert.match(r.out, /^run .*workflow-fault\.js, never .*workflow\.js$/m)
+      assert.match(r.out, /^ok .*c1-F9.*fix c1/m) }],
+    ['S28: the whole-branch stage on one workstream entry, docs on, no log; the fault copy hands over the planted docs commit', async () => {
+      const r = await passes('S28'), a = r.args(), alpha = path.join(fs.realpathSync(r.dest), 'remotes/alpha.git')
+      assert.deepEqual([a.workstreams.map(w => w.id), a.stage, a.wbRounds, a.docsRepos.length, a.decisionLog], [['alpha-discount'], 'wholeBranch', 0, 1, undefined])
+      const [x, y] = ['workflow.js', 'workflow-fault.js'].map(f => fs.readFileSync(path.join(r.runDir, f), 'utf8').split('\n')), changed = y.filter((l, i) => l !== x[i])
+      assert.deepEqual([x.length, changed.length], [y.length, 1])
+      for (const s of ["opts.label === 'alpha docs' ? ", git(alpha, 'rev-parse', 'feat/eval'), git(alpha, 'rev-parse', 'feat/eval--docs'), ' : await agent(']) assert.ok(changed[0].includes(s), s)
+      assert.match(r.out, /^run .*workflow-fault\.js, never .*workflow\.js$/m) }],
+    ['a script the S27 edits no longer fit is caught, per edit', async () => {
+      for (const [from, to] of [['      let found = [', '      var found = ['], ['{ gated, checks = 0, ...opts }, anySha = false) {', '{ gated, checks = 0, ...opts }, anySha) {']])
+        await fails('S27', /FAIL call-1[^]*exactly one/, { root: plugin(d => edit(d, 'skills/run/workflow.js', from, to)) }) }],
+    ['a second agent call in step() means the S28 fault no longer applies once', async () => {
+      const root = plugin(d => edit(d, 'skills/run/workflow.js', '  unran[opts.label] = 0\n', '  unran[opts.label] = 0\n  if (opts.neverSet) await agent(prompt, opts)\n'))
+      await fails('S28', /exactly one/, { root }) }],
+    ['a script that no longer puts the decision log in front of the agents is caught (S27)', async () => {
+      const root = plugin(d => edit(d, 'skills/run/workflow.js', ': \'\'}${DECIDED}`', ": ''}`"))
+      await fails('S27', /FAIL .*fix c1/, { root }) }],
+    ['a drift audit that never runs is caught (S27)', async () => {
+      const root = plugin(d => edit(d, 'skills/run/workflow.js', 'const driftWanted = !!A.decisionLog', 'const driftWanted = !!A.neverSet'))
+      await fails('S27', /FAIL .*(drift|log path)/, { root }) }],
+    ['a docs validator without the planted range is caught (S28)', async () => {
+      const root = plugin(d => edit(d, 'skills/run/workflow.js', 'git fetch${FETCH}, then ${o.baseSha}..${o.sha} on the side branch', 'git fetch${FETCH}, then the head of the side branch'))
+      await fails('S28', /FAIL .*docs validate/, { root }) }],
+    ['a decision log without the ruling is caught (S27)', async () => {
+      const root = plugin(d => edit(d, 'skills/run/tests/fixture/build.sh', 'An expired code is an error for every caller', 'An expired code is fine'))
+      await fails('S27', /FAIL .*R3/, { root }) }],
+    ['an oracle that names every receipt is caught (S27)', async () => {
+      const root = plugin(d => edit(d, 'skills/run/tests/fixture/r3-oracle.sh', 'except Exception:\n    sys.exit()', 'except Exception:\n    pass'))
+      await fails('S27', /FAIL .*oracle/, { root }) }],
+    ['a README that states the condition, or code that lost it, is caught (S28)', async () => {
+      const build = 'skills/run/tests/fixture/build.sh'
+      await fails('S28', /FAIL .*README/, { root: plugin(d => edit(d, build, 'LEDGER_MAX_DISCOUNT off\'', 'LEDGER_MAX_DISCOUNT off under 100000\'')) })
+      await fails('S28', /FAIL .*capped/, { root: plugin(d => edit(d, build, '    if amount < 100000:', '    if amount < 10 * 100000:')) }) }],
     ['a stale test that no longer fires is caught (S21)', async () => {
       const root = plugin(d => edit(d, 'skills/run/tests/fixture/build.sh', '"SAVE10")), ["total"])', '"SAVE10")), ["total_cents"])'))
       await fails('S21', /FAIL .*rename/, { root }) }],
