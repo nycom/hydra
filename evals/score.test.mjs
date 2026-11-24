@@ -272,6 +272,7 @@ const s21 = ({ w = {}, status = 'fixed', found = [stale, other], ledger = true, 
   const need = run()
   assert.equal(need.status, 3)
   assert.match(need.judge.seeds.W3, /weakened test/)
+  assert.match(need.judge.instructions, /shared edit the brief asks for .* is missing from the workstream's diff is one/)
   assert.deepEqual(need.judge.candidates.map(c => [c.id, c.stage]), [['c1-F1', 'reviewer'], ['c1-F2', 'reviewer'], ['c1-F3', 'reviewer']])
   const r = pass(run({}, all)) // one missed seed passes
   assert.equal(r.recall, 0.75)

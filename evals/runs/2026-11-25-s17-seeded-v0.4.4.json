@@ -1,0 +1,89 @@
+{
+  "id": "2026-11-25-s17-seeded-v0.4.4",
+  "date": "2026-11-25",
+  "hydraVersion": "0.4.4",
+  "scenario": "S17-seeded",
+  "verdict": "pass",
+  "reason": "recall 4/4, 0 primed",
+  "defects": {
+    "W1": {
+      "caught": true,
+      "stage": "reviewer",
+      "findingId": "c1-F1"
+    },
+    "W2": {
+      "caught": true,
+      "stage": "reviewer",
+      "findingId": "c1-F2"
+    },
+    "W3": {
+      "caught": true,
+      "stage": "reviewer",
+      "findingId": "c1-F4"
+    },
+    "W4": {
+      "caught": true,
+      "stage": "reviewer",
+      "findingId": "c1-F3"
+    }
+  },
+  "recall": 1,
+  "falsePositives": {
+    "major": 1,
+    "minor": 0
+  },
+  "cost": {
+    "outputTokens": 52433,
+    "contextTokens": 1050909,
+    "context": {
+      "input": 116,
+      "cacheWrite": 268065,
+      "cacheRead": 782728
+    },
+    "agents": 13,
+    "wallMinutes": 8.1,
+    "byStage": {
+      "implement": {
+        "tokens": 1881,
+        "agents": 1,
+        "contextTokens": 73390
+      },
+      "review": {
+        "tokens": 6027,
+        "agents": 2,
+        "contextTokens": 129364
+      },
+      "fix": {
+        "tokens": 3926,
+        "agents": 2,
+        "contextTokens": 108397
+      },
+      "validate": {
+        "tokens": 14004,
+        "agents": 2,
+        "contextTokens": 223966
+      },
+      "merge": {
+        "tokens": 1773,
+        "agents": 1,
+        "contextTokens": 72572
+      },
+      "wholeBranch": {
+        "tokens": 15134,
+        "agents": 3,
+        "contextTokens": 254205
+      },
+      "contracts": {
+        "tokens": 0,
+        "agents": 0,
+        "contextTokens": 0
+      },
+      "docs": {
+        "tokens": 9688,
+        "agents": 2,
+        "contextTokens": 189015
+      }
+    }
+  },
+  "notes": "One call. First S17-seeded on 0.4.4. Author sonnet, reviewer opus (effort high by default), validators opus. c1-F1 W1 critical, c1-F2 W2 critical, c1-F3 W4 major, c1-F4 W3 major: the first S17-seeded run that caught all four in review (0.3.6 2/4, 0.3.9 3/4). n=1. c1-F5 (major): the README shared edit \"is missing\" from the diff; the merge applies it, so it is a false positive. The judge, which was not told that rule, first called it a real flaw; the rule is now in the judge's instructions and the scenario text and the answer was corrected by the coordinator (verdict and recall unaffected). The fixer escalated c1-F2 (brief protects the helper) and the run ended with six questions; c2 fixed W1 and W4 in report.py by handing the helper copies; whole-branch V-F1 (folded owners, critical) and V-F2 (weakened test, major) stayed open because the brief protects both files, so the repo verdict is fail; docs validation also failed (D-F1, D-F2 major) and the docs commit was not promoted. None of that is scored. Two agents (the author and the c2 fixer) piped the gate through tail and reported that the printed gate exit=0 was not real; both named the only failure as the known-red. ws-outcome: nothing broken (6ccaaaa). ws-oracle: W1 W2 W3 W4 at e3088d6; discarded none. author: W1 A-N1, W2 A-N1, W3 none, W4 A-N1. Per call: 13 agents, 52433 output tokens, 8.1 min. cost.mjs failed [], unfinished []. git: 1/1 merged heads are on their feature branch. Answer-key grep: clean (80 agent tool calls)."
+}
