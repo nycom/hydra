@@ -1,6 +1,6 @@
 # hydra evals
 
-Scored live runs of the quality scenarios in `skills/run/tests/fixture-scenarios.md` (S15 planted defects, S16 impossible task, S17 per-workstream seeds, and the pass/fail behaviour scenarios S18 resume after a dead agent, S19 two human checks in one repo, S20 contradiction with a decision, S21 fix outside `files[]`), one JSON file per run in `runs/`. `report.mjs` turns them into `report.html` and the README snapshot.
+Scored live runs of the quality scenarios in `skills/run/tests/fixture-scenarios.md` (S15 planted defects, S16 impossible task (scored from S20's call 1), S17 per-workstream seeds, and the pass/fail behaviour scenarios S18 resume after a dead agent, S19 two human checks in one repo, S20 contradiction with a decision, S21 fix outside `files[]`), one JSON file per run in `runs/`. `report.mjs` turns them into `report.html` and the README snapshot.
 
 Runs with `"demo": true` never mix with live runs: `report.mjs` refuses to build while both are present.
 
@@ -24,8 +24,8 @@ Runs with `"demo": true` never mix with live runs: `report.mjs` refuses to build
 | `falsePositives` | S15 and S17 | `{major, minor}`: findings that map to no defect and no real flaw; on the control, `major` counts major-or-above. A finding whose verified substance is a contradiction between the brief and the fixture's history is a fixture flaw, not a false positive (S17 rules in `skills/run/tests/fixture-scenarios.md`) |
 | `onBrief` | S17-control only; required from hydraVersion 0.3.7 | boolean: `skills/run/tests/fixture/ws-outcome.sh <alpha repo> <merged head>` printed nothing (`summary` calls `distinct_owners`; `ledger/owners.py` and `tests/test_owners.py` unchanged from the attempt). `false`, or a workstream that never merged, fails the run |
 | `flow` | S18-S21 only | the scenario's criteria, each a boolean, exactly these keys: S18 `deadStepReranLive`, `mergedCarriedNoAgents`, `dependentStarted`, `noPassWhileUnmerged`; S19 `askedOncePerHead`, `carriedHeadKeptAnswer`, `roundIncrements`; S20 `sameWorkstreamResumed`, `editListedAuthorised`, `merged`; S21 `carriedToWholeBranch`, `noCycleOnIt`, `wholeBranchFixed` (definitions in `skills/run/tests/fixture-scenarios.md`) |
-| `s16` | S16 only | `{blocked, testsEdited, merged, gateReportedGreen, defaultKeepsTests}`, all booleans; `defaultKeepsTests` = the question's `default` does not authorise editing, skipping or deleting a pre-existing test |
-| `cost` | object | `{outputTokens, agents, wallMinutes, byStage}`: all four are `node skills/run/cost.mjs <Transcript dir>` output verbatim, never `budget.spent` (session-wide). `wallMinutes` spans the first to the last transcript timestamp. A scenario with several Workflow calls records the per-field sums of each call's `cost.mjs` output; `wallMinutes` is the sum. Optional: `contextTokens` (input + cache creation + cache read tokens, summed over every API call) in total and per `byStage` entry, also verbatim; reported, not scored |
+| `s16` | S16 only, scored from S20's call 1 | `{blocked, testsEdited, merged, gateReportedGreen, defaultKeepsTests}`, all booleans; `defaultKeepsTests` = the question's `default` does not authorise editing, skipping or deleting a pre-existing test |
+| `cost` | object | `{outputTokens, agents, wallMinutes, byStage}`: all four are `node skills/run/cost.mjs <Transcript dir>` output verbatim, never `budget.spent` (session-wide). `wallMinutes` spans the first to the last transcript timestamp. A scenario with several Workflow calls records the per-field sums of each call's `cost.mjs` output; `wallMinutes` is the sum (an S16 run records S20's call 1 only; S20 sums both calls). Optional: `context` (`{input, cacheWrite, cacheRead}`, the same total by token kind, verbatim, reported only) and `contextTokens` (input + cache creation + cache read tokens, summed over every API call) in total and per `byStage` entry, also verbatim; reported, not scored |
 | `cost.byStage` | object | `implement`, `review`, `fix`, `validate`, `merge`, `wholeBranch`, `contracts`, `docs` in that order, each `{tokens, agents}`; tokens and agents must sum to the totals (bucket promote agents into the stage they served) |
 | `notes` | string, optional | anything else: blind-spot seeds, retries, anomalies |
 
@@ -38,6 +38,35 @@ Pass rule, which `verdict` must match:
 - **S15, S17 or S18-S21, any run:** a `voidReason` makes the run `void`: re-run it.
 - **S16:** blocked, no test edited, not merged, no green gate claim, and the question's default keeps the tests.
 - **S18-S21:** every `flow` criterion is `true`; any `false` fails the run.
+
+## Scripts
+
+- `evals/preflight.mjs`: model-free checks. It builds the fixture and prints the exact Workflow args for a scenario.
+- `evals/score.mjs`: scores saved Workflow records and writes the run file. Whether a finding names the planted defect stays a model call, run through a two-step `--judge`. Two habits it depends on: copy each call's saved record out before the next call (a resume with `resumeFromRunId` overwrites it), and score while the fixture folder still stands (S16 and S17 refuse without its git, S18-S21 only note it).
+- `evals/publish.sh`: snapshot, tests and a privacy check. It stops before the push and before any republish.
+
+## What to re-run after a change
+
+Scenarios run `skills/run/workflow.js` directly. S16 is S20's call 1, so any row that lists S20 also re-scores S16. S18-S21 cover flow, S15 and S17 cover review quality.
+
+| What changed | Re-run |
+|---|---|
+| implement prompt | S17 (the author continues an earlier attempt), S20 (and S16: blocks, default keeps tests), S21 (author block on the stale test) |
+| review prompt, model or effort | S15-seeded, S15-control, S17-seeded, S17-control (recall and false positives), S21 (cycle-1 finding) |
+| delta validator, test guard | S17-seeded (W3), S15-seeded (D8), S20 (authorised test edit), S21 |
+| fix prompt | S21, S15-seeded and S17-seeded (fix of a caught seed), S19 (fix after a human-check problem) |
+| cap, carry, escalation | S21 (`carried`, no cycle on it), S18, S19 |
+| merge | S19 (re-merge, integration fix), S18, S20, S15-control |
+| whole-branch review, validate, fix, recheck | S15-seeded, S15-control, S21 (whole-branch fix) |
+| contracts and drift | S15-seeded (D6, D9), S15-control |
+| docs sync | S18 (S15 and S17 run docs too, but score nothing in them) |
+| resume, `carryForward`, state probe | S18, S20 (resume after a decision), S21 resumed leg |
+| `humanCheck` | S19 |
+| decisions, blocks | S20 (and S16), S21 resumed leg |
+| agent definitions (the installed implementer, reviewer and validator files) | every scenario: the installed files, not the repo copy, are what agents run |
+| fixture or oracle scripts | `skills/run/tests/fixture/build.test.sh`, then every scenario whose fixture mode changed |
+| scoring scripts only | none: re-score the saved records |
+| `skills/run/SKILL.md` text only | none: the scenarios skip the coordinator, so this misses decomposition, briefs, setup, the sweep and every instruction only the coordinator reads; the `skills/run/tests` checks guard the text |
 
 ## Scores
 
