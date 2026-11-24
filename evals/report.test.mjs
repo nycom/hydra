@@ -353,16 +353,26 @@ const newestHolds = runs => {
   }
   for (const v of newer) { // the scorecard cost row of every version since the frozen history
     const rs = runs.filter(r => r.hydraVersion === v && r.verdict !== 'void'), m = mean(rs, r => Math.round(r.cost.outputTokens / r.cost.agents))
-    assert.deepEqual(versionCost(runs, v), m && { ...m, tokens: rs.reduce((a, r) => a + r.cost.outputTokens, 0) })
+    const spent = rs.some(r => r.scenario === 'S20') ? rs.filter(r => r.scenario !== 'S16') : rs // since 0.4.4 S16 is S20's call 1, so S20's cost holds it
+    assert.deepEqual(versionCost(runs, v), m && { ...m, tokens: spent.reduce((a, r) => a + r.cost.outputTokens, 0) })
   }
 }
 newestHolds(real)
 newestHolds(all)
-// and over a version the history does not hold yet: one pass, one fail and one void, so none of it is vacuous today
+// and over a version the history does not hold yet: two passes, one fail, one void and an S16 that is the S20's call 1, so none of it is vacuous today
 { const next = (id, mut = () => {}) => variant(byId(id), r => { Object.assign(r, { id: `next-${id}`, hydraVersion: '9.0.0', date: '2099-01-01' }); mut(r) })
-  const runs = [...all, next('2026-11-23-s21-v0.4.3'), next('2026-11-21-s17-seeded-v0.3.9', r => { r.defects = { ...ws(), W1: missed, W3: missed }; r.recall = 2 / 4; r.reason = 'missed W3'; r.verdict = 'fail' }), next('2026-11-23-s18-v0.4.2', r => { r.voidReason = skipped; r.verdict = 'void' })]
-  for (const r of runs.slice(-3)) validate(r, 'x.json')
-  newestHolds(runs) }
+  const runs = [...all, next('2026-11-23-s21-v0.4.3'), next('2026-11-21-s17-seeded-v0.3.9', r => { r.defects = { ...ws(), W1: missed, W3: missed }; r.recall = 2 / 4; r.reason = 'missed W3'; r.verdict = 'fail' }), next('2026-11-23-s18-v0.4.2', r => { r.voidReason = skipped; r.verdict = 'void' }),
+    next('2026-11-23-s20-v0.4.2'), next('2026-11-21-s16-v0.3.9')]
+  for (const r of runs.slice(-5)) validate(r, 'x.json')
+  newestHolds(runs)
+  // the tokens S20 spent in call 1 count once in a version's total: from 0.4.4, and only where a scored S20 of that version holds them
+  const twin = (v, mut = () => {}) => [next('2026-11-23-s20-v0.4.2', r => { r.hydraVersion = v; mut(r) }), next('2026-11-21-s16-v0.3.9', r => { r.hydraVersion = v })], tokens = rs => versionCost(rs, rs[0].hydraVersion).tokens
+  assert.equal(tokens(twin('0.4.4')), 29756, 'S16 is in S20')
+  assert.deepEqual(versionCost(twin('0.4.4'), '0.4.4'), { ...normMean(twin('0.4.4'), 'perAgent'), tokens: 29756 }, 'the mean per run keeps S16')
+  assert.equal(tokens(twin('0.4.3')), 29756 + 1454, 'up to 0.4.3 S16 was a call of its own')
+  assert.equal(tokens(twin('0.4.4').slice(1)), 1454, 'S16 alone still counts')
+  assert.equal(tokens([...twin('0.4.4').slice(1), ...twin('0.4.5').slice(0, 1)]), 1454, 'another version\'s S20 does not hold it')
+  assert.equal(tokens(twin('0.4.4', r => { r.voidReason = skipped; r.verdict = 'void' })), 1454, 'a void S20 is not in the total, so S16 is') }
 // a KPI change is only a change over the same scenario count
 assert.deepEqual(kpiDelta(kpis[4].recall, kpis[3].recall, 1, ' pts'), { text: 'before: 100 over 1 scenario', cls: '' })
 assert.deepEqual(kpiDelta(kpis[4].contextTokens, kpis[3].contextTokens, -1, '%', String), { text: 'before: 1723650 over 4 scenarios', cls: '' })

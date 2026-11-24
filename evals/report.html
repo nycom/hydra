@@ -272,7 +272,8 @@ function compareRows(a, b) {
 }
 function versionCost(runs, version) {
   const rs = runs.filter(r => r.hydraVersion === version && passBar(r) !== 'void'), m = normMean(rs, 'perAgent')
-  return m && { ...m, tokens: rs.reduce((a, r) => a + r.cost.outputTokens, 0) }
+  const inS20 = vcmp(version, '0.4.3') > 0 && rs.some(r => r.scenario === 'S20')
+  return m && { ...m, tokens: rs.reduce((a, r) => a + (inS20 && r.scenario === 'S16' ? 0 : r.cost.outputTokens), 0) }
 }
 function sharedCostDelta(runs, c, p) {
   const scored = v => new Set(runs.filter(r => r.hydraVersion === v && passBar(r) !== 'void').map(r => r.scenario)), b = scored(p), shared = [...scored(c)].filter(s => b.has(s))

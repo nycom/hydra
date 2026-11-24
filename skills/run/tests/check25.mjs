@@ -246,9 +246,9 @@ await t('2c the whole-branch validator and the recheck get the handed rule with 
 await t('2d (control) with nothing handed neither gets it', async () => {
   const { prompts } = await go(one, { 'one validate': () => ({ verdict: 'fail', findings: [F('V-F1')] }), 'one recheck r1': () => ({ verified: ['V-F1'] }) })
   for (const L of ['one validate', 'one recheck r1']) assert(prompts[L] && !/Handed findings/.test(prompts[L]), L) })
-await t('2e the whole-branch fixer\'s handed rule escalates only when a finding says a brief names the file', async () => {
+await t('2e the whole-branch fixer\'s handed rule escalates only when a brief or finding names the file', async () => {
   const { prompts } = await go(one, carry(stale))
-  assert(/pre-existing tests included \(never escalated for that\), unless a finding says a brief names that file by path, directory or glob as not to be edited: escalate that one\./.test(prompts['one fix r1'])) })
+  assert(/pre-existing tests included \(never escalated for that\), unless a brief or finding names that file by path, directory or glob as not to be edited: escalate that one\./.test(prompts['one fix r1'])) })
 const RO = 'Make ledger.rounding.round_total round half up. Pre-existing tests are read-only: do not edit, delete, rename or skip them; add new tests as needed.'
 const BAR = 'A clause that names no path, directory or glob does not bar a handed fix.'
 await t('2f a brief clause that protects by class, not by path, does not bar a handed fix in any of the four prompts', async () => {

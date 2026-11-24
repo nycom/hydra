@@ -61,7 +61,7 @@ function call({ agents, args = {}, result = {}, on, start = T0, copy }) {
 }
 const score = (scenario, recs, { judge, id = uid(), out = path.join(tmp, 'out'), extra = [] } = {}) => {
   const j = judge && path.join(tmp, `${uid()}.json`)
-  if (j) fs.writeFileSync(j, JSON.stringify(judge))
+  if (j) fs.writeFileSync(j, JSON.stringify({ runIds: recs.map(c => c.runId), ...judge })) // a judge echoes the request's runIds
   const r = spawnSync('node', [path.join(HERE, 'score.mjs'), '--scenario', scenario, '--version', '0.4.4', '--id', id, '--date', '2026-01-02', ...recs.flatMap(c => ['--record', c.rec ?? c]), ...(j ? ['--judge', j] : []), '--out', out, ...extra], { encoding: 'utf8' })
   const file = path.join(out, `${id}.json`)
   return { ...r, file, run: r.status === 0 ? JSON.parse(fs.readFileSync(file, 'utf8')) : null, judge: r.status === 3 ? JSON.parse(r.stdout).judge : null, wrote: fs.existsSync(file) }
@@ -92,6 +92,7 @@ const s21 = ({ w = {}, status = 'fixed', found = [stale, other], ledger = true, 
   assert.ok(!first.wrote)
   assert.deepEqual(first.judge.candidates.map(x => x.id), ['c1-F1', 'c1-F2'])
   assert.ok(first.judge.instructions && first.judge.seeds.stale && first.judge.answerShape)
+  assert.deepEqual([first.judge.runIds, first.judge.answerShape.runIds], [[c.runId], [c.runId]])
   const r = pass(score('S21', [c], { judge: { stale: ['c1-F1'] } }))
   assert.deepEqual(r.flow, { carriedToWholeBranch: true, noCycleOnIt: true, wholeBranchFixed: true })
   assert.equal(r.cost.outputTokens, 140)
@@ -103,6 +104,12 @@ const s21 = ({ w = {}, status = 'fixed', found = [stale, other], ledger = true, 
   refused(score('S21', [c], { judge: { stale: ['c1-F1'], bogus: true } }), /unknown.*bogus/i)
   refused(score('S21', [c], { judge: {} }), /missing.*stale/i)
   refused(score('S21', [c], { judge: { stale: 'c1-F1' } }), /stale/)
+  // answers belong to the run they were asked for: another run of the same scenario has the same keys and candidate ids
+  const theirs = score('S21', [s21()])
+  assert.deepEqual(theirs.judge.candidates.map(x => x.id), ['c1-F1', 'c1-F2'])
+  refused(score('S21', [c], { judge: { runIds: theirs.judge.runIds, stale: ['c1-F1'] } }), /runIds .*another run/)
+  refused(score('S21', [c], { judge: { runIds: undefined, stale: ['c1-F1'] } }), /missing answer runIds/)
+  for (const runIds of [[], c.runId, [c.runId, c.runId]]) refused(score('S21', [c], { judge: { runIds, stale: ['c1-F1'] } }), /runIds/)
   const fl = (o, judge = { stale: ['c1-F1'] }) => pass(score('S21', [s21(o)], { judge }), 'fail').flow
   assert.deepEqual(fl({ ledger: false }), { carriedToWholeBranch: false, noCycleOnIt: true, wholeBranchFixed: false })
   assert.equal(fl({ w: { handed: [] } }).carriedToWholeBranch, false)
@@ -123,6 +130,7 @@ const s21 = ({ w = {}, status = 'fixed', found = [stale, other], ledger = true, 
   const need = score('S21', [one, two])
   assert.equal(need.status, 3)
   assert.deepEqual(Object.keys(need.judge.yesNo).sort(), ['blockOnStaleTest', 'defaultKeepsTests'])
+  assert.deepEqual(need.judge.runIds, [one.runId, two.runId])
   const judge = { stale: ['c1-F1'], blockOnStaleTest: true, defaultKeepsTests: true }
   const r = pass(score('S21', [two, one], { judge })) // order on the command line does not matter
   assert.match(r.notes, /^2 calls: resumed after an author block/)
@@ -207,22 +215,28 @@ const s21 = ({ w = {}, status = 'fixed', found = [stale, other], ledger = true, 
   const one = (o = {}) => call({
     args: flowArgs,
     agents: ['alpha-cents implement', 'beta-cents implement', 'alpha-discount implement', 'health alpha-discount review c1', ...(o.alive ? ['alpha-discount review c1'] : [])].map(label => ({ label })),
-    result: { workstreams: [ws('alpha-discount', { status: 'failed', merged: false }), ws('alpha-cents'), ws('beta-cents')], repos: [{ repo: R, verdict: o.verdict ?? 'incomplete' }, { repo: B, verdict: 'pass' }] },
+    result: { workstreams: [ws('alpha-discount', { status: 'failed', merged: false }), ws('alpha-cents', { merged: !o.alphaOpen }), ws('beta-cents', { merged: !o.betaOpen })], repos: [{ repo: R, verdict: o.verdict ?? 'incomplete' }, { repo: B, verdict: o.betaOpen ? 'incomplete' : 'pass' }] },
   })
   const two = (o = {}) => call({
     args: flowArgs, start: T0 + 600000,
-    agents: [{ label: 'alpha state' }, ...(o.idle ? [] : [{ label: 'alpha-discount implement' }]), { label: 'alpha-discount review c1', dead: o.dead }, ...(o.again ? [{ label: 'alpha-cents review c1' }] : [])].slice(0, o.idle ? 1 : 9),
+    agents: [{ label: 'alpha state' }, ...(o.idle ? [] : [{ label: 'alpha-discount implement' }]), { label: 'alpha-discount review c1', dead: o.dead }, ...(o.again ? [{ label: o.again }] : [])].slice(0, o.idle ? 1 : 9),
     result: { workstreams: [ws('alpha-discount'), ws('alpha-cents', { merged: !o.lost }), ws('beta-cents')], repos: [{ repo: R, verdict: o.lost ? 'incomplete' : 'pass' }, { repo: B, verdict: 'pass' }] },
   })
   const flow = (a, b, v = 'fail') => pass(score('S18', [one(a), two(b)]), v).flow
   assert.deepEqual(flow({}, {}, 'pass'), { deadStepReranLive: true, mergedCarriedNoAgents: true, dependentStarted: true, noPassWhileUnmerged: true })
   assert.equal(flow({}, { dead: true }).deadStepReranLive, false)
-  assert.equal(flow({}, { again: true }).mergedCarriedNoAgents, false)
+  for (const again of ['alpha-cents review c1', 'beta-cents implement attempt 2']) assert.equal(flow({}, { again }).mergedCarriedNoAgents, false, again)
   assert.equal(flow({}, { lost: true }).mergedCarriedNoAgents, false)
   assert.deepEqual(flow({}, { idle: true }), { deadStepReranLive: false, mergedCarriedNoAgents: true, dependentStarted: false, noPassWhileUnmerged: true })
   assert.equal(flow({ verdict: 'pass' }, {}).noPassWhileUnmerged, false)
   assert.match(pass(score('S18', [one({ alive: true }), two()]), 'void').voidReason, /fault never fired/)
   assert.match(pass(score('S18', [one()]), 'void').voidReason, /call 2/)
+  // both cents workstreams must merge in call 1: one that did not is re-implemented in call 2, so nothing was carried
+  for (const o of [{ betaOpen: true }, { alphaOpen: true }]) {
+    const r = pass(score('S18', [one(o), two({ again: `${o.betaOpen ? 'beta' : 'alpha'}-cents implement` })]), 'void')
+    assert.equal(r.voidReason, 'call 1 did not merge alpha-cents and beta-cents')
+    assert.equal(r.flow.mergedCarriedNoAgents, false)
+  }
 }
 
 // ---- S19 ----
@@ -321,6 +335,7 @@ const s21 = ({ w = {}, status = 'fixed', found = [stale, other], ledger = true, 
 {
   const ids = Array.from({ length: 10 }, (_, i) => `D${i + 1}`)
   const c = o => call({
+    start: o?.start,
     args: { workstreams: [{ id: 'alpha-report', repo: R }, { id: 'beta-report', repo: B }] },
     agents: [{ label: 'alpha review', out: { findings: ids.slice(0, 7).map((_, i) => finding(`W-F${i + 1}`)) } }, { label: 'alpha validate', out: { findings: [finding('V-F1')] } }, { label: 'alpha recheck r1', out: { findings: [finding('V-F1'), finding('R-F1')] } }, { label: 'beta validate', out: { findings: [finding('V-F1')] } }, ...(o?.noContract ? [] : [{ label: 'contracts', out: { findings: [finding('X-F1')] } }])],
     result: { workstreams: [ws('alpha-report'), ws('beta-report')], repos: [{ repo: R }, { repo: B }] },
@@ -333,6 +348,8 @@ const s21 = ({ w = {}, status = 'fixed', found = [stale, other], ledger = true, 
   assert.match(r.notes, /W-F1 names D9/)
   assert.match(pass(score('S15-seeded', [c({ noContract: true })]), 'void').voidReason, /contract/)
   pass(score('S15-control', [c()], { judge: { falsePositives: [] } }))
+  for (const sc of ['S15-seeded', 'S15-control', 'S17-seeded', 'S17-control']) // two calls would score the last and cost both
+    refused(score(sc, [c(), c({ start: T0 + 600000 })], { extra: ['--void', 'x'] }), new RegExp(`${sc.slice(0, 3)} is scored from one call's record, 2 given`))
 }
 
 // ---- refusals ----

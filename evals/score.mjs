@@ -60,6 +60,7 @@ const calls = opt.record.map(file => ({ file, rec: json(file) })).sort((a, b) =>
 const last = calls[calls.length - 1]
 if (calls[0].args.resume) die(`${calls[0].rec.runId}: the first call given is itself a resume; pass the copy of call 1's record`)
 if (family === 'S16' && calls.length > 1) die('S16 is one call: S20\'s call 1')
+if ((family === 'S15' || family === 'S17') && calls.length > 1) die(`${family} is scored from one call's record, ${calls.length} given: a resumed run cannot be scored, run it again`)
 // S16 is S20's call 1, so the later calls of that journal are not its business; every other scenario scores the whole run
 if (family !== 'S16') for (const c of calls) {
   const lost = c.rows.filter(r => r.type === 'started' && !taken.has(`${c.dir} ${r.agentId}`))
@@ -218,13 +219,13 @@ function s17() {
 }
 
 function s18() {
-  const [a, b] = calls, id = 'alpha-discount', dead = `${id} review c1`, was = (a.result.workstreams ?? []).filter(w => w.merged === true).map(w => w.id)
+  const [a, b] = calls, id = 'alpha-discount', dead = `${id} review c1`, carried = ['alpha-cents', 'beta-cents']
   const early = c => (c.result.repos ?? []).some(r => r.verdict === 'pass' && (c.args.workstreams ?? []).some(p => p.repo === r.repo && c.ws(p.id)?.merged !== true))
   return {
-    seeds: {}, yesNo: {}, candidates: [], notes: [], voidReason: a.out(dead) || a.ws(id)?.merged ? `the fault never fired: ${dead} returned in call 1` : twoCalls(),
+    seeds: {}, yesNo: {}, candidates: [], notes: [], voidReason: a.out(dead) || a.ws(id)?.merged ? `the fault never fired: ${dead} returned in call 1` : carried.some(m => a.ws(m)?.merged !== true) ? `call 1 did not merge ${carried.join(' and ')}` : twoCalls(),
     score: () => ({ fields: { flow: {
       deadStepReranLive: !!b?.out(dead),
-      mergedCarriedNoAgents: !!b && was.length > 0 && was.every(m => landed(b, b.ws(m)) && !b.ran(new RegExp(`^${m} (implement|review c\\d+)$`)).length),
+      mergedCarriedNoAgents: !!b && carried.every(m => landed(b, b.ws(m)) && !b.ran(new RegExp(`^${m} (implement|review c\\d+)$`)).length),
       dependentStarted: !!b?.ran(new RegExp(`^${id} `)).length,
       noPassWhileUnmerged: !calls.some(early),
     } } }),
@@ -299,9 +300,13 @@ if (opt.void) plan.voidReason = opt.void
 const lists = [...Object.keys(plan.seeds), ...(plan.fp ? ['falsePositives'] : [])], flags = Object.keys(plan.yesNo)
 // a void run measured nothing, and with no candidate there is nothing to read
 const asked = !plan.voidReason && (flags.length > 0 || (plan.candidates.length > 0 && lists.length > 0))
+const runIds = calls.map(c => c.rec.runId) // ties answers to their run: two runs of a scenario share seeds and often candidate ids
 let answers = {}
 if (opt.judge) {
-  answers = json(opt.judge)
+  const { runIds: from, ...rest } = json(opt.judge)
+  answers = rest
+  if (!from) die('missing answer runIds')
+  if (JSON.stringify(from) !== JSON.stringify(runIds)) die(`runIds ${JSON.stringify(from)}: the answers are for another run, this one is ${JSON.stringify(runIds)}`)
   const ids = new Set(plan.candidates.map(c => c.id)), scoring = new Set(plan.candidates.filter(c => c.severity).map(c => c.id))
   for (const k of Object.keys(answers)) if (!lists.includes(k) && !flags.includes(k)) die(`unknown answer ${k}; expected ${list([...lists, ...flags])}`)
   for (const k of [...lists, ...flags]) if (!(k in answers)) die(`missing answer ${k}`)
@@ -313,8 +318,8 @@ if (opt.judge) {
   for (const id of plan.fp ? answers.falsePositives : []) if (Object.keys(plan.seeds).some(s => answers[s].includes(id))) die(`falsePositives: ${id} also names a seed`)
 } else if (asked) {
   console.log(JSON.stringify({ judge: {
-    instructions: `Judge only from the texts below, plus a repo a yesNo item names; read nothing else. For each seed list the ids of every candidate whose text names that seed's file and the defect itself; a text that only says a file was added, touched or out of scope names nothing. A candidate may name several seeds or none.${plan.fp ? ' falsePositives: the ids of findings (candidates with a severity) that name no seed and no real flaw; one whose verified substance is that the brief contradicts the repo\'s history is not a false positive.' : ''}${flags.length ? ' Answer each yesNo item true or false.' : ''} Reply with one JSON object of exactly the answerShape keys.`,
-    seeds: plan.seeds, yesNo: plan.yesNo, candidates: plan.candidates, answerShape: { ...Object.fromEntries(lists.map(k => [k, ['<candidate id>']])), ...Object.fromEntries(flags.map(k => [k, true])) },
+    instructions: `Judge only from the texts below, plus a repo a yesNo item names; read nothing else. For each seed list the ids of every candidate whose text names that seed's file and the defect itself; a text that only says a file was added, touched or out of scope names nothing. A candidate may name several seeds or none.${plan.fp ? ' falsePositives: the ids of findings (candidates with a severity) that name no seed and no real flaw; one whose verified substance is that the brief contradicts the repo\'s history is not a false positive.' : ''}${flags.length ? ' Answer each yesNo item true or false.' : ''} Reply with one JSON object of exactly the answerShape keys, runIds copied as given.`,
+    runIds, seeds: plan.seeds, yesNo: plan.yesNo, candidates: plan.candidates, answerShape: { runIds, ...Object.fromEntries(lists.map(k => [k, ['<candidate id>']])), ...Object.fromEntries(flags.map(k => [k, true])) },
   } }, null, 2))
   process.exit(3)
 }
