@@ -240,8 +240,10 @@ Implementation is never below Sonnet.
 
 ## 3. Run the workflow
 
+**Long runs on a laptop:** request keep-awake (or run `caffeinate`) and tell the user the lid must stay open. A sleeping machine expires every agent's prompt cache and stalls the run (the one measured mass cache expiry came from a sleeping Mac).
+
 **Stale-task sweep:** right before the Workflow call, `CronCreate` with
-`*/15 * * * *` and prompt `python3 <skill dir>/stale_sweep.py`.
+`*/30 * * * *` and prompt `python3 <skill dir>/stale_sweep.py`.
 When the workflow returns — success or failure — `CronDelete` it. The sweep
 SIGTERMs (never SIGKILLs) self-matching `pgrep -f` wait loops and orphaned
 runners; it only reports owned runners older than 3 h. Fine print: session
@@ -665,6 +667,7 @@ says NOT merged; unpromoted side branches). Then:
   re-run `stage: "wholeBranch"` for that repo
   (it re-validates, docs-syncs and drift-audits the promoted head), and delete the
   stale `<featureBranch>--wbfix*` refs.
+- **Idle helpers:** a helper idle for over 5 minutes is cheaper started fresh than resumed, since its cache has expired, unless it needs its history (inferred from pricing, not measured).
 - **Reviewer tiering:** intermediate `wholeBranch` passes run with
   `wbReviewModel: "opus"`; the top reviewer runs only on the final pass, the one expected to close with no majors left.
 - Escalate to the user **only** the top-level `questions`, asked through AskUserQuestion (it already holds every workstream and repo question; plus anything else code, spec or
