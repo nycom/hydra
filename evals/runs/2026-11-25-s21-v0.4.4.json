@@ -1,0 +1,67 @@
+{
+  "id": "2026-11-25-s21-v0.4.4",
+  "date": "2026-11-25",
+  "hydraVersion": "0.4.4",
+  "scenario": "S21",
+  "verdict": "pass",
+  "reason": "review c1 filed the stale test as a critical, the fixer carried it out of files[], the workstream merged after one cycle and the whole-branch fixer, which now sees the briefs, flipped the assertion without escalating it.",
+  "flow": {
+    "carriedToWholeBranch": true,
+    "noCycleOnIt": true,
+    "wholeBranchFixed": true
+  },
+  "cost": {
+    "outputTokens": 86475,
+    "contextTokens": 2184486,
+    "context": {
+      "input": 240,
+      "cacheWrite": 521328,
+      "cacheRead": 1662918
+    },
+    "agents": 25,
+    "wallMinutes": 8.5,
+    "byStage": {
+      "implement": {
+        "tokens": 7459,
+        "agents": 3,
+        "contextTokens": 262446
+      },
+      "review": {
+        "tokens": 9192,
+        "agents": 3,
+        "contextTokens": 204493
+      },
+      "fix": {
+        "tokens": 5773,
+        "agents": 3,
+        "contextTokens": 184568
+      },
+      "validate": {
+        "tokens": 23202,
+        "agents": 4,
+        "contextTokens": 481797
+      },
+      "merge": {
+        "tokens": 5219,
+        "agents": 3,
+        "contextTokens": 202880
+      },
+      "wholeBranch": {
+        "tokens": 31044,
+        "agents": 8,
+        "contextTokens": 726946
+      },
+      "contracts": {
+        "tokens": 4586,
+        "agents": 1,
+        "contextTokens": 121356
+      },
+      "docs": {
+        "tokens": 0,
+        "agents": 0,
+        "contextTokens": 0
+      }
+    }
+  },
+  "notes": "One call. First S21 run on 0.4.4, one call, no author block, so no resume leg ran. Args: the printed --flow args with alpha-discount given after [alpha-cents] and the scoped gate, docsRepos [] (docs off from 0.4.4), cycles 1, from a run-local copy of the branch's workflow.js. Agents carry no user instructions and no session-start context (the context fix): first-call context implementer 8245, reviewer 6529, validator 8154 tokens (0.4.3: 19021, 17081, 18714). Models as in 0.4.3: authors alpha-cents opus, alpha-discount and beta-cents sonnet; reviewers alpha-cents fable, alpha-discount and beta-cents opus; validators opus; merge and promote sonnet; whole-branch reviewer alpha fable; contracts opus. Compared with 0.4.3's 20 non-docs agents this run spent 25: the alpha-cents reviewer filed the contract.yaml and README shared edits as missing (critical and major; both answered by the fixer, carried, and verified as applied at the merge) and the beta-cents validator filed alpha's contract.yaml as critical, so alpha-cents and beta-cents each ran a fix and beta a whole-branch fix and recheck. Reviewers are not told the shared-edit rule or that cross-repo contracts are checked apart. Top-level questions 1: the beta contract question, left open on the beta ledger although alpha's contract.yaml carries the rename after the merge (crossRepo pass). The whole-branch fixer saw the briefs and fixed the handed test without escalating. Per call: 25 agents, 86475 output tokens, 8.5 min. cost.mjs failed [], unfinished []. git: 3/3 merged heads are on their feature branch. Answer-key grep: clean (144 agent tool calls)."
+}
