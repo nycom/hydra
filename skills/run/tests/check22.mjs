@@ -3,6 +3,7 @@
 import { Run } from './run.mjs'
 import assert from 'node:assert'
 import { readFileSync } from 'node:fs'
+import { skillText } from './skill-text.mjs'
 const SHA = n => (n + '').padStart(40, 'a')
 const parallel = fs => Promise.all(fs.map(f => f().catch(() => null)))
 const free = { total: null, spent: () => 0, remaining: () => Infinity }
@@ -52,7 +53,7 @@ const go = async (args, sc) => {
 }
 const fails = []
 const t = async (name, fn) => { try { await fn() } catch (e) { fails.push(`${name}: ${e.message.split('\n')[0]}`) } }
-const sk = readFileSync(new URL('../SKILL.md', import.meta.url), 'utf8')
+const sk = skillText
 const norm = s => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
 const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 

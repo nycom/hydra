@@ -3,14 +3,20 @@
 import { Run } from './run.mjs'
 import assert from 'node:assert'
 import { readFileSync } from 'node:fs'
+import { core, refs, skillText } from './skill-text.mjs'
 const read = f => readFileSync(new URL(`../${f}`, import.meta.url), 'utf8')
 const flat = s => s.replace(/\s+/g, ' ')
-const skill = read('SKILL.md')
-const section = (from, to) => flat(skill.slice(skill.indexOf(from), skill.indexOf(to)))
-const finish = section('## 5. Finish', '## Stacked mode')
-assert(finish.length > 1, 'SKILL.md has §5 Finish before Stacked mode')
+const section = (from, to) => flat(core.slice(core.indexOf(from), to ? core.indexOf(to) : undefined))
+const finish = section('## 5. Finish')
+assert(core.includes('## 5. Finish') && finish.lastIndexOf('## ') === 0, 'SKILL.md ends with §5 Finish')
 assert(finish.includes('Retrospective'), '§5 Finish has a Retrospective step')
-const step = finish.slice(finish.indexOf('Retrospective'))
+const inCore = finish.slice(finish.indexOf('Retrospective'))
+for (const [re, what] of [[/mandatory/i, 'mandatory'], [/one retro per run/i, 'one retro per run'], [/success or failure/, 'after success or failure'],
+  [/one `reviewer` agent on `opus`, told to return retro\.md filled in and not its own review format/, 'the retro runs on a typed agent'],
+  [/Read `<skill dir>\/references\/retrospective\.md` first/, 'reads the reference first'], [/real runs[^.]*never inside any git repo/, 'real-run output location'],
+  [/treat it as real/i, 'unsure means private'], [/generalis/i, 'privacy: generalised'], [/no project, repo, person or host names/i, 'privacy: names'], [/no code copied/i, 'privacy: code'],
+  [/grep over the staged diff and the PR text; any hit means don't push/, 'mechanical privacy gate']]) assert(re.test(inCore), `§5 Finish: ${what}`)
+const step = flat(refs['retrospective.md'])
 const has = (re, what) => assert(re.test(step), `Retrospective step: ${what}`)
 has(/retro\.md/, 'names retro.md')
 has(/mandatory/i, 'mandatory')
@@ -26,9 +32,9 @@ has(/`node <skill dir>\/cost\.mjs <Transcript dir>`/, 'cost from the cost script
 has(/never read the transcripts/, 'transcripts are not read')
 has(/resumeFromRunId/, 'resume recovery gets one retro')
 has(/one `reviewer` agent on `opus`, told to return retro\.md filled in and not its own review format/, 'the retro runs on a typed agent')
-assert(!skill.includes('`general-purpose`'), 'no helper runs on the default agent type: it starts about 70K tokens heavier')
-assert.match(flat(skill), /one `reviewer` agent on `fable`/, 'plan review runs on a typed agent')
-assert.match(flat(skill), /one `validator` agent on `sonnet` per repo/, 'the known-red baseline runs on a typed agent')
+assert(!skillText.includes('`general-purpose`'), 'no helper runs on the default agent type: it starts about 70K tokens heavier')
+assert.match(flat(skillText), /one `reviewer` agent on `fable`/, 'plan review runs on a typed agent')
+assert.match(flat(skillText), /one `validator` agent on `sonnet` per repo/, 'the known-red baseline runs on a typed agent')
 has(/you save/i, 'the coordinator saves the file')
 has(/eval runs[^.]*evals\/retros\/<run id>\.md/i, 'eval-run output location')
 has(/evals\/runs\/<run id>\.json/, 'eval retro shares the run file id')
@@ -36,7 +42,7 @@ has(/plugin cache/, 'hydra repo is a clone, never the plugin cache')
 has(/treat it as real/i, 'unsure means private')
 has(/real runs[^.]*never in/i, 'real-run output location')
 has(/never inside a(ny)? (git )?repo/, 'real-run retros stay out of every repo')
-assert(!/Obsidian/.test(skill), 'no private notes path in the public skill')
+assert(!/Obsidian/.test(skillText), 'no private notes path in the public skill')
 has(/generalis/i, 'privacy: generalised')
 has(/no project, repo, person or host names/i, 'privacy: names')
 has(/no code copied/i, 'privacy: code')

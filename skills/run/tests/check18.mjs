@@ -3,6 +3,7 @@
 import { Run } from './run.mjs'
 import assert from 'node:assert'
 import { readFileSync } from 'node:fs'
+import { skillText } from './skill-text.mjs'
 const SHA = n => (n + '').padStart(40, 'a')
 const parallel = fs => Promise.all(fs.map(f => f().catch(() => null)))
 const free = { total: null, spent: () => 0, remaining: () => Infinity }
@@ -258,7 +259,7 @@ await t('9c a blocker open when the resumed call stopped goes to the restarted r
 
 // ---- docs and version ----
 await t('6a SKILL.md documents resume, decisions, the head-bound checks and the handed findings; plugin.json is at least 0.4.0', async () => {
-  const s = readFileSync(new URL('../SKILL.md', import.meta.url), 'utf8')
+  const s = skillText
   for (const k of ['resume', 'decisions', 'carryForward']) assert(new RegExp('\\| `' + k + '` \\|').test(s), k)
   assert(/one `p:` fewer than the workstream ledgers/.test(s) && /`checkAt`/.test(s) && /"carried"/.test(s) && /`incomplete`/.test(s) && /health probe/.test(s) && /gate exit=/.test(s))
   const v = JSON.parse(readFileSync(new URL('../../../.claude-plugin/plugin.json', import.meta.url), 'utf8')).version.split('.').map(Number); assert(v[0] > 0 || v[1] >= 4, 'at least 0.4.0') })
