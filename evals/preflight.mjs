@@ -263,7 +263,7 @@ await check(`fixture --${sc.mode}`, () => {
   return (c.dest = fs.realpathSync(destArg))
 })
 
-if (opt.values['skip-checks']) console.log('skip build.test.sh, check*.mjs, run-cmd.test.mjs, report.test.mjs (--skip-checks)')
+if (opt.values['skip-checks']) console.log('skip build.test.sh, check*.mjs, run-cmd.test.mjs (--skip-checks)')
 else {
   // on a clone of HEAD: build.test.sh fails when anyone edits the checkout while it runs
   const at = path.join(tmp, 'head'), tests = path.join(at, 'skills/run/tests')
@@ -276,7 +276,6 @@ else {
   for (const f of fs.readdirSync(tests).filter(f => /^check\d*\.mjs$/.test(f)).sort((a, b) => a.localeCompare(b, 'en', { numeric: true })))
     await test(`skills/run/tests/${f}`, process.execPath, [f, '../workflow.js'], { cwd: tests })
   await test('skills/run/tests/run-cmd.test.mjs', process.execPath, ['run-cmd.test.mjs'], { cwd: tests })
-  await test('evals/report.test.mjs', process.execPath, ['evals/report.test.mjs'], { cwd: at })
 }
 
 await check('call-1 workflow.js and args.json', () => {

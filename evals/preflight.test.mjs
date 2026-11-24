@@ -101,12 +101,13 @@ test('preflight', par, async t => {
       const root = plugin(d => { stub(d); fs.writeFileSync(path.join(d, 'skills/run/tests/check2.mjs'), "import fs from 'node:fs'\nif (!fs.existsSync('seen')) { fs.writeFileSync('seen', ''); console.error('timed out once'); process.exit(1) }") })
       const r = await passes('S20', { root, extra: [] })
       assert.match(r.out, /^ok   skills\/run\/tests\/check2\.mjs: passed on a retry, first[^]*timed out once/m) }],
-    ['every check runs: build.test.sh, each check*.mjs, run-cmd.test.mjs and report.test.mjs', async () => {
+    ['every check runs: build.test.sh, each check*.mjs and run-cmd.test.mjs; not report.test.mjs, red between scoring a run and the next snapshot', async () => {
       const root = plugin(stub)
       const r = await passes('S17-control', { root, extra: [] })
       const names = fs.readdirSync(path.join(root, 'skills/run/tests')).filter(f => /^check\d*\.mjs$/.test(f))
       assert.ok(names.length > 20)
-      for (const f of [...names, 'build.test.sh', 'run-cmd.test.mjs', 'report.test.mjs']) assert.ok(r.out.split('\n').some(l => l.startsWith('ok ') && l.endsWith(f)), `no ok line for ${f}`) }],
+      for (const f of [...names, 'build.test.sh', 'run-cmd.test.mjs']) assert.ok(r.out.split('\n').some(l => l.startsWith('ok ') && l.endsWith(f)), `no ok line for ${f}`)
+      assert.ok(!/report\.test/.test(r.out)) }],
     ['S21: after, scoped gate, docsRepos []', async () => {
       const a = (await passes('S21')).args()
       assert.deepEqual([ws(a, 'alpha-discount').after, ws(a, 'alpha-discount').gate], [['alpha-cents'], SCOPED])
