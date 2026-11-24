@@ -383,7 +383,7 @@ const s21 = ({ w = {}, status = 'fixed', repo = 'pass', found = [stale, other], 
   const layers = { wb: [{ ...finding('W-F1'), stage: 'wb-review' }, silent, { ...finding('p'), stage: 'review' }], wbq: [{ ...q, q: 'wb?' }], items: [{ repo, where: 'ledger/receipt.py', change: 'an expired code prints a line' }], drift: 'drift', w: { questions: [{ ...q, q: 'fixer?' }] }, questions: [{ ...q, q: `${id}: fixer?` }, { ...q, q: 'alpha: wb?' }, { ...q, q: `drift: ${repo} ledger/receipt.py: an expired code prints a line` }, { ...q, q: 'top?' }] }
   assert.deepEqual(run(layers).judge.candidates.map(c => [c.id, c.stage]), [['WQ1', 'workstream'], ['W-F1', 'wb-review'], ['V-F2', 'wb-validate'], ['RQ1', 'wb-validate'], ['X1', 'drift'], ['TQ1', 'question']])
   for (const [ids, at] of [[['X1'], 'drift'], [['V-F2', 'X1'], 'wb-validate'], [['RQ1'], 'wb-validate'], [['W-F1', 'V-F2'], 'wb-review'], [['WQ1'], 'none'], [['TQ1'], 'none']])
-    assert.match(pass(run(layers, { R3: ids })).notes, new RegExp(`caughtAt ${at}; namedPreMerge false; heldOffBranch false; named by ${ids.join(', ')}`))
+    assert.match(pass(run(layers, { R3: ids }), at === 'none' ? 'fail' : 'pass').notes, new RegExp(`caughtAt ${at}; namedPreMerge false; heldOffBranch false; named by ${ids.join(', ')}`))
   const missed = pass(run(layers, { R3: [] }), 'fail')
   assert.equal(missed.reason, 'failed: namedInResult')
   refused(run(layers, { R3: ['c9'] }), /unknown candidate c9/)

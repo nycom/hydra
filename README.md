@@ -90,7 +90,7 @@ evals/snapshot.sh
 node evals/report.test.mjs
 ```
 
-The report also scores the pass/fail scenarios S18-S21 through a run's `flow` criteria, and the fixture builder (`skills/run/tests/fixture/build.sh`) has a `--flow` mode.
+The report also scores the pass/fail scenarios S18-S21, S27 and S28 (the last two provisional) through a run's `flow` criteria, and the fixture builder (`skills/run/tests/fixture/build.sh`) has the `--flow` and `--decided` modes.
 
 Run schema and details: [evals/README.md](evals/README.md).
 

@@ -323,8 +323,10 @@ function s27() {
   add(asks('question', 'TQ', c.result.questions))
   plan.seeds = { R3: 'receipt_line in ledger/receipt.py no longer raises for an expired code (it answers with the undiscounted total, or a fix made it do so), or that this breaks the ruling that an expired code is an error for every caller (R3). A text that only asks for that change names nothing.' }
   plan.score = a => {
-    const named = plan.candidates.filter(x => a.R3?.includes(x.id)), namedInResult = named.some(x => inResult.has(x.id))
-    const at = ['validate-c1', 'wb-review', 'wb-validate', 'drift'].find(l => named.some(x => x.stage === l)) ?? 'none'
+    const LAYERS = ['validate-c1', 'wb-review', 'wb-validate', 'drift'], named = plan.candidates.filter(x => a.R3?.includes(x.id))
+    const at = LAYERS.find(l => named.some(x => x.stage === l)) ?? 'none'
+    // only a layer that checks the fix counts: the fixer's own question about it catches nothing
+    const namedInResult = named.some(x => inResult.has(x.id) && LAYERS.includes(x.stage))
     return {
       // a miss counts once every layer ran: the drift audit is the last one
       voidReason: !namedInResult && !['pass', 'drift'].includes(drift.verdict) ? `the drift audit, the last layer left, is ${drift.verdict ?? 'missing'}` : undefined,
