@@ -209,7 +209,7 @@ function s17() {
   const LINE = { W1: 'entry["owner"] = entry["owner"].strip()', W2: 'casefold()', W3: 'assertIsInstance(distinct_owners([]), list)', W4: 'except KeyError' }
   const discarded = Object.keys(DEFECTS.S17).filter(s => !present.includes(s) || cut.includes(LINE[s]))
   for (const s of Object.keys(DEFECTS.S17)) if (!discarded.includes(s)) plan.seeds[s] = table()[s] ?? die(`fixture-scenarios.md no longer describes ${s}`)
-  if (plan.candidates.length) plan.candidates.push(...said(author))
+  plan.candidates.push(...said(author)) // the spec asks for the author's own catches on every run, also when no scored stage filed anything
   plan.notes.push(`ws-oracle: ${list(present, ' ')} at ${head.slice(0, 7)}; discarded ${list(discarded)}.`)
   plan.score = a => {
     const r = seeded(plan, discarded, a), own = s => list((a[s] ?? []).filter(i => i.startsWith('A-')), '+')

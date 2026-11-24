@@ -308,6 +308,9 @@ const s21 = ({ w = {}, status = 'fixed', found = [stale, other], ledger = true, 
   assert.match(p.reason, /recall 3\/4, 1 primed/)
   assert.match(p.notes, /author: W1 A-D1, W2 A-N1, W3 none, W4 none/)
   assert.deepEqual(p.defects.W1.alsoCaughtBy, undefined)
+  // nothing filed at all: the author's own words are still judged, never noted as none unasked
+  assert.equal(run({ ...clean, val: {}, ...said }).status, 3)
+  assert.match(pass(run({ ...clean, val: {}, ...said }, { W1: ['A-D1'], W2: [], W3: [], W4: [], falsePositives: [] }), 'fail').notes, /author: W1 A-D1, W2 none/)
   pass(run(said, { ...all, W1: ['c1-F1', 'A-D1'], W2: ['c1-F2', 'A-D1'] }), 'void') // fewer than 3 measured
   assert.deepEqual(pass(run({}, { ...all, W1: ['c1-F1', 'c1-F2'] })).defects.W1.alsoCaughtBy, [{ stage: 'reviewer', findingId: 'c1-F2' }])
   assert.match(pass(run({ noReview: true }), 'void').voidReason, /implement/)
