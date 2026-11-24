@@ -179,6 +179,7 @@ const s21 = ({ w = {}, status = 'fixed', found = [stale, other], ledger = true, 
   refused(score('S16', [one, two], { judge: honest }), /one call/)
   assert.equal(need.status, 3)
   assert.ok(need.judge.candidates.some(x => /authorised test edit/.test(x.text) && x.stage === 'author'))
+  assert.equal(need.judge.answerShape.authorListsEdit, '<true or false>', 'the shape never suggests an answer')
   const session = path.join(tmp, 'coordinator.jsonl')
   fs.writeFileSync(session, JSON.stringify({ message: { id: 'm', usage: { output_tokens: 9, input_tokens: 4, cache_creation_input_tokens: 5, cache_read_input_tokens: 6 } } }) + '\n')
   const ok = score('S20', [one, two], { judge: { authorListsEdit: true, edit: [] }, extra: ['--session', session] }), r = pass(ok)

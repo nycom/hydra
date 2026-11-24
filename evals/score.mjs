@@ -319,7 +319,7 @@ if (opt.judge) {
 } else if (asked) {
   console.log(JSON.stringify({ judge: {
     instructions: `Judge only from the texts below, plus a repo a yesNo item names; read nothing else. For each seed list the ids of every candidate whose text names that seed's file and the defect itself; a text that only says a file was added, touched or out of scope names nothing. A candidate may name several seeds or none.${plan.fp ? ' falsePositives: the ids of findings (candidates with a severity) that name no seed and no real flaw; one whose verified substance is that the brief contradicts the repo\'s history is not a false positive.' : ''}${flags.length ? ' Answer each yesNo item true or false.' : ''} Reply with one JSON object of exactly the answerShape keys, runIds copied as given.`,
-    runIds, seeds: plan.seeds, yesNo: plan.yesNo, candidates: plan.candidates, answerShape: { runIds, ...Object.fromEntries(lists.map(k => [k, ['<candidate id>']])), ...Object.fromEntries(flags.map(k => [k, true])) },
+    runIds, seeds: plan.seeds, yesNo: plan.yesNo, candidates: plan.candidates, answerShape: { runIds, ...Object.fromEntries(lists.map(k => [k, ['<candidate id>']])), ...Object.fromEntries(flags.map(k => [k, '<true or false>'])) },
   } }, null, 2))
   process.exit(3)
 }
