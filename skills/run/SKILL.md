@@ -16,8 +16,8 @@ push + `ls-remote` verification, SHA pinning between stages, review/fix/validate
 cycles, merges, shared-file edits, whole-branch review, contract check, docs sync.
 Every step runs as a typed agent: authors, fixers, merge, promote and docs as
 `implementer` (merge, promote and docs are told they are no feature task: no
-tests, no test-first, no self-review fix pass, nothing changed beyond their steps), reviewers as `reviewer`, validators and the contract
-check as `validator`. An untyped step would start a far larger default context.
+tests, no test-first, no self-review fix pass, nothing changed beyond their steps), reviewers as `reviewer`, validators, the contract
+check and the state and health probes as `validator`. An untyped step would start a far larger default context.
 
 The ladder governs the run (the ponytail plugin, if installed, states the same rules): the plan is authored ladder-first (reuse > stdlib >
 native > one line > minimum code; no speculative tasks); every review cycle hunts
@@ -137,8 +137,9 @@ Implementation is never below Sonnet.
 
 ## 1. Decompose
 
-- **Plan review first:** one read-only `general-purpose` agent on `fable` (not
-  the generic `architect-reviewer`). Brief it with the plan, the touched repos and
+- **Plan review first:** one `reviewer` agent on `fable` (not the generic
+  `architect-reviewer`; never the default agent type, which starts about 70K
+  tokens heavier). Brief it with the plan, the touched repos and
   only these risks: (1) file-set overlap between workstreams and hot files any of
   them would touch; (2) boundary and coupling; (3) cross-repo contracts and the
   merge order they force (contract owner lands first, re-vendor + digest steps);
@@ -206,7 +207,7 @@ Implementation is never below Sonnet.
 - **Preflight, per touched repo:** add `.claude/worktrees/` to
   `.git/info/exclude` (local; never a committed ignore line), run
   `git worktree prune`, and record the **known-red baseline**: run the full gate
-  once at the feature-branch base in a throwaway worktree (one sonnet agent per
+  once at the feature-branch base in a throwaway worktree (one `validator` agent on `sonnet` per
   repo) and pass the exact failing test ids as `knownRed`. Optional: a local
   `.git/hooks/pre-push` running the hygiene grep
   (`grep -iE 'co-authored-by|generated with|\bclaude\b|anthropic|\.claude/'`)
@@ -683,7 +684,8 @@ says NOT merged; unpromoted side branches). Then:
   state per repo: branches, SHAs, test results, unresolved questions. PRs stay
   open — a human merges to `main`, especially where merge deploys.
 - **Retrospective (mandatory), one retro per run:** at Finish, success or
-  failure, spawn one read-only `general-purpose` agent on `opus`. Brief it with
+  failure, spawn one `reviewer` agent on `opus`, told to return retro.md filled in and
+  not its own review format. Brief it with
   every Workflow return's result JSON from this run in order (the first call
   plus each `stage: "wholeBranch"` re-run), the run args, the feature-branch
   SHAs you already verified, `<skill dir>/retro.md` and, optionally, each launch
