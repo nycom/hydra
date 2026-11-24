@@ -31,7 +31,7 @@ before you act; otherwise skip it.
 | you set an arg the tables and call here leave out: wrong actions (`stopRule`) or an approved case table (`acceptance`); the user's answers as binding rules plus a drift audit (`decisionLog`); a cheaper intermediate whole-branch review (`wbReviewModel`) or a review-only pass (`wbRounds`); a progress panel that offers a step tool (`stepTool`); a small pure file (`lite`); a by-eye check by the user (`humanCheck`); extra commands (`checks`, `knownRedChecks`); a gate over 2 min (`quickGate`); a local boot recipe (`smoke`, `smokeTimeout`); git-ignored files the gate needs (`copyExcluded`); a commit subject prefix (`commitPrefix`); code-like shared edits (`reviewSharedEdits`) | `<skill dir>/references/args-and-sizing.md` | before launching |
 | the user asks for a size, a cost or a wall-time estimate, or you plan a `tokenBudget` | `<skill dir>/references/args-and-sizing.md`, "Size" and "Time estimate" | before launching |
 | you set `humanCheck` on a workstream | `<skill dir>/references/questions-and-resume.md`, "Human checks" | before launching |
-| local-only run (`localOnly: true`): nothing reaches the network | `<skill dir>/references/local-only.md` | before section 2, and again at section 5 |
+| local-only run (`localOnly: true`): nothing reaches the network | `<skill dir>/references/local-only.md` | before section 2, and again when the workflow returns (before section 4) |
 | stacked slices (only on the user's ask; merging them stays theirs) | `<skill dir>/references/stacked.md` | before section 1 |
 | after a result: `humanCheck` set, a verdict `paused` or `incomplete`, a workstream unmerged or `blocked` (`decision`), a workstream the user drops (`dropped`), a non-empty `handed` or a repo note `… is settled`; any `resumeFromRunId` call, a crash or an infra stop included | `<skill dir>/references/questions-and-resume.md` | before asking the user or re-running |
 | after a result: a question about drift, churn, known gaps or a stuck finding; a verdict that is not `pass`; a critical or major `open`; `escalations`, `stoppedBy`, or a field you do not know | `<skill dir>/references/results.md` | before acting on it |
@@ -262,13 +262,13 @@ The workflow returns:
 - the other fields, per workstream and per repo: `<skill dir>/references/results.md`
 
 **Default path** (every workstream `merged: true`, every repo verdict `pass`, no
-`escalations`, nothing `handed`, no critical or major `open` or in `crossRepo`): the
+`escalations`, nothing `handed`, nothing `dropped`, empty `stoppedBy` and `questions`, `drift` `pass` or `skipped`, no critical or major `open` or in `crossRepo`): the
 bullets here in order, then section 5. Anything else: first read the file its row in
 the reference table names.
 
 `open` in the ledger means no validator accepted
 it; it may be absent from `open` (a minor nobody re-raised, or an escalation
-awaiting the user). Count a carried minor once. A repo's
+awaiting the user). Count a carried minor once. The ledger is `findings` (`<skill dir>/references/results.md`). A repo's
 `notes` also lists what a successful promote left undone (e.g. a side-branch
 delete that was denied; for a docs-only repo, in `otherDocs[].docs.notes`):
 delete those refs yourself.
@@ -281,7 +281,7 @@ saw go wrong (dead agents after 2 replacements, a validator that never ran its g
 cap or budget stops, failed merges, a finding that survived its opus fix — each
 says NOT merged; unpromoted side branches). Then:
 
-- `git ls-remote` every returned `finalSha` against its feature branch before
+- `git ls-remote` every returned `finalSha` against its feature branch (`hydra-local` in local-only mode; re-read `<skill dir>/references/local-only.md` first) before
   believing it. Then run each merged workstream's `checks` once yourself at `finalSha`
   in a throwaway worktree (`node <skill dir>/run-cmd.mjs 540 '<cmd>'`); a red one
   not in its `knownRedChecks` is a critical: fix-up, then `stage: "wholeBranch"`.
@@ -341,5 +341,5 @@ says NOT merged; unpromoted side branches). Then:
   Everything bound for the public hydra repo (retros, changes, eval seeds, PR titles,
   bodies, branch names, commit messages) is generalised: no project, repo, person or
   host names, no local filesystem paths, branch names, URLs, secrets or env values, no
-  code copied from private repos. Before committing there, run that file's grep over
-  the staged diff and the PR text; any hit means don't push.
+  code copied from private repos. Before committing there, run the grep in `<skill dir>/references/retrospective.md` as a
+  grep over the staged diff and the PR text; any hit means don't push.

@@ -5,7 +5,7 @@ const fails = []
 const t = async (name, fn) => { try { await fn() } catch (e) { fails.push(`${name}: ${e.message.split('\n')[0]}`) } }
 const names = Object.keys(refs)
 
-await t('the core is at most 34K characters', () => assert(core.length <= 34000, `SKILL.md has ${core.length} characters`))
+await t('the core is at most 31K characters', () => assert(core.length <= 31000, `SKILL.md has ${core.length} characters`))
 await t('the core\'s table names every reference file, and every file it names exists', () => {
   const rows = core.split('| situation | read | when |\n')[1]?.split('\n\n')[0]
   assert(rows, 'SKILL.md has the table')
@@ -32,6 +32,25 @@ for (const [f, s] of Object.entries({ 'SKILL.md': core, ...refs })) {
   await t(`${f}: a named pointer's target stands in the same file`, () => {
     for (const [re, target] of POINTERS) assert(!re.test(flat) || target.test(s), `${flat.match(re)?.[0]}: no ${target}`) })
 }
+
+const rowsOf = () => core.split('| situation | read | when |\n')[1].split('\n\n')[0].split('\n').slice(1)
+await t('the table\'s quoted subsection names stand as a heading or bold lead in the file the row names', () => {
+  for (const row of rowsOf()) {
+    const read = row.replace(/^\| | \|$/g, '').split(' | ')[1]
+    const file = read?.match(/references\/([\w-]+\.md)`/)?.[1]
+    for (const [, name] of (read || '').matchAll(/"([^"]+)"/g)) {
+      const esc = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      assert(file && new RegExp(`^#+ ${esc}\\s*$|\\*\\*${esc}[.:]?\\*\\*`, 'm').test(refs[file] || ''), `"${name}" in ${file}`) } } })
+await t('a "section N" pointer in the table names a section the core has', () => {
+  for (const [, n] of rowsOf().join('\n').matchAll(/\bsection (\d+)/g)) assert(new RegExp(`^## ${n}\\. `, 'm').test(core), `section ${n}`) })
+
+// what only the core may hold: the references are read on a trigger, these are read always
+const CORE_ONLY = [[/keep-awake/], [/caffeinate/], [/never merge to `main`/], [/pass it back verbatim/], [/Never resume after a hand fix/],
+  [/^\| `tokenReserve` \| `600000` \|/m], [/run each merged workstream's `checks` once yourself at `finalSha`/], [/`phase: "delegate"`/], [/\*\*Not done\*\* list/],
+  ...['paused', 'blocked', 'dropped', 'resumeFromRunId', 'humanCheck', 'localOnly', 'stopRule', 'decisionLog', 'tokenBudget', 'stoppedBy', 'escalations', 'handed']
+    .map(w => [new RegExp(`^\\| [^\\n]*\`?${w}\`?[^\\n]* \\| \`<skill dir>/references/`, 'm')])]
+await t('the core alone holds the always-read rules and the table\'s trigger words', () => {
+  for (const [re] of CORE_ONLY) assert(re.test(core), `SKILL.md lacks ${re}`) })
 
 if (fails.length) { console.error(fails.join('\n')); process.exit(1) }
 console.log('skill split checks ok')

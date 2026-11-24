@@ -132,8 +132,8 @@ that is already an ancestor of the feature branch ("Already up to date") is
 
 ## Changing workflow.js
 
-`tests/` is the regression suite: a mock `agent()` harness that runs the real
-script. After any edit, run every check from `tests/`:
+`<skill dir>/tests/` is the regression suite: a mock `agent()` harness that runs the real
+script. After any edit, run every check from `<skill dir>/tests/`:
 `for f in check*.mjs; do node $f ../workflow.js; done` (each prints `... ok`), plus `node run-cmd.test.mjs` after any edit to `run-cmd.mjs`.
-Add a scenario that fails before your change. `tests/fixture-scenarios.md`
+Add a scenario that fails before your change. `<skill dir>/tests/fixture-scenarios.md`
 describes the live two-repo fixture eval (2026-10-29) for bigger changes.

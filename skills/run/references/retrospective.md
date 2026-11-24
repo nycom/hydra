@@ -35,5 +35,5 @@ Read at Finish, before you spawn the retro agent.
   to the user in AskUserQuestion batches after the run's `questions`. Nothing is
   applied without the user's OK. Approved hydra changes become PRs reviewed
   until clean; approved eval gaps become seeds or scenarios in
-  `tests/fixture-scenarios.md` plus updates to the builder,
+  `<skill dir>/tests/fixture-scenarios.md` plus updates to the builder,
   `skills/run/tests/fixture/build.sh`.
