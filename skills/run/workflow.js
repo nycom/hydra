@@ -145,7 +145,7 @@ if (CF.call != null && !(Number.isInteger(CF.call) && CF.call >= 1)) throw new E
 const CALL = (CF.call ?? 0) + 1
 for (const [id, x] of Object.entries(CF.workstreams || {})) {
   if (!byId[id]) throw new Error(`carryForward.workstreams.${id}: no workstream ${id}`)
-  for (const k of ['handed', 'open', 'findings']) if (x[k] != null && !Array.isArray(x[k])) throw new Error(`carryForward.workstreams.${id}.${k} must be an array`)
+  for (const k of ['handed', 'open', 'findings', 'sharedEdits']) if (x[k] != null && !Array.isArray(x[k])) throw new Error(`carryForward.workstreams.${id}.${k} must be an array`)
 }
 const CF_REPOS = Object.fromEntries(Object.entries(CF.repos || {}).map(([repo, x]) => [norm(repo), x]))
 for (const [repo, x] of Object.entries(CF_REPOS)) {
@@ -224,6 +224,8 @@ const SHARED_GATE = (hot, edits) => hot.length && edits.length ? ' If the gate i
 const SHARED_NOTE = hot => hot.length ? `Shared files are never the author's to commit: ${hot.join(', ')}; the merge applies the edits the brief asks for there, so a change missing from them is not a finding.\n` : ''
 // merge, promote and docs run as the lean implementer type, whose own instructions are written for feature work
 const NOT_FEATURE = "This step is not a feature task: write no tests, skip test-first and the self-review fix pass; change nothing these instructions don't name; follow everything below in order and return the schema."
+// the docs steps' limits: the plan's say on the lines the merge put in shared files, which no docs agent reads a brief for
+const LIMITS = edits => edits.length ? `The merge applied these shared-file edits, each as the plan asked for it: ${JSON.stringify(edits)}. They are limits on the docs: a line they put in a file may be corrected where it is false, never otherwise extended or reworded.` : ''
 const ALSO = fs => fs.some(f => f.also) ? 'An entry with `also` holds a second finding at overlapping lines: resolve and verify both; if the `also` one still holds, return it open under its own id.\n' : ''
 const RO_TESTS = 'Pre-existing tests are read-only unless the brief names them. If a test or the gate contradicts the brief, or passing would need special-casing, return status blocked with a question — that is a valid outcome. For any question, the default must keep every pre-existing test unchanged and stay within the brief; offer a test edit only as a non-default option. Blocked only on an optional sub-part, with every other part done, your head pushed with the gate green and each question\'s default implemented: return status "blocked" with ok=true and the run continues with the defaults, carrying the questions; any other block is ok=false. The user\'s answer comes back on a re-run of this same workstream.'
 // A brief conflict is the user's call: fixers escalate it, validators route it to questions, never to the fix loop.
@@ -404,6 +406,9 @@ const lock = {}
 // shortcut: prompts that list it depend on merge timing, so a resume may run those agents live instead of from cache.
 const mergedInto = {}
 const mergeShas = {} // workstream id -> the feature-branch tip its latest merge pushed, for workstreams ordered after it
+// workstream id -> the shared edits its merges applied, each once; a resume starts from the resumed result's
+const applied = Object.fromEntries(Object.entries(CF.workstreams || {}).map(([id, x]) => [id, x.sharedEdits || []]))
+const apply = (w, edits) => { const had = applied[w.id] || []; applied[w.id] = [...had, ...edits.filter(e => !had.some(h => h.file === e.file && h.intent === e.intent))] }
 const sharedFound = Object.fromEntries(Object.entries(CF_REPOS).filter(([, x]) => x.shared?.length).map(([repo, x]) => [repo, x.shared.map(prior)])) // repo -> findings of the shared-edits checks, fixed in the whole-branch fix rounds; a resume starts from the resumed result's
 const landedHere = {} // repo -> a merge landed in this call, so a kept whole-branch pass no longer covers its tip
 // humanCheck: a repo's checks are asked together, in the one pause after its merges finish; merges never wait on a check.
@@ -434,10 +439,18 @@ const unaccounted = (prior, verified, open) => prior.filter(f => blocking(f) && 
 // the first path:line (or path:from-to) in a finding's where; null for 'gate', 'merge' and other non-file wheres
 const loc = f => { const m = f.where.match(/([^\s:,()]+):(\d+)(?:-(\d+))?/); return m && { file: m[1], from: +m[2], to: +(m[3] || m[2]) } }
 const fileOf = f => loc(f)?.file || '' // churn ignores ''
+const inDocs = f => /(^|\/)(readme|changelog)(\.[\w-]+)*$|(^|\/)docs\/.*\.(md|mdx|rst|adoc|txt)$/i.test(fileOf(f))
+// What makes an author's or fixer's result a fabrication, else ''. No honest result has an all-zero sha. A gateTail counts only when it is nothing but
+// a placeholder word, on a commit that is new against from: a terse gate's output may be one word or none, cut above its "gate exit=" line.
+const fabricated = (r, from) => !r?.ok ? '' : /^0{40}$/.test(r.sha) ? 'an all-zero sha'
+  : from && r.status === 'done' && hex(r.sha) && !same(r.sha, from) && /^\W*(placeholder|tbd|todo)\W*$/i.test(r.gateTail) ? 'a new commit with a placeholder gateTail' : ''
 // A dead agent is replaced by a fresh one of the same role that redoes the whole step, up to 2 replacements.
 // The attempt number changes the prompt, so a resume can never hand back the dead attempt's cached result.
 // A done+ok result without a full 40-hex sha would orphan a correct push: the next attempt only repairs the sha,
 // and the script keeps the first full result (sharedEdits, questions, answers) with the repaired sha and both attempts' notes. anySha: the caller never reads the sha.
+// pushes: an author or fixer step, and the head its prompt names as the start ('' = none it can be judged against, as for an author). A fabricated result is a dead attempt and none of it
+// is kept, so it is never the first full result. Past attempt 1 and on a resume an earlier attempt may have moved that head, so a sha that differs proves no new
+// commit and only the all-zero sha is judged.
 // gated: the prompt carries a gate, so a gate with no command or a "skipped" summary never ran: a dead attempt, never kept as bad.
 // The script can't see tool calls; command turns a silent skip into an explicit claim.
 // An accepted escalation is the user's call: if no fixer question names its id, one is made from the finding, so it always reaches the user.
@@ -448,6 +461,7 @@ const SETTLES = 'If a change you make takes an option other than a question\'s d
 const dropSettled = (w, asked, ids = []) => { const qs = asked.filter(q => ids.includes(q.id)).map(q => q.q); if (qs.length) w.questions = w.questions.filter(q => !qs.includes(q.q)); return qs }
 const softOf = {} // workstream id -> its soft-block questions, for the whole-branch fixer
 const UNRUN = /^\W*(skip(ped)?|not run|none|n\/?a)\b/i // a prefix: "skipped: clean review" never ran; "OK (skipped=1)" did
+const faked = {} // label -> an attempt returned a fabricated result, for the caller's escalation
 const unran = {} // label -> attempts that returned without running the gate, for the caller's escalation
 // After a step's first replacement dies, one cheap probe tells a dead environment (expired auth, no tool access) from a dead agent:
 // a failed probe ends the step as a resumable infra fault instead of a third blind retry.
@@ -455,23 +469,26 @@ const infra = {} // label -> the health probe failed
 const HEALTH = { type: 'object', properties: { ok: { type: 'boolean', description: 'true if the command ran' }, notes: { type: 'string' } }, required: ['ok', 'notes'] }
 const healthy = async o => !!(await agent(`Health check: run git --version in a shell and return ok=true with its output in notes. Change nothing. ${HARD}`, { label: `health ${o.label}`, phase: o.phase, agentType: TYPE.validator, model: 'sonnet', effort: 'low', schema: HEALTH }))?.ok
 // checks: how many checks the prompt carries; the schema asks for their exits, and in a gated step a missing or short checkExits never ran
-async function step(prompt, { gated, checks = 0, ...opts }, anySha = false) {
+async function step(prompt, { gated, pushes, checks = 0, ...opts }, anySha = false) {
   opts.schema = withChecks(opts.schema, checks)
-  let bad = null, skipped = false
+  let bad = null, skipped = false, fake = ''
   unran[opts.label] = 0
   for (let n = 1; n <= 3; n++) {
     const tail = bad
       ? `the previous attempt finished and returned the result below, but its sha ${JSON.stringify(bad.sha)} is not a full 40-hex SHA. Do not redo the work: git ls-remote the branch you were told to push to and return the same result with the verified sha.\n${JSON.stringify(bad)}`
+      : fake ? `the previous attempt returned ${fake}, so its whole result is discarded. Redo the whole step; first check the remote for anything it already pushed, run the gate, and return the real remote sha and the gate's last lines verbatim, the "gate exit=" line included.`
       : skipped ? `the previous attempt returned without running the gate${checks ? ' or every check' : ''}; redo the whole step, run every command, and report the command you ran in gate.command`
       : 'the previous agent died mid-step. Redo the whole step; first check the remote for anything it already pushed.'
     const r = await agent((n === 1 ? prompt : `${prompt}\n\nAttempt ${n}: ${tail}`) + STEP, n === 1 ? opts : { ...opts, label: `${opts.label} attempt ${n}` })
     const malformed = !anySha && r?.status === 'done' && r.ok && !/^[0-9a-f]{40}$/.test(r.sha)
     const unrun = gated && r?.gate && (!r.gate.command?.trim() || UNRUN.test(r.gate.command) || UNRUN.test(r.gate.summary) || (checks && !(Array.isArray(r.checkExits) && r.checkExits.length === checks && r.checkExits.every(Number.isInteger))))
-    if (r && !malformed && !unrun) return bad && r.status === 'done' && r.ok ? { ...bad, sha: r.sha, notes: [...(bad.notes || []), ...(r.notes || [])] } : r
+    fake = pushes == null ? '' : fabricated(r, n === 1 && !A.resume ? pushes : '')
+    if (r && !fake && !malformed && !unrun) return bad && r.status === 'done' && r.ok ? { ...bad, sha: r.sha, notes: [...(bad.notes || []), ...(r.notes || [])] } : r
     if (unrun) unran[opts.label]++
+    else if (fake) faked[opts.label] = true
     else bad ??= r // the first full result is the one kept and repaired
     skipped = !!unrun
-    log(`${opts.label}: ${unrun ? `returned without running the gate (summary ${JSON.stringify(r.gate.summary)})` : r ? `returned a malformed sha ${JSON.stringify(r.sha)}` : 'agent died'} (attempt ${n} of 3)`)
+    log(`${opts.label}: ${unrun ? `returned without running the gate (summary ${JSON.stringify(r.gate.summary)})` : fake ? `returned ${fake}` : r ? `returned a malformed sha ${JSON.stringify(r.sha)}` : 'agent died'} (attempt ${n} of 3)`)
     if (!r && n === 2 && !await healthy(opts)) { infra[opts.label] = true; log(`${opts.label}: health probe failed, stopping as an infra fault`); return null }
   }
   return null
@@ -479,7 +496,7 @@ async function step(prompt, { gated, checks = 0, ...opts }, anySha = false) {
 // why a gated step returned null, for its escalation
 const INFRA = what => `${what} died twice and the health probe failed (auth or tool access): an infra fault, not the work; fix it, then re-run with resumeFromRunId, resume and carryForward = this result's carryForward`
 const died = (what, label) => infra[label] ? INFRA(what) : !unran[label] ? `${what} died 3 times` : `${what} ${unran[label] === 3 ? 'never ran its gate' : 'died or never ran its gate'} in 3 attempts`
-const unusable = (what, branch, label) => infra[label] ? `${INFRA(what)}; check ${O}/${branch} for an unvalidated push` : `${what} returned no usable result 3 times (died or malformed sha); check ${O}/${branch} for an unvalidated push`
+const unusable = (what, branch, label) => infra[label] ? `${INFRA(what)}; check ${O}/${branch} for an unvalidated push` : `${what} returned no usable result 3 times (died${faked[label] ? ', a placeholder result' : ''} or malformed sha); check ${O}/${branch} for an unvalidated push`
 // Whole-branch fixes and docs land on side branches; a feature branch only fast-forwards to a SHA a validator passed.
 // Returns '' once promoted, else why not (the side branches stay and the feature branch stays where it was).
 // A promote that landed but left a step undone (a side-branch delete denied) records its notes per repo for the result.
@@ -635,6 +652,7 @@ async function runWorkstream(w) {
     const done = (mergedInto[w.repo] ||= [])
     if (!done.includes(w)) done.push(w)
     mergeShas[w.id] = head
+    apply(w, out.sharedEdits)
     out.notes.push(`already merged into ${w.featureBranch} at ${head}: carried as merged, no stage re-run`)
     log(`${tag}: already merged, carried`)
     return checked(at)
@@ -659,7 +677,7 @@ ${authorGate()}
 ${CHECKS(w)}${GIT(w.repo, w.id)}
 Commit and push to ${w.branch}. Nothing to change (the branch already meets the brief and the gate is green): no commit, no push, status "done", sha = the current ${O}/${w.branch} head, ok = true.
 Return status ("done" only when the gate is green and the push verified, or nothing to change), ok, the verified remote sha, a one-line test summary, gateTail, sharedEdits, decisions (up to 10), questions and notes.`,
-    { label: `${tag} implement`, phase: 'Implement', agentType: TYPE.implementer, model: w.model, schema: IMPLEMENTED, checks: w.checks?.length })
+    { label: `${tag} implement`, phase: 'Implement', agentType: TYPE.implementer, model: w.model, schema: IMPLEMENTED, pushes: '', checks: w.checks?.length })
   if (!impl) return stop(unusable('implement', w.branch, `${tag} implement`))
   absorb(impl)
   if (!pushed(impl, 'implement')) return blocked('implement', impl)
@@ -757,7 +775,7 @@ sharedEdits: return the complete current list; it replaces the earlier one${out.
 ${authorGate()}
 ${CHECKS(w)}${GIT(w.repo, `${w.id}-fix${i}`)}
 Return status, ok, verified sha, tests, gateTail, one answer per finding id, sharedEdits, decisions (new or changed only), questions (only what code, spec and brief cannot settle; use action "escalated") and notes.`,
-          { label: `${tag} fix c${i}`, phase: 'Review cycles', agentType: TYPE.implementer, model: stuck.length ? 'opus' : w.model, schema: FIXED, checks: w.checks?.length })
+          { label: `${tag} fix c${i}`, phase: 'Review cycles', agentType: TYPE.implementer, model: stuck.length ? 'opus' : w.model, schema: FIXED, pushes: prev, checks: w.checks?.length })
         if (!fix) return stop(unusable(`fix c${i}`, w.branch, `${tag} fix c${i}`))
         absorb(fix)
         if (!pushed(fix, `fix c${i}`)) return blocked(`fix c${i}`, fix)
@@ -873,6 +891,7 @@ Push to ${w.featureBranch} (plain push; if rejected, fetch and redo every step o
       if (m?.ok && m.status === 'done') {
         if (!done.includes(w)) done.push(w)
         mergeShas[w.id] = m.sha
+        apply(w, out.sharedEdits)
         landedHere[w.repo] = true
         landings++
         if (c.reviewSharedEdits && out.sharedEdits.length) await checkShared(w, m, out.sharedEdits, landings)
@@ -1037,7 +1056,7 @@ Briefs:
 ${briefs}
 
 Return status, ok, verified sha, tests, gateTail, one answer per finding id, questions and notes.`,
-      { label: `${n} fix r${round}`, phase: 'Whole-branch', agentType: TYPE.implementer, model: top(r.ws.map(w => w.model)), schema: without(FIXED, 'sharedEdits', 'decisions') })
+      { label: `${n} fix r${round}`, phase: 'Whole-branch', agentType: TYPE.implementer, model: top(r.ws.map(w => w.model)), schema: without(FIXED, 'sharedEdits', 'decisions'), pushes: landedHere[r.repo] ? head : '' }) // no merge in this call: the side branch may be an earlier run's, on this same head
     if (!fix) return fail(unusable(`whole-branch fix r${round}`, side, `${n} fix r${round}`))
     res.questions.push(...fix.questions)
     res.notes.push(...fix.notes)
@@ -1192,13 +1211,20 @@ Ids: X-F1, X-F2, ...`,
     const gate = rr ? [...new Set(rr.ws.filter(w => !dropped.includes(w.id)).map(w => w.gate))].join('\n') : d.gate
     const knownRed = conf(d.repo).knownRed
     const side = `${d.featureBranch}--docs`
+    // the docs agents read no brief: what the merge applied limits them, and the doc minors this repo's reviews left open are theirs to close
+    const ws = wsResults.filter(w => byId[w.id].repo === d.repo)
+    const edits = ws.flatMap(w => applied[w.id] || [])
+    const limits = LIMITS(edits)
+    const asked = [...(rs?.questions || []), ...ws.flatMap(w => w.questions || [])].map(q => q.q)
+    // a finding a question already names is the user's, not the docs agent's (a carried one is asked under its own workstream's id)
+    const minors = (rs?.open || []).filter(f => !blocking(f) && inDocs(f) && ![f.id, f.id.slice(f.id.indexOf(':') + 1)].some(id => asked.some(q => names(q, id))))
     const o = await step(
       `Docs sync for ${d.repo}, branch ${d.featureBranch}. Docs must describe what SHIPPED, not what the author first wrote.
 ${NOT_FEATURE}
 This repo's branch: ${d.featureBranch} vs ${O}/${d.base}. Read the whole diff of every feature branch below vs its base, INCLUDING every review-round fix:
 ${PINS}
 Set up: worktree docs-sync, detached at ${O}/${d.featureBranch}; push to the side branch ${side}, never to ${d.featureBranch}: it fast-forwards to your commit only after a validator passes it. If ${O}/${side} already exists and contains ${O}/${d.featureBranch}, an earlier attempt of this step pushed it: continue from it; otherwise it is a leftover of an earlier run: delete it first (git push ${O} --delete ${side}).
-1. Update in ${d.repo}: README / docs / runbooks (new or changed env vars with prod-required secrets first, endpoints, contract fields, defaults flipped in review, deleted scaffolding, behaviour changed for existing clients); design/spec docs if this repo holds them (rows whose box, trigger or status moved).
+1. Update in ${d.repo}: README / docs / runbooks (new or changed env vars with prod-required secrets first, endpoints, contract fields, defaults flipped in review, deleted scaffolding, behaviour changed for existing clients); design/spec docs if this repo holds them (rows whose box, trigger or status moved).${minors.length ? `\nOpen minors in doc files, from this run's reviews: ${JSON.stringify(minors)}. Fix each one that still holds by changing the doc, never code, and list it in notes as "fixed minor: <id>"; leave one you disagree with.` : ''}${limits && `\n${limits} What a limit bars: leave it and say so in notes.`}
 2. ${A.localOnly ? 'Local-only run: no PR exists and gh never runs; skip this step.' : `If a PR already exists for ${d.featureBranch} (gh pr view), update its body (placement table, test plan, claims the fixes made false) with gh pr edit — never create a PR.`}
 3. Knowledge graph, if graphify-out/ exists: graphify update . (add --force if the branch deleted files; never --update or semantic mode); reset line 1 of graphify-out/GRAPH_REPORT.md to the repo name (never a worktree name); drop manifest changes that are mtime-only; commit only graph.json, GRAPH_REPORT.md, manifest.json and .graphify_labels.json as "${conf(d.repo).commitPrefix}Refresh the knowledge graph". No graphify-out/: skip.
 4. ${gate ? `${GATE(gate, knownRed, d.repo)}\nRun it after the graph refresh. Red gate: do not push, ok=false.` : 'No gate for this repo.'}
@@ -1214,21 +1240,25 @@ ${GIT(d.repo, 'docs-sync')}`,
         `Validate the docs-sync commits on ${d.repo}, branch ${d.featureBranch}: git fetch${FETCH}, then ${o.baseSha}..${o.sha} on the side branch ${side}. They land after every other check: on a pass they are fast-forwarded onto ${d.featureBranch} and become its head. ${REFUTE}
 Sections (verdict per section):
 1. Every changed doc line against the code it describes, at these pinned heads:
-${PINS}
+${PINS}${limits && `\n${limits} A docs change that extends or rewords such a line which was not false at ${o.baseSha} is always a finding: major, kind docs, never a question.`}${minors.length ? `\nOpen minors in doc files this sync was asked to fix: ${JSON.stringify(minors)}. Return in verified each id whose issue no longer holds at this head. One that still holds stays off verified; it is not a finding by itself and does not fail the verdict.` : ''}${edits.length || minors.length ? `\nA line of this range that the code refutes is always a finding, never a question, whatever minor, limit or asked question names it. A finding about the docs that only the user can settle (the code does not decide it, or a limit bars the fix) goes to questions, never to findings, and does not fail the verdict: both options, the default keeping the docs as they are at this head.${asked.length ? ` Already asked of the user, never re-ask: ${JSON.stringify(asked)}` : ''}` : ''}
 2. Knowledge graph, if touched: GRAPH_REPORT.md line 1 is the repo name; only the four graphify files are committed.
 3. ${HYGIENE(`${o.baseSha}..${o.sha}`, d.repo)}
 4. ${gate ? `Run the gate and report gate {green, summary, command, flaky}. ${WRAPPED}:\n${GATE_CMD(gate)}\n${GREEN(knownRed, d.repo)} ${FLAKY}` : 'No gate: gate {green: true, summary: "no gate", command: "", flaky: []}.'}
 ${RO(d.repo, 'docs-val')}
 ${SEV}
 sha = the commit you validated. Ids: D-F1, D-F2, ...`,
-        { label, phase: 'Docs sync', agentType: TYPE.validator, model: 'opus', effort: 'high', schema: VERDICT, gated: !!gate })
+        { label, phase: 'Docs sync', agentType: TYPE.validator, model: 'opus', effort: 'high', schema: edits.length || minors.length ? RECHECK : VERDICT, gated: !!gate })
       noteFlaky(d.repo, v)
       const vOk = v && same(v.sha, o.sha)
       const findings = vOk ? [...v.findings, ...redGate(v, 'D-G')] : [{ id: 'D-X', severity: 'critical', kind: 'docs', where: o.sha, issue: v ? `docs validator saw ${v.sha}, docs pushed ${o.sha}` : died('docs validator', label), evidence: 'the script\'s own check' }]
-      return { vOk, pass: vOk && v.verdict === 'pass' && !findings.some(blocking), findings }
+      if (rs && vOk && v.questions?.length) {
+        rs.questions = [...rs.questions, ...v.questions]
+        asked.push(...v.questions.map(q => q.q))
+      }
+      return { vOk, pass: vOk && v.verdict === 'pass' && !findings.some(blocking), findings, verified: v?.verified || [] }
     }
     let at = { ...o, fixRounds: 0 }
-    let { vOk, pass, findings } = await docsValidate(o, `${name(d.repo)} docs validate`)
+    let { vOk, pass, findings, verified } = await docsValidate(o, `${name(d.repo)} docs validate`)
     // one fix round, then the whole range is validated again; a D-X is the script's own, nothing a docs fixer can settle
     const fixLabel = `${name(d.repo)} docs fix`
     if (vOk && findings.some(blocking) && !short(fixLabel)) {
@@ -1239,7 +1269,7 @@ ${NOT_FEATURE}
 Set up: worktree docs-fix, detached at ${O}/${side} (expected ${o.sha}; if it moved, an earlier attempt of this step pushed it: continue from it); push back to ${side}, never to ${d.featureBranch}.
 Change only the doc lines the findings name, so each says what the code at these pinned heads does:
 ${PINS}
-A finding you cannot settle without changing code: leave it and say so in notes.
+${limits && `${limits} A line a docs change extended or reworded goes back to what it is at ${o.baseSha}, keeping only a correction of what was false there. What a limit bars: leave it and say so in notes.\n`}A finding you cannot settle without changing code: leave it and say so in notes.
 Nothing to change: no commit, no push, sha = the current ${O}/${side} head (${o.sha} unless an earlier attempt moved it), ok = true.
 ${gate ? `${GATE(gate, knownRed, d.repo)}\nRed gate: do not push, ok=false.` : 'No gate for this repo.'}
 Before pushing: ${HYGIENE(`${o.sha}..HEAD`, d.repo)}
@@ -1252,11 +1282,16 @@ ${GIT(d.repo, 'docs-fix')}`,
         at = { ...at, sha: fix.sha, files: [...new Set([...o.files, ...fix.files])], tests: fix.tests }
         const re = await docsValidate(at, `${name(d.repo)} docs revalidate`)
         pass = re.pass
+        verified = re.verified
         findings = re.vOk ? re.findings : [...findings, ...re.findings] // no verdict on the fix: what it was asked to fix stays open
       } else at.notes.push(fix ? `docs fix pushed nothing to validate (ok ${fix.ok}, sha "${fix.sha}"); check ${O}/${side} for an unvalidated push` : unusable('docs fix', side, fixLabel))
     }
     if (!pass) return { ...at, verdict: 'fail', findings }
     const why = await promote(d.repo, d.featureBranch, o.baseSha, at.sha, [side], `${name(d.repo)} docs promote`, 'Docs sync')
+    if (!why) for (const f of minors.filter(f => verified.includes(f.id))) {
+      settle(rs.findings, f.id, 'fixed')
+      rs.open = rs.open.filter(x => x !== f)
+    }
     return { ...at, verdict: why ? 'fail' : 'pass', findings: why ? [...findings, { id: 'D-P', severity: 'critical', kind: 'docs', where: side, issue: `validated docs not promoted to ${d.featureBranch}: ${why}`, evidence: 'the promote step' }] : findings }
   })),
   async () => driftRan ? step(
@@ -1322,7 +1357,7 @@ return {
     workstreams: Object.fromEntries(wsResults.map(w => {
       const rr = repoResults.find(r => r.repo === byId[w.id].repo)
       const settled = rr?.verdict === 'pass' ? rr.findings : [] // a handed finding leaves only once its pass passed: a failed one promoted nothing
-      return [w.id, { handed: (w.handed || []).filter(f => !settled.some(e => e.id === `${w.id}:${f.id}` && STATUS.includes(e.status) && e.status !== 'carried')), open: w.open || [], findings: w.findings || [] }]
+      return [w.id, { handed: (w.handed || []).filter(f => !settled.some(e => e.id === `${w.id}:${f.id}` && STATUS.includes(e.status) && e.status !== 'carried')), open: w.open || [], findings: w.findings || [], ...(applied[w.id]?.length && { sharedEdits: applied[w.id] }) }]
     })),
     repos: Object.fromEntries(repoResults.map(r => [r.repo, { shared: sharedFound[r.repo] || [], passed: r.verdict === 'pass' ? r : null }])),
   } }),

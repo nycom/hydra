@@ -67,6 +67,21 @@ validator runs again over the whole docs range (`docs revalidate`); never a seco
 round, and none on the script's own `D-X` or under the reserve. Docs run only on a repo
 whose whole-branch pass did not fail, and only from the SHA that pass validated.
 `finalSha` is always a validated SHA.
+**What the docs step is told:** docs agents read no brief, so two lists reach them, each
+only when it is not empty. *Open minors:* the repo's open minors whose `where` names a
+line of a README, a CHANGELOG or a text file under `docs/` (md, mdx, rst, adoc, txt),
+unless a question already names that finding; the docs agent fixes the ones that still
+hold, the validator returns in `verified` those that no longer do, and a promoted docs
+pass settles them as `fixed`; one that still holds is no finding and does not fail the
+docs. *Limits:* the shared edits the merges applied (a resume takes the earlier calls'
+from `carryForward`; a `stage: "wholeBranch"` run knows none). The docs agent, the docs
+fixer and the validator all get them: a line an edit put in a file may be corrected
+where it is false, never otherwise extended or reworded; a docs change that does so is a
+major docs finding and the fix round takes it back, keeping only a correction of what
+was false. With either list the validator may also return `questions`, for a docs
+finding only the user can settle; they join the repo's. A line of the docs commit that
+the code refutes is always a finding, whatever minor, limit or question names it. With
+neither, the docs prompts and the validator's schema hold nothing of this.
 Before the whole-branch fix round, a validator finding joins a reviewer finding
 as one entry when the first `path:line` or `path:from-to` anywhere in each `where`
 names the same file with overlapping lines (higher severity kept, the other
@@ -75,6 +90,16 @@ major); each reviewer finding pairs once. Verifying
 the entry settles both ids unless the recheck returns the `also` one open under
 its own id. Both hunts stay independent, and a `where` with no `path:line`
 never collapses.
+**A fabricated author or fixer result is a dead attempt:** in the implement, workstream fix
+and whole-branch fix steps the script discards a done result (or a soft block) whose sha is
+all zeros and redoes the whole step, within the same 3 attempts; it never goes through the
+sha repair, which would keep the first result's other fields. In the two fix steps it also
+discards a new commit whose `gateTail` is nothing but a placeholder word ("placeholder",
+"TBD", "TODO"). A missing `gate exit=` line alone is no sign: agents cut it, and a terse gate
+prints one word or nothing. "New" = the sha differs from the head the step was given, on
+attempt 1 of a call that is not a resume and, for a whole-branch fix, in a call that merged
+something. A fixer that changed nothing runs no gate and says so; it is never redone. An empty sha keeps its sha repair. Not covered: the merge
+and docs steps, whose results later checks compare.
 **A gate that never ran is a dead attempt:** every gate report carries
 `command`, the exact gate command(s) the agent ran at that head in that step.
 In a step whose prompt carries a gate (both workstream validators, the
