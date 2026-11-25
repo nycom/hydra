@@ -67,7 +67,7 @@ Scenarios run `skills/run/workflow.js` directly. S16 is S20's call 1, so any row
 | whole-branch review, validate, fix, recheck | S15-seeded, S15-control, S21 (whole-branch fix), S27 (when the cycle-1 validator misses), S28 (void unless this pass is clean) |
 | contracts and drift | S15-seeded (D6, D9), S15-control, S27 (drift) |
 | docs sync | S18 (S15 and S17 run docs too, but score nothing in them), S28 (docs validator, docs fix round and promote; its author is forced) |
-| docs limits (shared edits), doc minors given to docs | S18, S17-seeded (both run docs after shared edits), S28 (its docs prompts must stay as they are); no scenario freezes a row or leaves a doc minor open on purpose |
+| docs limits (shared edits), doc minors given to docs | S18, S17-seeded (both run docs after shared edits), S28 (when its whole-branch validator leaves a README minor open, as on 0.4.12, the docs validator must still file the planted line); no scenario freezes a row or leaves a doc minor open on purpose |
 | what counts as a fabricated author or fixer result | none: no scenario forces one, the `skills/run/tests` checks are exact; read the logs of any run for a redo of an honest result |
 | resume, `carryForward`, state probe | S18, S20 (resume after a decision), S21 resumed leg |
 | `humanCheck` | S19 |

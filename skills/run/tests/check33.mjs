@@ -173,9 +173,13 @@ await t('2a an open doc minor reaches the docs prompt and its validator, is veri
   const { one, all, opts } = await go(ONE, { ...open(M), 'one docs validate': () => ({ verified: ['V-F1'], questions: [] }) })
   assert.deepEqual(holds(all, JSON.stringify([M])), ['one docs', 'one docs validate'])
   assert(/Fix each one that still holds .* "fixed minor: <id>"; leave one you disagree with\./.test(all['one docs'][0]))
-  assert(/Return in verified each id whose issue no longer holds at this head; never re-file one in findings\./.test(all['one docs validate'][0]))
+  assert(/Return in verified each id whose issue no longer holds at this head\./.test(all['one docs validate'][0]))
   assert(opts['one docs validate'].schema.required.includes('verified'))
   assert.deepEqual([one.verdict, one.open, status(one, 'V-F1')], ['pass', [], 'fixed']) })
+await t('2a2 a minor that still holds is no finding of its own, but a false line of the docs commit always is, whatever minor names it', async () => {
+  const { one, prompts, ran } = await go(ONE, { ...open(M), 'one docs validate': p => ({ verdict: 'fail', verified: [], questions: [], findings: /A line of this range that the code refutes is always a finding, even when one of these names it\./.test(p) && !/never re-file/.test(p) ? [F('D-F1', 'README.md:9', 'major', 'docs')] : [] }) })
+  assert.deepEqual([ran('one docs fix').length, one.verdict, one.docs.fixRounds], [1, 'pass', 1])
+  assert(/One that still holds stays off verified and is not a finding by itself\./.test(prompts['one docs validate'])) })
 await t('2b a minor carried from a workstream\'s cycles and one left by a recheck are given too', async () => {
   const carried = { ...F('v1-F2', 'docs/guide.md:4', 'minor', 'docs') }
   const c = await go(ONE, { 'a validate c1': () => ({ open: [carried] }), 'one docs validate': () => ({ verified: ['a:v1-F2'] }) })

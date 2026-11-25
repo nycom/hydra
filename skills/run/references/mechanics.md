@@ -71,7 +71,8 @@ whose whole-branch pass did not fail, and only from the SHA that pass validated.
 only when it is not empty. *Open minors:* the repo's open minors whose `where` names a line
 of a README, a CHANGELOG or a text file under `docs/` (md, mdx, rst, adoc, txt), unless a question already names that
 finding; the docs agent fixes the ones that still hold, the validator returns in `verified`
-those that no longer do, and a promoted docs pass settles them as `fixed`. *Limits:* the
+those that no longer do, and a promoted docs pass settles them as `fixed`; a false line of the
+docs commit is a finding even when one of these minors names it. *Limits:* the
 shared edits the merges applied (a resume takes the earlier calls' from `carryForward`; a
 `stage: "wholeBranch"` run knows none). The docs agent, the docs fixer and the validator
 all get them: a line an edit put in a file may be corrected where it is false, never
