@@ -54,7 +54,7 @@ Scenarios run `skills/run/workflow.js` directly. S16 is S20's call 1, so any row
 | implement prompt | S17 (the author continues an earlier attempt), S20 (and S16: blocks, default keeps tests), S21 (author block on the stale test) |
 | review prompt, model or effort | S15-seeded, S15-control, S17-seeded, S17-control (recall and false positives), S21 (cycle-1 finding) |
 | delta validator, test guard | S17-seeded (W3), S15-seeded (D8), S20 (authorised test edit), S21, S27 (a fix that breaks a decision) |
-| fix prompt | S21, S15-seeded and S17-seeded (fix of a caught seed), S19 (fix after a human-check problem), S27 (its fixer complies only because that one prompt loses the binding-decisions sentence) |
+| fix prompt | S21, S15-seeded and S17-seeded (fix of a caught seed), S19 (fix after a human-check problem) |
 | cap, carry, escalation | S21 (`carried`, no cycle on it), S18, S19 |
 | merge | S19 (re-merge, integration fix), S18, S20, S15-control |
 | whole-branch review, validate, fix, recheck | S15-seeded, S15-control, S21 (whole-branch fix), S27 (when the cycle-1 validator misses), S28 (void unless this pass is clean) |

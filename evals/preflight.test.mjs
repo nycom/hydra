@@ -134,15 +134,14 @@ test('preflight', par, async t => {
       assert.deepEqual([a.skillDir, a.docsRepos], [skill, []]) }],
     ['S17-seeded: the oracle finds W1 W2 W3 W4', async () => { assert.match((await passes('S17-seeded')).out, /ok .*W1 W2 W3 W4/) }],
     ['S15-seeded and S15-control', async () => { await passes('S15-seeded'); await passes('S15-control') }],
-    ['S27: one workstream, the log, one cycle, no docs; the fault copy differs in two lines, and the output says to run it', async () => {
-      const r = await passes('S27'), a = r.args(), [w] = a.workstreams
+    ['S27: one workstream, the log beside the clones, one cycle, no docs; the fault copy differs in one line, which holds both pre-pushed shas, and the output says to run it', async () => {
+      const r = await passes('S27'), a = r.args(), [w] = a.workstreams, dest = fs.realpathSync(r.dest), alpha = path.join(dest, 'remotes/alpha.git')
       assert.deepEqual([a.workstreams.length, w.id, w.files], [1, 'alpha-receipt', ['ledger/receipt.py', 'tests/test_receipt.py']])
-      assert.deepEqual([a.decisionLog, a.cycles, a.maxCycles, a.wbRounds, a.docsRepos, a.stage], [path.join(fs.realpathSync(r.dest), 'alpha/docs/decisions.md'), 1, 1, 0, [], undefined])
+      assert.deepEqual([a.decisionLog, a.cycles, a.maxCycles, a.wbRounds, a.docsRepos, a.stage], [path.join(dest, 'decisions.md'), 1, 1, 0, [], undefined])
       const [x, y] = ['workflow.js', 'workflow-fault.js'].map(f => fs.readFileSync(path.join(r.runDir, f), 'utf8').split('\n')), changed = y.filter((l, i) => l !== x[i])
-      assert.deepEqual([x.length, changed.length], [y.length, 2])
-      assert.ok(changed.every((l, i) => l.startsWith(['async function step(', '      let found = ['][i])), changed.join('\n'))
-      assert.match(r.out, /^run .*workflow-fault\.js, never .*workflow\.js$/m)
-      assert.match(r.out, /^ok .*c1-F9.*fix c1/m) }],
+      assert.deepEqual([x.length, changed.length], [y.length, 1])
+      for (const s of ['"alpha-receipt implement":', '"alpha-receipt review c1":', '"alpha-receipt fix c1":', git(alpha, 'rev-parse', 'feat/eval--alpha-receipt^'), git(alpha, 'rev-parse', 'feat/eval--alpha-receipt'), ')[opts.label] ?? await agent(']) assert.ok(changed[0].includes(s), s)
+      assert.match(r.out, /^run .*workflow-fault\.js, never .*workflow\.js$/m) }],
     ['S28: the whole-branch stage on one workstream entry, docs on, no log; the fault copy hands over the planted docs commit', async () => {
       const r = await passes('S28'), a = r.args(), alpha = path.join(fs.realpathSync(r.dest), 'remotes/alpha.git')
       assert.deepEqual([a.workstreams.map(w => w.id), a.stage, a.wbRounds, a.docsRepos.length, a.decisionLog], [['alpha-discount'], 'wholeBranch', 0, 1, undefined])
@@ -150,15 +149,33 @@ test('preflight', par, async t => {
       assert.deepEqual([x.length, changed.length], [y.length, 1])
       for (const s of ["opts.label === 'alpha docs' ? ", git(alpha, 'rev-parse', 'feat/eval'), git(alpha, 'rev-parse', 'feat/eval--docs'), ' : await agent(']) assert.ok(changed[0].includes(s), s)
       assert.match(r.out, /^run .*workflow-fault\.js, never .*workflow\.js$/m) }],
-    ['a script the S27 edits no longer fit is caught, per edit', async () => {
-      for (const [from, to] of [['      let found = [', '      var found = ['], ['{ gated, checks = 0, ...opts }, anySha = false) {', '{ gated, checks = 0, ...opts }, anySha) {']])
-        await fails('S27', /FAIL call-1[^]*exactly one/, { root: plugin(d => edit(d, 'skills/run/workflow.js', from, to)) }) }],
-    ['a second agent call in step() means the S28 fault no longer applies once', async () => {
-      const root = plugin(d => edit(d, 'skills/run/workflow.js', '  unran[opts.label] = 0\n', '  unran[opts.label] = 0\n  if (opts.neverSet) await agent(prompt, opts)\n'))
-      await fails('S28', /exactly one/, { root }) }],
+    ['a second agent call in step(), or none, means the S27 and S28 faults no longer apply once', async () => {
+      for (const [from, to] of [['  unran[opts.label] = 0\n', '  unran[opts.label] = 0\n  if (opts.neverSet) await agent(prompt, opts)\n'], ['const r = await agent((n === 1', 'const r = await ask((n === 1']]) {
+        const root = plugin(d => edit(d, 'skills/run/workflow.js', from, to))
+        for (const s of ['S27', 'S28']) await fails(s, /FAIL call-1[^]*step\(\) holds [02] .*exactly one/, { root })
+      } }],
+    ['a renamed label of a forced step is caught (S27)', async () => {
+      for (const [step, as] of [['implement', 'first implement'], ['review c${i}', 'own review c${i}'], ['fix c${i}', 'redo fix c${i}']]) // names the dry run's mock still answers
+        await fails('S27', new RegExp(`FAIL .*forced steps[^]*alpha-receipt ${step.replace('${i}', '1')}: .*no such step`), { root: plugin(d => edit(d, 'skills/run/workflow.js', `{ label: \`\${tag} ${step}\`,`, `{ label: \`\${tag} ${as}\`,`)) }) }],
+    ['a forced answer that no longer fits its step\'s schema is caught (S27): a required field, an unknown key, an enum, a pattern', async () => {
+      for (const [from, to, re] of [["required: ['status', 'ok', 'sha', 'tests', 'gateTail', 'sharedEdits',", "required: ['status', 'ok', 'sha', 'branch', 'tests', 'gateTail', 'sharedEdits',", 'alpha-receipt implement: lacks branch'],
+        ["    gateTail: { type: 'string'", "    gateEnd: { type: 'string'", 'alpha-receipt fix c1: unknown key gateTail'],
+        ["action: { enum: ['fixed',", "action: { enum: ['repaired',", 'alpha-receipt fix c1: answers\\[0\\]: action: "fixed" is none of'],
+        ["{40})?$', description: 'full 40-hex remote SHA verified via git ls-remote; empty", "{64})?$', description: 'full 40-hex remote SHA verified via git ls-remote; empty", 'alpha-receipt fix c1: sha: "[0-9a-f]{40}" is no string'],
+      ]) await fails('S27', new RegExp(`FAIL .*schema[^]*${re}`), { root: plugin(d => edit(d, 'skills/run/workflow.js', from, to)) }) }],
+    ['a fix commit that keeps the raise is caught (S27)', async () => {
+      const root = plugin(d => edit(d, 'skills/run/tests/fixture/build.sh', "except ValueError:\\n        total_cents = total(entries)[\"total_cents\"]\\n'", "except ValueError:\\n        raise\\n'"))
+      await fails('S27', /FAIL .*oracle/, { root }) }],
+    ['a decision log inside the repo is caught (S27)', async () => {
+      const build = 'skills/run/tests/fixture/build.sh'
+      await fails('S27', /FAIL .*outside every repo[^]*feat\/eval/, { root: plugin(d => edit(d, build, 'elif [ "$mode" = decided ] && [ "$repo" = alpha ]; then', 'elif [[ "$mode" = decided || "$mode" = ruled ]] && [ "$repo" = alpha ]; then')) })
+      await fails('S27', /FAIL .*outside every repo[^]*alpha\/decisions\.md/, { root: plugin(d => { edit(d, build, 'rulings > "$dest/decisions.md"', 'rulings > "$dest/alpha/decisions.md"'); edit(d, build, 'f"{dest}/decisions.md"', 'f"{alpha}/decisions.md"') }) }) }],
+    ['a fix commit that names the log is caught (S27)', async () => {
+      const root = plugin(d => edit(d, 'skills/run/tests/fixture/build.sh', '"""Receipt text."""', '"""Receipt text, see the decisions."""'))
+      await fails('S27', /FAIL .*names the log/, { root }) }],
     ['a script that no longer puts the decision log in front of the agents is caught (S27)', async () => {
       const root = plugin(d => edit(d, 'skills/run/workflow.js', ': \'\'}${DECIDED}`', ": ''}`"))
-      await fails('S27', /FAIL .*fix c1/, { root }) }],
+      await fails('S27', /FAIL .*validate c1/, { root }) }],
     ['a drift audit that never runs is caught (S27)', async () => {
       const root = plugin(d => edit(d, 'skills/run/workflow.js', 'const driftWanted = !!A.decisionLog', 'const driftWanted = !!A.neverSet'))
       await fails('S27', /FAIL .*(drift|log path)/, { root }) }],
