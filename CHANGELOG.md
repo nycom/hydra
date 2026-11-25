@@ -2,6 +2,15 @@
 
 What each version changed, newest first. A line describes the version it stands under; the behaviour now is in `skills/run/references/`.
 
+## 0.4.12 (2026-11-25)
+
+- An author or fixer result with an all-zero sha, or a fixer's new commit whose `gateTail` is a placeholder, is a dead attempt: the step is redone within the same three attempts and nothing of the discarded result is kept.
+- The docs step and its validator get the open minors that name a doc file; a promoted docs pass settles the ones its validator verified.
+- The docs step, its fix round and their validator get the shared-file edits the merges applied as limits: a line they put in a file may be corrected where it is false, never extended or reworded. Such a change is a major docs finding.
+- With either of those in play, a docs finding only the user can settle becomes a question.
+- `carryForward` hands the applied shared edits to a resume.
+- The default prompts are unchanged.
+
 ## 0.4.11 (2026-11-25)
 
 - Both fix prompts say that every committed hunk must serve one listed finding; anything else worth changing is returned as a question. This replaces "keep fixes minimal".

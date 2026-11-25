@@ -38,7 +38,10 @@ The top level is in SKILL.md, section 4.
   used by another workstream; `docs` =
   `{sha, files, prBody, ok, tests, notes, verdict, findings, fixRounds}` (`sha` = the
   docs commit on `<featureBranch>--docs`, the fix round's when it pushed one; it
-  becomes `finalSha` only when validated and promoted); `fixRounds` = 1 when a
+  becomes `finalSha` only when validated and promoted). A promoted docs pass also settles the
+  open doc minors its validator verified: `fixed` in `findings`, gone from `open`. A docs
+  finding only the user can settle is in the repo's `questions`, also when the docs
+  failed; its default keeps the docs as that commit has them. `fixRounds` = 1 when a
   critical or major from the docs validator got its one docs fix round, else 0
   (none on the script's own `D-X`, none under the reserve: `stoppedBy` then lists
   `<repo> docs fix`). A docs validation that still fails after that round, or a
