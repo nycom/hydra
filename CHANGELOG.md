@@ -2,6 +2,13 @@
 
 What each version changed, newest first. A line describes the version it stands under; the behaviour now is in `skills/run/references/`.
 
+## 0.4.11 (2026-11-25)
+
+- Both fix prompts say that every committed hunk must serve one listed finding; anything else worth changing is returned as a question. This replaces "keep fixes minimal".
+- The validator of a workstream fix and the whole-branch recheck map each hunk of the fix to its finding and file an unasked change as a regression: major when user-visible or against a brief clause or a decision, else minor. After a fixer merged the feature branch, only the fixer's own hunks are mapped.
+- The default prompts grew once (prompt-size pin 75253 to 76337).
+- The skill's progress-panel text: newer savvy-progress takes a rejected merge's tick back when the fix starts.
+
 ## 0.4.10 (2026-11-25)
 
 - The gate wrapper is one command, so a pipe an agent appends cannot replace the gate's exit code.

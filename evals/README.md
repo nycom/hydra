@@ -60,8 +60,8 @@ Scenarios run `skills/run/workflow.js` directly. S16 is S20's call 1, so any row
 | gate wrapper, gate step, shared-edit text | S26 (unscored trial, scored by hand from `skills/run/tests/fixture-scenarios.md`), S17-seeded, S20 |
 | implement prompt | S17 (the author continues an earlier attempt), S20 (and S16: blocks, default keeps tests), S21 (author block on the stale test) |
 | review prompt, model or effort | S15-seeded, S15-control, S17-seeded, S17-control (recall and false positives), S21 (cycle-1 finding); ten replays of the cycle-1 review prompt when only shared-edit text changed |
-| delta validator, test guard | S17-seeded (W3), S15-seeded (D8), S20 (authorised test edit), S21, S27 (a fix that breaks a decision) |
-| fix prompt | S21, S15-seeded and S17-seeded (fix of a caught seed), S19 (fix after a human-check problem) |
+| delta validator, test guard, the map of fix hunks | S17-seeded (W3; no false unasked change, no churn stop), S15-seeded (D8), S20 (authorised test edit), S21, S27 (a fix that breaks a decision); no scenario plants an unasked change that breaks no decision |
+| fix prompt | S21, S15-seeded and S17-seeded (fix of a caught seed), S19 (fix after a human-check problem), S20 (whole-branch fix), S27 (the fix of a decision break) |
 | cap, carry, escalation | S21 (`carried`, no cycle on it), S18, S19, S26 (a red gate is never `carried`) |
 | merge | S19 (re-merge, integration fix), S18, S20, S15-control |
 | whole-branch review, validate, fix, recheck | S15-seeded, S15-control, S21 (whole-branch fix), S27 (when the cycle-1 validator misses), S28 (void unless this pass is clean) |
