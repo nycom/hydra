@@ -78,7 +78,7 @@ Optional, for per-worker step bars in a progress mod that offers a step tool: re
 ## Tests
 
 ```
-(cd skills/run/tests && for f in check*.mjs; do node $f ../workflow.js; done)
+(cd skills/run/tests && for f in check*.mjs; do node $f ../workflow.js || exit 1; done)
 node skills/run/tests/run-cmd.test.mjs
 python3 skills/run/stale_sweep.py --self-test
 ```
