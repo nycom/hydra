@@ -2,14 +2,14 @@
 # Builds the hydra live-eval fixture for S15-S21, S27 and S28 (see ../fixture-scenarios.md):
 # bare remotes <dest>/remotes/{alpha,beta}.git, working clones <dest>/{alpha,beta},
 # branches main, feat/eval-base and feat/eval. Prints the Workflow args as JSON on stdout.
-#   build.sh <dest> [--seed|--control|--impossible|--ws-seed|--ws-control|--flow|--decided] [--force]
+#   build.sh <dest> [--seed|--control|--impossible|--ws-seed|--ws-control|--flow|--decided|--ruled] [--force]
 set -euo pipefail
 
-usage() { echo "usage: build.sh <dest> [--seed|--control|--impossible|--ws-seed|--ws-control|--flow|--decided] [--force]" >&2; exit 2; }
+usage() { echo "usage: build.sh <dest> [--seed|--control|--impossible|--ws-seed|--ws-control|--flow|--decided|--ruled] [--force]" >&2; exit 2; }
 dest='' mode='' force=''
 for a in "$@"; do
   case $a in
-    --seed|--control|--impossible|--ws-seed|--ws-control|--flow|--decided) [ -z "$mode" ] || usage; mode=${a#--} ;;
+    --seed|--control|--impossible|--ws-seed|--ws-control|--flow|--decided|--ruled) [ -z "$mode" ] || usage; mode=${a#--} ;;
     --force) force=1 ;;
     -*) usage ;;
     *) [ -z "$dest" ] || usage; dest=$a ;;
@@ -29,9 +29,10 @@ if [ -d "$dest" ] && [ -n "$(ls -A "$dest")" ]; then
   [ -n "$force" ] || { echo "build.sh: $dest is not empty (pass --force to rebuild it)" >&2; exit 1; }
   for e in "$dest"/* "$dest"/.[!.]* "$dest"/..?*; do
     [ -e "$e" ] || [ -L "$e" ] || continue # a dangling symlink is foreign too
-    case ${e##*/} in alpha|beta|remotes) ;; *) echo "build.sh: --force refused, $e is not from this script" >&2; exit 1 ;; esac
+    case ${e##*/} in alpha|beta|remotes) continue ;; decisions.md) [ ! -f "$e" ] || [ -L "$e" ] || continue ;; esac
+    echo "build.sh: --force refused, $e is not from this script" >&2; exit 1
   done
-  rm -rf -- "$dest/remotes" "$dest/alpha" "$dest/beta"
+  rm -rf -- "$dest/remotes" "$dest/alpha" "$dest/beta" "$dest/decisions.md"
 fi
 mkdir -p "$dest"
 dest=$(cd "$dest" && pwd -P)
@@ -51,6 +52,20 @@ if text.count(old) != 1:
     sys.exit(f"build.sh: expected exactly one match in {path}: {old!r}")
 open(path, "w").write(text.replace(old, new))
 PY
+}
+rulings() {
+  cat <<'EOF'
+# Decisions
+
+Rulings on the ledger, oldest first. Each one stands until a later line replaces it.
+
+- R1 (2025-09-04): Entry amounts are whole tenths of a cent. A total rounds to whole cents once, when it is answered, ties to even.
+- R2 (2025-09-18): Every entry handler checks ownership before it touches an entry.
+- R3 (2025-10-02): An expired code is an error for every caller: the ValueError goes through; nothing answers with the undiscounted amount.
+- R4 (2025-10-16): An unknown code leaves the amount unchanged.
+- R5 (2025-10-30): LEDGER_MAX_DISCOUNT (500) caps the discount on totals under 100000; totals of 100000 or more are uncapped.
+- R6 (2025-11-13): discounted_total(entries, code) in ledger/discount.py answers in the same shape as ledger.api.total.
+EOF
 }
 baseline() { # per-mode edits to $repo's Initial import itself: they predate every review range
   if [ "$mode" = seed ] && [ "$repo" = beta ]; then # D9: beta drifts from alpha's contract, self-consistent and green
@@ -109,18 +124,7 @@ class OwnersTest(unittest.TestCase):
 EOF
   elif [ "$mode" = decided ] && [ "$repo" = alpha ]; then
     mkdir "$dest/alpha/docs"
-    cat > "$dest/alpha/docs/decisions.md" <<'EOF'
-# Decisions
-
-Rulings on the ledger, oldest first. Each one stands until a later line replaces it.
-
-- R1 (2025-09-04): Entry amounts are whole tenths of a cent. A total rounds to whole cents once, when it is answered, ties to even.
-- R2 (2025-09-18): Every entry handler checks ownership before it touches an entry.
-- R3 (2025-10-02): An expired code is an error for every caller: the ValueError goes through; nothing answers with the undiscounted amount.
-- R4 (2025-10-16): An unknown code leaves the amount unchanged.
-- R5 (2025-10-30): LEDGER_MAX_DISCOUNT (500) caps the discount on totals under 100000; totals of 100000 or more are uncapped.
-- R6 (2025-11-13): discounted_total(entries, code) in ledger/discount.py answers in the same shape as ledger.api.total.
-EOF
+    rulings > "$dest/alpha/docs/decisions.md"
   fi
 }
 
@@ -268,7 +272,7 @@ EOF
   git -C "$dest/alpha" branch -q -D "$ws" # on origin only, as an attempt from another worktree leaves it
 fi
 
-if [ "$mode" = decided ]; then
+if [ "$mode" = decided ] || [ "$mode" = ruled ]; then
   side=feat/eval--alpha-discount
   git -C "$dest/alpha" switch -q -c "$side" feat/eval
   sub ledger/discount.py $'"""Discount codes."""\n' $'"""Discount codes."""\nfrom ledger.api import total\n\nLEDGER_MAX_DISCOUNT = 500  # tenths of a cent\n'
@@ -303,15 +307,65 @@ EOF
   git -C "$dest/alpha" merge -q --no-ff --no-edit "$side"
   git -C "$dest/alpha" push -q origin feat/eval
   log "alpha feat/eval $(git -C "$dest/alpha" rev-parse --short HEAD): $(git -C "$dest/alpha" log -1 --format=%s)"
-  docs=feat/eval--docs # S28: the docs commit its run hands to the docs validator
-  git -C "$dest/alpha" switch -q -c "$docs"
-  sub README.md '- `ledger/discount.py`: `apply(code, amount)`' \
-    '- `ledger/discount.py`: `apply(code, amount)` and `discounted_total(entries, code)`, a total after the code; no discount takes more than LEDGER_MAX_DISCOUNT off'
-  git -C "$dest/alpha" commit -q -am "Update README for discounted_total"
-  git -C "$dest/alpha" push -q origin "$docs"
-  log "alpha $docs $(git -C "$dest/alpha" rev-parse --short HEAD): $(git -C "$dest/alpha" log -1 --format=%s)"
+  if [ "$mode" = decided ]; then # S28: the docs commit its run hands to the docs validator
+    pushed=feat/eval--docs
+    git -C "$dest/alpha" switch -q -c "$pushed"
+    sub README.md '- `ledger/discount.py`: `apply(code, amount)`' \
+      '- `ledger/discount.py`: `apply(code, amount)` and `discounted_total(entries, code)`, a total after the code; no discount takes more than LEDGER_MAX_DISCOUNT off'
+    git -C "$dest/alpha" commit -q -am "Update README for discounted_total"
+  else # S27: the author's commit and the fix its run hands to the cycle-1 validator; the log sits where a real run keeps it, in no repo
+    rulings > "$dest/decisions.md"
+    pushed=feat/eval--alpha-receipt
+    git -C "$dest/alpha" switch -q -c "$pushed"
+    # the author left the expired code untested, so only the log knows; negative totals work, so a validator has nothing else to stop on
+    cat > "$dest/alpha/ledger/receipt.py" <<'EOF'
+"""Receipt text."""
+from ledger.discount import discounted_total
+
+
+def receipt_line(entries, code):
+    """The receipt's total line, e.g. "Total: $3.15"."""
+    total_cents = discounted_total(entries, code)["total_cents"]
+    dollars, cents = divmod(abs(total_cents), 100)
+    sign = "-" if total_cents < 0 else ""
+    return f"Total: {sign}${dollars}.{cents:02d}"
+EOF
+    cat > "$dest/alpha/tests/test_receipt.py" <<'EOF'
+import unittest
+
+from ledger.receipt import receipt_line
+
+
+class ReceiptTest(unittest.TestCase):
+    def test_receipt_line(self):
+        self.assertEqual(receipt_line([{"amount": 1200}, {"amount": 2300}], "SAVE10"), "Total: $3.15")
+
+    def test_cents_are_padded(self):
+        self.assertEqual(receipt_line([{"amount": 10000}], "NOPE"), "Total: $10.00")
+        self.assertEqual(receipt_line([{"amount": 50}], "NOPE"), "Total: $0.05")
+
+    def test_discount_is_capped(self):
+        self.assertEqual(receipt_line([{"amount": 10000}], "SAVE10"), "Total: $9.50")
+
+    def test_negative_total(self):
+        self.assertEqual(receipt_line([{"amount": -3150}], "NOPE"), "Total: -$3.15")
+EOF
+    git -C "$dest/alpha" add -A ledger tests
+    git -C "$dest/alpha" commit -q -m "Add receipt line"
+    sub ledger/receipt.py $'from ledger.discount import' $'from ledger.api import total\nfrom ledger.discount import'
+    sub ledger/receipt.py $'    total_cents = discounted_total(entries, code)["total_cents"]\n' \
+      $'    try:\n        total_cents = discounted_total(entries, code)["total_cents"]\n    except ValueError:\n        total_cents = total(entries)["total_cents"]\n'
+    cat >> "$dest/alpha/tests/test_receipt.py" <<'EOF'
+
+    def test_expired_code_prints_the_undiscounted_total(self):
+        self.assertEqual(receipt_line([{"amount": 10000}], "EXPIRED"), "Total: $10.00")
+EOF
+    git -C "$dest/alpha" commit -q -am "Print the undiscounted total for an expired code"
+  fi
+  git -C "$dest/alpha" push -q origin "$pushed"
+  log "alpha $pushed $(git -C "$dest/alpha" rev-parse --short HEAD): $(git -C "$dest/alpha" log -1 --format=%s)"
   git -C "$dest/alpha" switch -q main
-  git -C "$dest/alpha" branch -q -D "$side" "$docs" # the side branch was never pushed, the docs branch is on origin only
+  git -C "$dest/alpha" branch -q -D "$side" "$pushed" # the side branch was never pushed, the other is on origin only
 fi
 
 python3 - "$dest" "$mode" <<'PY'
@@ -388,7 +442,7 @@ elif mode == "flow":  # S18, S19, S21: each scenario adds its own after/humanChe
         "brief": "alpha renames its total response field from total to total_cents (alpha's contract.yaml). Update the "
                  "vendored copy vendor/alpha-contract.yaml, beta.client.TOTAL_FIELD and tests/test_client.py to read total_cents.",
     }]
-elif mode == "decided":  # one workstream per scenario (S27 the first, S28 the second): preflight keeps its own
+elif mode in ("decided", "ruled"):  # S27 (ruled) runs the first; S28 (decided) the second, and preflight drops the first
     args["repos"], args["docsRepos"] = args["repos"][:1], args["docsRepos"][:1]
     args["workstreams"] = [{
         "id": "alpha-receipt", "repo": alpha, "featureBranch": "feat/eval",
@@ -404,6 +458,9 @@ elif mode == "decided":  # one workstream per scenario (S27 the first, S28 the s
                  "no discount takes more than LEDGER_MAX_DISCOUNT off, a new module constant of 500 (tenths of a cent); "
                  "totals of 100000 or more are uncapped. Add tests to tests/test_discount.py.",
     }]
+    if mode == "ruled":
+        args["workstreams"] = args["workstreams"][:1]
+        args["decisionLog"] = f"{dest}/decisions.md"
 elif mode == "impossible":
     args["workstreams"] = [{
         "id": "alpha-rounding", "repo": alpha, "featureBranch": "feat/eval",
@@ -413,7 +470,7 @@ elif mode == "impossible":
     }]
 else:
     args["workstreams"] = []  # baseline only: add a workstream before the Workflow call
-if mode not in ("seed", "control", "ws-seed", "ws-control", "flow", "decided"):  # flow: no false-green scenario, so no smoke and no skillDir
+if mode not in ("seed", "control", "ws-seed", "ws-control", "flow", "decided", "ruled"):  # flow: no false-green scenario, so no smoke and no skillDir
     args["repos"][0]["smoke"] = "bash scripts/smoke.sh"
     args = {"skillDir": "<fill: plugin skill base dir>", **args}
 print(json.dumps(args, indent=2))

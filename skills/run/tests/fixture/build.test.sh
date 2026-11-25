@@ -214,7 +214,7 @@ mkdir -p "$tmp/dangling/dest/alpha" && ln -s "$tmp/nowhere" "$tmp/dangling/dest/
 if build "$tmp/dangling/dest" --force >/dev/null; then fail "--force rebuilt a dest holding a dangling symlink"; fi
 eq "dangling-link dest untouched" "$(ls -A "$tmp/dangling/dest" | xargs)" "alpha link"
 # a telling dest path is refused in the eval modes, naming the word; "eval" itself is fine (the impossible build below uses it)
-for case in "--seed s15-run s15" "--control Control-runs control" "--impossible my.BUG bug" "--ws-seed s17-run s17" "--ws-control Seeds seed" "--decided s27-run s27" "--flow run-S28 s28"; do
+for case in "--seed s15-run s15" "--control Control-runs control" "--impossible my.BUG bug" "--ws-seed s17-run s17" "--ws-control Seeds seed" "--decided s27-run s27" "--ruled my-S27 s27" "--flow run-S28 s28"; do
   set -- $case
   if err=$(build_err "$tmp/named/$2/dest" "$1"); then fail "$1 accepted the dest path $2"; fi
   grep -qiF "\"$3\"" <<<"$err" || fail "$1 refusal does not name $3: $err"
@@ -474,6 +474,59 @@ for d in base s c w v eval/i eval/f; do
   eq "$d has no discounted_total" "$(git -C "$tmp/$d/dest/remotes/alpha.git" grep -l 'def discounted_total' feat/eval -- ledger || true)" ""
 done
 echo "ok --decided: the plain baseline plus docs/decisions.md (six dated rulings, R3 and R5 among them) on alpha, beta unchanged; feat/eval = feat/eval-base + a --no-ff merge of one commit 'Add discounted total', capped under 100000 and not from there on, its tests red when either side of the cap goes, no test naming the expired code or the edge; gate red only on known-red; origin $DOCS_BRANCH = feat/eval + one commit on README.md alone, whose bullet states the cap without the condition; alpha-receipt and alpha-discount in the args, alpha only, no base, no smoke; r3-oracle.sh silent without a receipt and on a faithful one, R3 on one that swallows the error (gate still green); no other mode has the log, the function or the docs branch"
+
+RULED_WS="[('alpha-receipt', 'alpha', 'feat/eval--alpha-receipt', 'sonnet', None, True)]"
+RECEIPT=feat/eval--alpha-receipt
+TELLS='decision|ruling|r3|log' # nothing that S27's agents are told of these two commits may point at the log
+NEW_TEST=tests.test_receipt.ReceiptTest.test_expired_code_prints_the_undiscounted_total
+refs() { local r; for r in alpha beta; do git -C "$1/remotes/$r.git" for-each-ref; done; }
+mkdir "$tmp/r"
+build "$tmp/r/dest" --ruled > "$tmp/out/ruled.json"
+own_dir_only r
+check_baseline "$tmp/r/dest" alpha "$RECEIPT"
+check_seeded "$tmp/r/dest" alpha feat/eval--alpha-discount 'Add discounted total' 'ledger/discount.py tests/test_discount.py' "$tmp/trees/r"
+b="$tmp/r/dest/remotes/alpha.git"
+eq "ruled alpha baseline = the plain baseline's" "$(git -C "$b" rev-parse "main^{tree}")" "$(git -C "$tmp/base/dest/alpha" rev-parse "main^{tree}")"
+eq "ruled feat/eval = --decided's without the log" "$(files_of "$b" feat/eval)" "$(files_of "$a" feat/eval | grep -v docs/decisions.md)"
+eq "the rulings beside the clones = --decided's in the repo" "$(cat "$tmp/r/dest/decisions.md")" "$log"
+for ref in $(heads "$b"); do
+  eq "no ruling on $ref" "$(git -C "$b" ls-tree -r --name-only "$ref" -- docs; git -C "$b" grep -lF "$R3" "$ref" || true)" ""
+  eq "no test on $ref but the fix's own names the expired code" "$(git -C "$b" grep -liE expired "$ref" -- tests)" "$([ "$ref" != "$RECEIPT" ] || echo "$ref:tests/test_receipt.py")"
+done
+eq "--decided is the fixture S28 was scored on (feat/eval--docs holds its whole history)" "$(git -C "$a" rev-parse "$DOCS_BRANCH")" 9f72a31a9f6da8f865b3a9801200991ee689c07f
+# the pre-pushed commits: what the author and the cycle-1 fixer would have left
+eq "receipt branch on feat/eval" "$(git -C "$b" rev-parse "$RECEIPT~2")" "$(git -C "$b" rev-parse feat/eval)"
+eq "receipt commits" "$(git -C "$b" log --format='%s: %an <%ae> %cn <%ce>' "feat/eval..$RECEIPT")" $'Print the undiscounted total for an expired code: Dev <dev@example.invalid> Dev <dev@example.invalid>\nAdd receipt line: Dev <dev@example.invalid> Dev <dev@example.invalid>'
+for rev in "$RECEIPT^" "$RECEIPT"; do eq "files of $rev" "$(git -C "$b" diff --name-only "$rev^" "$rev" | xargs)" "ledger/receipt.py tests/test_receipt.py"; done
+no_hints "receipt commits" "$(git -C "$b" log -p "feat/eval..$RECEIPT")" "$META_HINTS"
+no_hints "receipt messages and diff" "$(git -C "$b" log --format=%B "feat/eval..$RECEIPT"; git -C "$b" diff "feat/eval...$RECEIPT")" "$TELLS"
+eq "oracle at feat/eval, the parent and the tip" "$(r3_oracle "$b" feat/eval)|$(r3_oracle "$b" "$RECEIPT^")|$(r3_oracle "$b" "$RECEIPT")" "||R3"
+git clone -q --branch "$RECEIPT" "$b" "$tmp/trees/r-tip"
+eq "gate at the tip" "$(gate_failures "$tmp/trees/r-tip")" "$KNOWN_RED"
+git -C "$tmp/trees/r-tip" checkout -q HEAD^ -- ledger
+eq "the tip's new test alone is red on the parent's code" "$(gate_failures "$tmp/trees/r-tip")" "$(printf '%s\n' "$KNOWN_RED" "$NEW_TEST" | sort | xargs)"
+git -C "$tmp/trees/r-tip" checkout -q -f --detach HEAD^
+eq "gate at the parent" "$(gate_failures "$tmp/trees/r-tip")" "$KNOWN_RED"
+eq "parent's receipt lines" "$(py_in "$tmp/trees/r-tip" 'from ledger.receipt import receipt_line as r; print(*[r([{"amount": a}], c) for a, c in ((3500, "SAVE10"), (50, "NOPE"), (10000, "SAVE10"), (-3150, "NOPE"))], sep="|")')" 'Total: $3.15|Total: $0.05|Total: $9.50|Total: -$3.15'
+check_args "$tmp/out/ruled.json" "$tmp/r/dest" "$RULED_WS" no 1
+eq "ruled receipt workstream = --decided's" "$(arg "$tmp/out/ruled.json" 'a["workstreams"]')" "$(arg "$tmp/out/decided.json" 'a["workstreams"][:1]' | sed "s#$tmp/d/dest#$tmp/r/dest#g")"
+eq "decisionLog" "$(arg "$tmp/out/ruled.json" 'a["decisionLog"]')" "$tmp/r/dest/decisions.md"
+# --force: the log is this script's own file, whatever the next mode; a foreign entry or a directory of that name still is not
+first=$(refs "$tmp/r/dest")
+build "$tmp/r/dest" --ruled --force >/dev/null
+eq "ruled rebuild is reproducible" "$(refs "$tmp/r/dest"; cat "$tmp/r/dest/decisions.md")" "$first"$'\n'"$log"
+touch "$tmp/r/dest/notes.txt"
+if build "$tmp/r/dest" --ruled --force >/dev/null; then fail "--force rebuilt a ruled dest holding a foreign entry"; fi
+eq "ruled dest with a foreign entry untouched" "$(ls -A "$tmp/r/dest" | xargs)" "alpha beta decisions.md notes.txt remotes"
+rm "$tmp/r/dest/notes.txt"
+build "$tmp/r/dest" --force >/dev/null
+eq "a rebuild in another mode removes the log" "$(ls -A "$tmp/r/dest" | xargs)" "alpha beta remotes"
+mkdir -p "$tmp/foreign-log/dest/decisions.md"
+if build "$tmp/foreign-log/dest" --force >/dev/null; then fail "--force removed a directory named decisions.md"; fi
+mkdir -p "$tmp/linked-log/dest" && ln -s "$tmp/stamp" "$tmp/linked-log/dest/decisions.md"
+if build "$tmp/linked-log/dest" --force >/dev/null; then fail "--force removed a link named decisions.md"; fi
+for d in base s c w v eval/i eval/f d; do [ ! -e "$tmp/$d/dest/decisions.md" ] || fail "$d has a log beside the clones"; done
+echo "ok --ruled: the plain baseline and --decided's merge of 'Add discounted total', the same six rulings at <dest>/decisions.md and on no ref; origin $RECEIPT = feat/eval + 'Add receipt line' + 'Print the undiscounted total for an expired code' by Dev, each on ledger/receipt.py and tests/test_receipt.py, neither naming the log; oracle silent, then R3; gate red only on known-red at both, the fix's test red on the parent's code; alpha-receipt alone in the args, with the log's path; --force rebuilds the same refs, removes the log, refuses a foreign entry and a decisions.md that is no plain file; --decided still at S28's commit"
 
 # nothing outside the temp dir: sandboxed HOME/TMPDIR/cwd stay empty, this checkout and the global git config untouched
 for s in home tmp cwd; do eq "sandbox $s empty" "$(ls -A "$tmp/$s")" ""; done
