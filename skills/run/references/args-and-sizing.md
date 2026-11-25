@@ -51,9 +51,9 @@ arg here goes at the level its name or the example shows.
 | `repos[].reviewSharedEdits` | `false` | after a merge that applied shared-file edits, one opus `validator` checks exactly those commits (each edit against its intent, the gate, hygiene) inside the merge lock, so before the next merge lands; its findings (and a red gate) join the repo's whole-branch fix rounds. Opt-in, not automatic: defaults stay as before, and it costs one opus agent per such merge while the whole-branch validator already reruns every suite. Turn it on when shared edits are code-like (generated clients, lockfiles, contract digests) |
 
 **Step reports** (`stepTool`, optional): when a progress panel offers a step
-tool, read the `tools:` line of the implementer, reviewer and validator agent
-files; only if all three list it, pass its name as `stepTool`. Workers then
-report their steps with it.
+tool, read the `tools:` line of the agent files of the three settled types; only
+if all three list it, pass its name as `stepTool`. Workers then report their steps
+with it. The shipped agents list no step tool, so this needs the user's own.
 
 ## Sizing
 

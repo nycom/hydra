@@ -1,5 +1,5 @@
 // Agent types: `agentTypes` replaces a role's agent type, unset keeps the bare names, and the plugin ships one lean agent per role.
-// Every scenario fails against the 0.4.5 script and tree except the one marked (control).
+// Every scenario fails against the 0.4.5 script and tree except the ones marked (control).
 import { Run } from './run.mjs'
 import assert from 'node:assert'
 import { readFileSync, readdirSync } from 'node:fs'
@@ -52,12 +52,15 @@ await t('2 one role replaced: only that role changes, health probe included', as
 await t('3 all roles replaced: no bare name is left', async () => {
   const { used } = await run({ implementer: 'hydra:implementer', reviewer: 'my-reviewer', validator: 'a:b:c' })
   assert.deepEqual(used, ['a:b:c', 'hydra:implementer', 'my-reviewer']) })
-await t('4 null and {} behave as unset', async () => {
+await t('4 (control) null and {} behave as unset', async () => {
   for (const v of [null, {}]) assert.deepEqual((await run(v)).used, ROLES) })
 await t('5 an unknown role or a bad name throws', async () => {
   for (const v of [{ author: 'x' }, { reviewer: '' }, { reviewer: 'a b' }, { reviewer: 5 }, { reviewer: null }, { reviewer: 'a:' }, [], 'reviewer'])
     await assert.rejects(run(v), /agentTypes/, JSON.stringify(v)) })
-await t('6 the script has no literal agent type left', () => assert(!/agentType: '/.test(src)))
+// the run in 1-3 reaches 10 of the 18 sites; the source pins all of them, in order: V validator, I implementer, R reviewer
+await t('6 every agent call takes its type from TYPE, on its own role', () => {
+  const sites = [...src.matchAll(/agentType:\s*([^,}\s]+)/g)].map(m => m[1])
+  assert.equal(sites.map(s => ({ 'TYPE.implementer': 'I', 'TYPE.reviewer': 'R', 'TYPE.validator': 'V' })[s] ?? `?${s}`).join(''), 'VIVIRVIVIRVIVVVIVR') })
 
 await t('7 the plugin ships exactly the three agents, lean and untied to a model', () => {
   assert.deepEqual(readdirSync(new URL('agents/', root)).sort(), ROLES.map(r => `${r}.md`))
@@ -73,9 +76,10 @@ await t('7 the plugin ships exactly the three agents, lean and untied to a model
 await t('8 SKILL.md states the resolution: own agent first, then the shipped one, then stop; same types on a resume', () => {
   const p = core.split('\n\n').find(s => s.startsWith('**Agent types.**'))
   assert(p, 'the paragraph')
-  for (const re of [/agentTypes/, /hydra:<role>/, /bare name/, /resume/, /your own spawns/]) assert(re.test(p.replace(/\n/g, ' ')), String(re))
+  for (const re of [/agentTypes/, /hydra:<role>/, /bare name/, /resume/, /your own spawns/, /name a model on every/, /tell the user which type each role got/, /lacks Bash/]) assert(re.test(p.replace(/\n/g, ' ')), String(re))
   assert(core.indexOf('**Agent types.**') < core.indexOf('## 1. Decompose'), 'before section 1')
-  assert(/^\| `agentTypes` \| none \|/m.test(refs['args-and-sizing.md']), 'the args row') })
+  assert(/^\| `agentTypes` \| none \|/m.test(refs['args-and-sizing.md']), 'the args row')
+  assert(/^ {4}agentTypes: /m.test(refs['questions-and-resume.md'].split('```')[1]), 'the resumed call') })
 
 if (fails.length) { console.error(fails.join('\n')); process.exit(1) }
 console.log('agent type checks ok')

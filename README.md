@@ -26,6 +26,8 @@ One run per scenario on a small fixture; limits in evals/retros/.
 Interactive report: [evals/report.html](evals/report.html), open locally (GitHub shows source).
 <!-- eval:end -->
 
+These results were measured with the author's own agents; the shipped agents have not been scored yet.
+
 - One feature branch per repo. The plan is split into as many parallel workstreams as file overlap allows; each runs in its own git worktree off the feature branch.
 - Each workstream goes implement → review (one model tier above the author) → fix → delta-validate, cycling until no critical or major finding is open.
 - A finding that only a brief change can settle (the brief contradicts itself or the repo, or a fix would undo an earlier verified fix) becomes a question for the user, never a fix.
@@ -71,7 +73,7 @@ Hydra ships its three agents: `hydra:implementer`, `hydra:reviewer` and `hydra:v
 
 To replace one, put an agent with the bare name (`implementer`, `reviewer` or `validator`) in `~/.claude/agents/` or the project's `.claude/agents/`: yours is used instead, so an existing setup runs as before. For one run, name any agent type and Hydra passes it as `agentTypes`. Your agent's definition decides how much context every worker starts with; set `omitClaudeMd: true` to keep it lean. On the author's own agents, with another plugin's session-start text kept out too, first calls went from 17,000-19,000 to 6,500-8,200 tokens.
 
-Optional, for per-worker step bars in a progress mod that offers a step tool: add that tool to the `tools:` list of the implementer, reviewer and validator agent types, then pass `stepTool` (see `skills/run/references/args-and-sizing.md`).
+Optional, for per-worker step bars in a progress mod that offers a step tool: replace the three agents with your own, add that tool to their `tools:` lists, then pass `stepTool` (see `skills/run/references/args-and-sizing.md`).
 
 ## Tests
 

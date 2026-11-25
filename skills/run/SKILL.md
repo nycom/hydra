@@ -26,8 +26,12 @@ Agent tool's list, in this order: a type the user names for this run, the bare
 name if the list has it, else `hydra:<role>`. Pass each role that is not its bare
 name in `agentTypes`, and use the settled types for your own spawns too, wherever
 this skill names a role. Pass the same `agentTypes` on every resume; a run that
-started without it resumes without it. A type that is not in the list: stop and
-tell the user, the script would die on its first agent.
+started without it resumes without it. Before launch, tell the user which type each
+role got. If the list shows that a bare-name agent lacks Bash (or, for the
+implementer, Edit or Write), ask instead of assuming; a type that is not in the list
+at all: stop and say so, the script would die on its first agent. The shipped agents
+inherit your model, so name a model on every spawn of your own (a fix-up: the
+workstream's).
 
 The ladder governs the run (the ponytail plugin, if installed, states the same rules): the plan is authored ladder-first (reuse > stdlib >
 native > one line > minimum code; no speculative tasks); every review cycle hunts

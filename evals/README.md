@@ -63,6 +63,7 @@ Scenarios run `skills/run/workflow.js` directly. S16 is S20's call 1, so any row
 | resume, `carryForward`, state probe | S18, S20 (resume after a decision), S21 resumed leg |
 | `humanCheck` | S19 |
 | decisions, blocks | S20 (and S16), S21 resumed leg |
+| `agents/*.md` (the shipped agents) | every scenario, run with `agentTypes` set to the three `hydra:<role>` names and labelled so in `notes` |
 | agent definitions (the installed implementer, reviewer and validator files) | every scenario. Published runs use the author's own installed files unless `notes` says they ran on the shipped `hydra:<role>` agents |
 | fixture or oracle scripts | `skills/run/tests/fixture/build.test.sh`, then every scenario whose fixture mode changed |
 | scoring scripts only | none: re-score the saved records |

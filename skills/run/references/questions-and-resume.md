@@ -11,6 +11,7 @@ Read before asking the user about a paused or blocked run, and before any
     resume: "<id of the run being resumed>", // on every resumeFromRunId call: rebuilds workstream state from git
     decisions: { "api-auth": "edit the pinned test to half up" }, // only on the re-run after a block with a decision
     carryForward: <the resumed result's carryForward>, // on every resume, verbatim
+    agentTypes: { validator: "hydra:validator" }, // only if the resumed call had it, and exactly as it had it
   }
 ```
 
