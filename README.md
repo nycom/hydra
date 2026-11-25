@@ -26,7 +26,7 @@ One run per scenario on a small fixture; limits in evals/retros/.
 Interactive report: [evals/report.html](evals/report.html), open locally (GitHub shows source).
 <!-- eval:end -->
 
-These results were measured with the author's own agents; the shipped agents have not been scored yet.
+These results were measured with the author's own agents. The shipped agents ran three of these scenarios on 0.4.6, kept apart in `evals/runs-shipped/`: S16 pass, S17-seeded pass (recall 4/4, 0 false positives), S20 pass (all 3 criteria hold). One run per scenario, not a trend.
 
 - One feature branch per repo. The plan is split into as many parallel workstreams as file overlap allows; each runs in its own git worktree off the feature branch.
 - Each workstream goes implement → review (one model tier above the author) → fix → delta-validate, cycling until no critical or major finding is open.

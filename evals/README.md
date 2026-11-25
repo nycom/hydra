@@ -2,6 +2,8 @@
 
 Scored live runs of the quality scenarios in `skills/run/tests/fixture-scenarios.md` (S15 planted defects, S16 impossible task (scored from S20's call 1), S17 per-workstream seeds, and the pass/fail behaviour scenarios S18 resume after a dead agent, S19 two human checks in one repo, S20 contradiction with a decision, S21 fix outside `files[]`, S27 fix that breaks a binding decision and, with a provisional pass rule, S28 docs line that drops a condition), one JSON file per run in `runs/`. `report.mjs` turns them into `report.html` and the README snapshot.
 
+`runs-shipped/` holds the runs on the shipped `hydra:<role>` agents, in the same schema, with `notes` that say so. The report, its headline, the README block and `report.sha256` do not read it, so those scores never mix with the runs on the author's own agents in `runs/`; `report.test.mjs` validates its files. Score into it with `--out evals/runs-shipped`.
+
 Runs with `"demo": true` never mix with live runs: `report.mjs` refuses to build while both are present.
 
 ## Run file schema
@@ -64,7 +66,7 @@ Scenarios run `skills/run/workflow.js` directly. S16 is S20's call 1, so any row
 | `humanCheck` | S19 |
 | decisions, blocks | S20 (and S16), S21 resumed leg |
 | `decisionLog`, the binding-decisions text | S27 |
-| `agents/*.md` (the shipped agents) | every scenario, run with `agentTypes` set to the three `hydra:<role>` names and labelled so in `notes` |
+| `agents/*.md` (the shipped agents) | every scenario, run with `agentTypes` set to the three `hydra:<role>` names, saved in `runs-shipped/` and labelled so in `notes` |
 | agent definitions (the installed implementer, reviewer and validator files) | every scenario. Published runs use the author's own installed files unless `notes` says they ran on the shipped `hydra:<role>` agents |
 | fixture or oracle scripts | `skills/run/tests/fixture/build.test.sh`, then every scenario whose fixture mode changed |
 | scoring scripts only | none: re-score the saved records |

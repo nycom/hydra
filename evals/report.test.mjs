@@ -471,6 +471,10 @@ assert.throws(() => loadRuns(mixed), /delete evals\/runs\/demo-\*\.json before a
 fs.rmSync(path.join(mixed, 'demo-a.json')); assert.equal(loadRuns(mixed).length, 1)
 fs.rmSync(mixed, { recursive: true })
 
+// ---- runs-shipped: the same schema, read by nothing else, and every file says which agents it ran on ----
+const shipped = loadRuns(path.join(ROOT, 'evals/runs-shipped'))
+assert.ok(shipped.length && shipped.every(e => /shipped hydra:<role> agents/.test(e.run.notes)), 'evals/runs-shipped: a run without the label in notes')
+
 // ---- live headline keeps the void reason and uses the tile's honesty rule ----
 const liveRun = r => ({ file: `evals/runs/${r.id}.json`, text: '', run: { ...r, demo: false } })
 const voidRun = variant(seeded, r => { r.id = 'v'; r.defects = allCaught(); r.defects.D4 = discarded; r.recall = 1; r.verdict = 'void' })
