@@ -19,6 +19,7 @@ const agent = async (p, o) => {
   if (L.endsWith('recheck r1')) return { verdict: 'pass', sections: 's', sha: SHA(4), tests: 't', gate: { command: 'npm test', green: true, summary: '' }, findings: [], verified: ['W-F1'] }
   if (L.endsWith(' docs')) return { baseSha: SHA(4), sha: SHA(5), files: ['README.md'], prBody: false, ok: true, tests: 't', notes: [] }
   if (L.endsWith('docs validate')) return { verdict: 'fail', sections: 's', sha: SHA(5), tests: 't', gate: { command: 'npm test', green: true, summary: '' }, findings: [{ id: 'D-F1', severity: 'major', kind: 'docs', where: 'README', issue: 'wrong' }] }
+  if (L.endsWith('docs fix')) return { baseSha: SHA(5), sha: '', files: [], prBody: false, ok: true, tests: 't', notes: [] } // the round pushes nothing: the finding stays
   if (L.endsWith(' promote')) return { ok: true, sha: (p.match(/ to ([0-9a-f]{40})\./) || [])[1], notes: [] }
   throw new Error('unmocked ' + L)
 }

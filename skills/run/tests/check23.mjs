@@ -112,7 +112,7 @@ await t('2e (control) a validator\'s brief-conflict question is never offered to
 
 await t('2f a settle the delta validator rejects is not applied: fix c2 reverts, the question stays and is offered again', async () => {
   const { r, prompts } = await go({ cycles: 1, workstreams: [ws('a')] }, { ...fixWith({ settles: ['Q1'] }),
-    'a validate c1': () => ({ verified: ['c1-F1'], open: [{ ...F('v1-R1'), kind: 'regression' }] }), 'a validate c2': () => ({ verified: ['v1-R1'] }),
+    'a validate c1': () => ({ verified: ['c1-F1'], open: [{ ...F('v1-R1', 'major', 'y.py:3'), kind: 'regression' }] }), 'a validate c2': () => ({ verified: ['v1-R1'] }),
     'a fix c2': () => ({ answers: [{ id: 'v1-R1', action: 'fixed', note: 'reverted the flip' }] }) })
   assert(W(r, 'a').merged && prompts['a fix c2']?.includes(optional.q), 'offered to fix c2')
   assert(r.questions.some(q => q.q === `a: ${optional.q}`) && !W(r, 'a').notes.some(x => /settled the open question/.test(x)), JSON.stringify(r.questions)) })

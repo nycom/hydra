@@ -519,7 +519,7 @@ sha = the commit you validated. Ids: ${S}-F1, ${S}-F2, ...`,
 async function runWorkstream(w) {
   const tag = w.id
   const c = repoMap[w.repo].conf
-  const out = { id: w.id, branch: w.branch, status: '', sha: '', validatedSha: '', cyclesRun: 0, extended: false, findingsFixed: 0, open: [], sharedEdits: [], questions: [], notes: [], escalations: [], tests: '', gateTail: '', merged: false, preMergeSha: '', baseAtMerge: '', evidence: {}, findings: [], handed: [] }
+  const out = { id: w.id, branch: w.branch, status: '', sha: '', validatedSha: '', cyclesRun: 0, extended: false, findingsFixed: 0, open: [], sharedEdits: [], questions: [], notes: [], escalations: [], tests: '', gateTail: '', merged: false, preMergeSha: '', baseAtMerge: '', evidence: {}, findings: [], handed: [], churn: [] }
   const book = out.findings
   const decisions = [] // the author's reasoning, handed to every later reviewer and fixer
   const ledger = [] // settled findings: never re-raised unless the code under them changed
@@ -804,6 +804,22 @@ Return headSha, gate, evidence, verified (ids confirmed resolved, or whose answe
             t.rounds.add(i)
             t.answers.push(`c${i} ${g.id}: ${fix.answers.find(a => a.id === g.id)?.note || 'no answer'}`)
           }
+        // churn: a new regression blocker in a file this cycle's fix was asked to touch; a regression chain has a new id and line each cycle,
+        // so tries never counts it. Two cycles in a row stop the loop, one while an optional question is still open
+        const asks = new Set(found.map(fileOf).filter(Boolean))
+        const hit = [...new Set(carry.filter(f => blocking(f) && f.kind === 'regression' && !found.some(g => g.id === f.id) && asks.has(fileOf(f))).map(fileOf))]
+        if (hit.length) out.churn.push({ cycle: i, files: hit })
+        const open = softQs.filter(q => out.questions.includes(q)).map(q => q.q)
+        const twice = out.churn.at(-2)?.cycle === i - 1
+        if (hit.length && (twice || open.length)) {
+          out.open = carry
+          const pairs = out.churn.slice(twice ? -2 : -1).flatMap(c => c.files.map(f => [f, c.cycle]))
+          const broke = [...new Set(pairs.map(([f]) => f))].map(f => `${f} (${pairs.filter(([g]) => g === f).map(([, k]) => `c${k}`).join(', ')})`).join(', ')
+          const which = twice ? `the fixes of cycles ${i - 1} and ${i}` : `the fix of cycle ${i}`
+          const change = 'change the brief or spec so a fix is clear (say how)'
+          out.questions.push({ q: `heuristic churn: ${which} broke ${broke}${twice ? ' again' : ''}${open.length ? `, with an optional question still open: ${open.join(' | ')}` : ''}`, options: [change, 'run more cycles (raise maxCycles)', `drop this workstream (re-run with dropped: ["${w.id}"]; the rest merges and it is listed as not done)`], default: change })
+          return stop(`heuristic churn: ${which} broke ${broke}; returned to the user as a question`)
+        }
         // Surviving the opus round too, it is the user's call, not another patch.
         const spent = carry.filter(blocking).map(f => ({ f, t: triesOf(f) })).find(x => x.t?.rounds.size >= 3)
         if (spent) {
@@ -1183,8 +1199,9 @@ ${GIT(d.repo, 'docs-sync')}`,
     if (!o || !o.sha) return o
     if (rs && !same(o.baseSha, rs.sha)) return { ...o, verdict: 'fail', findings: [{ id: 'D-X', severity: 'critical', kind: 'docs', where: o.sha, issue: `docs started from ${o.baseSha}, but the whole-branch pass validated ${rs.sha}`, evidence: 'the script\'s own check' }] }
     // The docs commit becomes the repo's finalSha only once its own read-only validator passes it.
-    const v = await step(
-      `Validate the docs-sync commits on ${d.repo}, branch ${d.featureBranch}: git fetch${FETCH}, then ${o.baseSha}..${o.sha} on the side branch ${side}. They land after every other check: on a pass they are fast-forwarded onto ${d.featureBranch} and become its head. ${REFUTE}
+    const docsValidate = async (o, label) => {
+      const v = await step(
+        `Validate the docs-sync commits on ${d.repo}, branch ${d.featureBranch}: git fetch${FETCH}, then ${o.baseSha}..${o.sha} on the side branch ${side}. They land after every other check: on a pass they are fast-forwarded onto ${d.featureBranch} and become its head. ${REFUTE}
 Sections (verdict per section):
 1. Every changed doc line against the code it describes, at these pinned heads:
 ${PINS}
@@ -1194,13 +1211,43 @@ ${PINS}
 ${RO(d.repo, 'docs-val')}
 ${SEV}
 sha = the commit you validated. Ids: D-F1, D-F2, ...`,
-      { label: `${name(d.repo)} docs validate`, phase: 'Docs sync', agentType: TYPE.validator, model: 'opus', effort: 'high', schema: VERDICT, gated: !!gate })
-    noteFlaky(d.repo, v)
-    const vOk = v && same(v.sha, o.sha)
-    const findings = vOk ? [...v.findings, ...redGate(v, 'D-G')] : [{ id: 'D-X', severity: 'critical', kind: 'docs', where: o.sha, issue: v ? `docs validator saw ${v.sha}, docs pushed ${o.sha}` : died('docs validator', `${name(d.repo)} docs validate`), evidence: 'the script\'s own check' }]
-    if (!vOk || v.verdict !== 'pass' || findings.some(blocking)) return { ...o, verdict: 'fail', findings }
-    const why = await promote(d.repo, d.featureBranch, o.baseSha, o.sha, [side], `${name(d.repo)} docs promote`, 'Docs sync')
-    return { ...o, verdict: why ? 'fail' : 'pass', findings: why ? [...findings, { id: 'D-P', severity: 'critical', kind: 'docs', where: side, issue: `validated docs not promoted to ${d.featureBranch}: ${why}`, evidence: 'the promote step' }] : findings }
+        { label, phase: 'Docs sync', agentType: TYPE.validator, model: 'opus', effort: 'high', schema: VERDICT, gated: !!gate })
+      noteFlaky(d.repo, v)
+      const vOk = v && same(v.sha, o.sha)
+      const findings = vOk ? [...v.findings, ...redGate(v, 'D-G')] : [{ id: 'D-X', severity: 'critical', kind: 'docs', where: o.sha, issue: v ? `docs validator saw ${v.sha}, docs pushed ${o.sha}` : died('docs validator', label), evidence: 'the script\'s own check' }]
+      return { vOk, pass: vOk && v.verdict === 'pass' && !findings.some(blocking), findings }
+    }
+    let at = { ...o, fixRounds: 0 }
+    let { vOk, pass, findings } = await docsValidate(o, `${name(d.repo)} docs validate`)
+    // one fix round, then the whole range is validated again; a D-X is the script's own, nothing a docs fixer can settle
+    const fixLabel = `${name(d.repo)} docs fix`
+    if (vOk && findings.some(blocking) && !short(fixLabel)) {
+      const fix = await step(
+        `Docs fix round for ${d.repo}, branch ${d.featureBranch}. The docs validator left these open on the docs commit ${o.sha}:
+${JSON.stringify(findings)}
+${NOT_FEATURE}
+Set up: worktree docs-fix, detached at ${O}/${side} (expected ${o.sha}; if it moved, an earlier attempt of this step pushed it: continue from it); push back to ${side}, never to ${d.featureBranch}.
+Change only the doc lines the findings name, so each says what the code at these pinned heads does:
+${PINS}
+A finding you cannot settle without changing code: leave it and say so in notes.
+Nothing to change: no commit, no push, sha = the current ${O}/${side} head (${o.sha} unless an earlier attempt moved it), ok = true.
+${gate ? `${GATE(gate, knownRed, d.repo)}\nRed gate: do not push, ok=false.` : 'No gate for this repo.'}
+Before pushing: ${HYGIENE(`${o.sha}..HEAD`, d.repo)}
+${GIT(d.repo, 'docs-fix')}`,
+        { label: fixLabel, phase: 'Docs sync', agentType: TYPE.implementer, model: 'sonnet', schema: DOCS_OUT })
+      at.fixRounds = 1
+      at.notes = [...o.notes, ...(fix?.notes || [])]
+      if (fix?.ok && hex(fix.sha) && !same(fix.sha, o.sha) && !same(fix.sha, o.baseSha)) { // the feature head carries no docs commit
+        at.notes.push(`docs fix round: ${fix.sha} follows ${o.sha}, for ${findings.map(f => `${f.id} (${f.where}: ${f.issue})`).join('; ')}`)
+        at = { ...at, sha: fix.sha, files: [...new Set([...o.files, ...fix.files])], tests: fix.tests }
+        const re = await docsValidate(at, `${name(d.repo)} docs revalidate`)
+        pass = re.pass
+        findings = re.vOk ? re.findings : [...findings, ...re.findings] // no verdict on the fix: what it was asked to fix stays open
+      } else at.notes.push(fix ? `docs fix pushed nothing to validate (ok ${fix.ok}, sha "${fix.sha}"); check ${O}/${side} for an unvalidated push` : unusable('docs fix', side, fixLabel))
+    }
+    if (!pass) return { ...at, verdict: 'fail', findings }
+    const why = await promote(d.repo, d.featureBranch, o.baseSha, at.sha, [side], `${name(d.repo)} docs promote`, 'Docs sync')
+    return { ...at, verdict: why ? 'fail' : 'pass', findings: why ? [...findings, { id: 'D-P', severity: 'critical', kind: 'docs', where: side, issue: `validated docs not promoted to ${d.featureBranch}: ${why}`, evidence: 'the promote step' }] : findings }
   })),
   async () => driftRan ? step(
     `Drift audit, read-only: find every user-visible change that no decision-log line and no brief clause covers.
@@ -1225,7 +1272,8 @@ const docsOf = repo => {
   if (j < 0 || !shipped || paused || skipped.has(repo)) return null
   const d = docs?.[j]
   const verdict = d?.verdict || (d?.sha ? 'fail' : 'n/a')
-  return d ? { sha: d.sha, files: d.files, prBody: d.prBody, ok: d.ok, tests: d.tests, notes: d.sha && verdict !== 'pass' ? [...d.notes, `not promoted: docs commit ${d.sha} stays on ${DOCS[j].featureBranch}--docs`] : d.notes, verdict, findings: d.findings || [] } : { sha: '', files: [], prBody: false, ok: false, tests: '', notes: [died('docs agent', `${name(repo)} docs`)], verdict: 'fail', findings: [] }
+  const fixRounds = d?.fixRounds || 0
+  return d ? { sha: d.sha, files: d.files, prBody: d.prBody, ok: d.ok, tests: d.tests, notes: d.sha && verdict !== 'pass' ? [...d.notes, `not promoted: docs commit ${d.sha} stays on ${DOCS[j].featureBranch}--docs${fixRounds ? ' after one docs fix round' : ''}`] : d.notes, verdict, findings: d.findings || [], fixRounds } : { sha: '', files: [], prBody: false, ok: false, tests: '', notes: [died('docs agent', `${name(repo)} docs`)], verdict: 'fail', findings: [], fixRounds }
 }
 const docsOut = d => d && { ...d, findings: d.findings.map(brief) }
 // Contracts have no fix loop: an open cross-repo blocker is the user's call, with the contract check's own recipe.
@@ -1252,7 +1300,7 @@ return {
     const d = docsOf(r.repo)
     // docs that fail validation or promotion never reach the branch and fail the repo; so does a docs agent that died 3 times
     const docsFailed = d && (d.sha ? d.verdict !== 'pass' : d.verdict === 'fail')
-    return { ...r, verdict: docsFailed ? 'fail' : r.verdict, escalations: [...r.escalations, ...(docsFailed ? [d.sha ? `docs commit ${d.sha} left unpromoted on ${r.featureBranch}--docs` : `${died('docs agent', `${name(r.repo)} docs`)}; docs not synced`] : [])], open: [...r.open, ...(d?.findings || [])].map(brief), questions: uniqQ(r.questions), notes: uniq([...r.notes, ...(leftovers[r.repo] || []), ...(x => x.length ? [`not done (dropped): ${x.join(', ')}`] : [])(dropped.filter(id => byId[id].repo === r.repo))]), findings: [...r.findings, ...asLedger('docs', d?.findings)], docs: docsOut(d), finalSha: (d?.verdict === 'pass' && d.sha) || r.sha, flaky: flakyOf(r.repo) }
+    return { ...r, verdict: docsFailed ? 'fail' : r.verdict, escalations: [...r.escalations, ...(docsFailed ? [d.sha ? `docs commit ${d.sha} left unpromoted on ${r.featureBranch}--docs${d.fixRounds ? ' after one docs fix round' : ''}` : `${died('docs agent', `${name(r.repo)} docs`)}; docs not synced`] : [])], open: [...r.open, ...(d?.findings || [])].map(brief), questions: uniqQ(r.questions), notes: uniq([...r.notes, ...(leftovers[r.repo] || []), ...(x => x.length ? [`not done (dropped): ${x.join(', ')}`] : [])(dropped.filter(id => byId[id].repo === r.repo))]), findings: [...r.findings, ...asLedger('docs', d?.findings)], docs: docsOut(d), finalSha: (d?.verdict === 'pass' && d.sha) || r.sha, flaky: flakyOf(r.repo) }
   }),
   // crossRepo.ledger is the result key, not the prompt-side ledger of settled findings inside runWorkstream
   drift,

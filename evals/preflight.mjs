@@ -335,7 +335,7 @@ async function dry(c, args, { file = 'workflow.js', own = {} } = {}) {
     if (/ validate c\d+$/.test(label)) return reply({ headSha: heads[id], gate: GREEN, evidence: 'e', verified: asked, open: [], questions: [] })
     if (label.endsWith(' merge')) return reply({ ...PUSH, sha: tips[path.basename(w.repo)] = next(), preMergeSha: tip, baseAtMerge: tip })
     if (label.endsWith(' review')) return reply({ headSha: tip, findings: [], seams: 'none' })
-    if (label.endsWith(' docs')) return reply({ baseSha: tip, sha: '', files: [], prBody: false, ok: true, tests: 't', notes: [] })
+    if (/ docs( fix)?$/.test(label)) return reply({ baseSha: tip, sha: '', files: [], prBody: false, ok: true, tests: 't', notes: [] })
     if (label.endsWith(' validate')) return reply(verdict)
     if (label.endsWith(' promote')) return reply({ ok: true, sha: prompt.match(/ to ([0-9a-f]{40})/)?.[1], notes: [] })
     if (label === 'drift') return reply({ ok: true, notes: [], sections: 's', drift: [] })

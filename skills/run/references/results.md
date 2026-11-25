@@ -13,10 +13,14 @@ The top level is in SKILL.md, section 4.
   (e.g. `alpha-cents cycle 3`, `api whole-branch fix round 2`, `contracts`)
 - per workstream: `{id, branch, status, sha, validatedSha, cyclesRun, extended,
   findingsFixed, open, sharedEdits, questions, notes, escalations, tests,
-  gateTail, merged, preMergeSha, baseAtMerge, evidence, findings, handed}`, plus `decision` after a block with questions (empty list in `wholeBranch` stage);
+  gateTail, merged, preMergeSha, baseAtMerge, evidence, findings, handed, churn}`, plus `decision` after a block with questions (empty list in `wholeBranch` stage);
   `handed` = the one-line findings handed to the whole-branch pass (fix outside `files[]`);
   `evidence` maps each workstream validator step (`validate c1`, `validate c1 delta`, …) to the
-  commands it says it ran per step
+  commands it says it ran per step; `churn` = `[{cycle, files}]`, one entry per cycle whose
+  delta validation returned a new regression-kind blocker in a file that cycle's fixer was
+  asked to fix; two such cycles in a row, or one while an optional question of that
+  workstream is still open, stop it NOT merged with a heuristic churn question (change the
+  brief, the default; more cycles; drop it). A resume counts again
 - per repo: `{repo, featureBranch, sha, verdict, sections, seams, tests, fixRounds,
   open, questions, notes, escalations, findings, docs, finalSha, flaky, churn}`; `churn` =
   `[{round, files}]`, one entry per whole-branch round that brought a new regression-kind
@@ -32,10 +36,13 @@ The top level is in SKILL.md, section 4.
   whole-branch reviewer's seam inventory, one line per place a workstream's
   changed signature, field, config key, default, enum value or error shape is
   used by another workstream; `docs` =
-  `{sha, files, prBody, ok, tests, notes, verdict, findings}` (`sha` = the
-  docs commit on `<featureBranch>--docs`; it becomes `finalSha` only when
-  validated and promoted); a failed docs validation or promotion fails the
-  repo and names the unpromoted docs commit on `<featureBranch>--docs` in
+  `{sha, files, prBody, ok, tests, notes, verdict, findings, fixRounds}` (`sha` = the
+  docs commit on `<featureBranch>--docs`, the fix round's when it pushed one; it
+  becomes `finalSha` only when validated and promoted); `fixRounds` = 1 when a
+  critical or major from the docs validator got its one docs fix round, else 0
+  (none on the script's own `D-X`, none under the reserve: `stoppedBy` then lists
+  `<repo> docs fix`). A docs validation that still fails after that round, or a
+  failed promotion, fails the repo and names the unpromoted docs commit on `<featureBranch>--docs` in
   `escalations` and `docs.notes`; so does a docs agent that died 3 times (plus
   an escalation). Docs are skipped (`docs.notes`: `skipped: …`) when the repo's
   whole-branch pass failed
