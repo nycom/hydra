@@ -26,8 +26,9 @@ Agent tool's list, in this order: a type the user names for this run, the bare
 name if the list has it, else `hydra:<role>`. Pass each role that is not its bare
 name in `agentTypes`, and use the settled types for your own spawns too, wherever
 this skill names a role. Pass the same `agentTypes` on every resume; a run that
-started without it resumes without it. Before launch, tell the user which type each
-role got. If the list shows that a bare-name agent lacks Bash (or, for the
+started without it resumes without it. Before your first spawn, the plan review
+included, print one line for the user, whatever the types are:
+`Agent types: implementer = <type>, reviewer = <type>, validator = <type>`. If the list shows that a bare-name agent lacks Bash (or, for the
 implementer, Edit or Write), ask instead of assuming; a type that is not in the list
 at all: stop and say so, the script would die on its first agent. The shipped agents
 inherit your model, so name a model on every spawn of your own (a fix-up: the
@@ -167,6 +168,9 @@ Local-only runs read `<skill dir>/references/local-only.md` before this section.
   criteria, contracts with other workstreams/repos, which shared files it
   will need to change (as intents), and any pre-existing tests, snapshots or
   test-runner config the workstream is expected to change, delete or rename.
+  When two workstreams add entries to the same shared file and the order matters,
+  put the place in both briefs, each relative to the other ("after the A row if it
+  is there", "before the B row if it is there"): either may merge first.
   The workflow adds the git, gate, hygiene, hard-rule, shared-file and ladder
   rules — don't repeat them.
 
@@ -179,7 +183,7 @@ Local-only runs read `<skill dir>/references/local-only.md` before this section.
 When the workflow returns — success or failure — `CronDelete` it. The sweep
 SIGTERMs (never SIGKILLs) self-matching `pgrep -f` wait loops and orphaned
 runners; it only reports owned runners older than 3 h. Fine print: session
-crons fire only while the session is idle and expire after 7 days, and the
+crons fire only while the session is idle and expire after 30 days by default, and the
 sweep has only ever killed the fakes in its `--self-test`, never a real stuck loop.
 
 ```
@@ -191,6 +195,7 @@ Workflow({
     maxCycles: 4,                    // optional hard cap; default cycles+2, or 4 when cycles is null
     tokenBudget: 3000000,            // optional; output tokens this run may spend (budget.spent())
     tokenReserve: 600000,            // optional; default 600000
+    agentTypes: { implementer: "hydra:implementer", reviewer: "hydra:reviewer", validator: "hydra:validator" }, // only the roles not on their bare name; none: leave it out
     workstreams: [
       { id: "api-auth", repo: "~/code/api", featureBranch: "feat/auth",
         branch: "feat/auth--api-auth", model: "opus",
