@@ -103,11 +103,12 @@ test('preflight', par, async t => {
       const r = await passes('S20', { root, extra: [] })
       assert.match(r.out, /^ok   skills\/run\/tests\/check2\.mjs: passed on a retry, first[^]*timed out once/m) }],
     ['every check runs: build.test.sh, each check*.mjs and run-cmd.test.mjs; not report.test.mjs, red between scoring a run and the next snapshot', async () => {
-      const root = plugin(stub)
+      // run-cmd.test.mjs fails its first try, as a loaded machine makes it do: a retried check has run too
+      const root = plugin(d => { stub(d); fs.writeFileSync(path.join(d, 'skills/run/tests/run-cmd.test.mjs'), "import fs from 'node:fs'\nif (!fs.existsSync('seen-cmd')) { fs.writeFileSync('seen-cmd', ''); console.error('timed out once'); process.exit(1) }") })
       const r = await passes('S17-control', { root, extra: [] })
       const names = fs.readdirSync(path.join(root, 'skills/run/tests')).filter(f => /^check\d*\.mjs$/.test(f))
       assert.ok(names.length > 20)
-      for (const f of [...names, 'build.test.sh', 'run-cmd.test.mjs']) assert.ok(r.out.split('\n').some(l => l.startsWith('ok ') && l.endsWith(f)), `no ok line for ${f}`)
+      for (const f of [...names, 'build.test.sh', 'run-cmd.test.mjs']) assert.ok(r.out.split('\n').some(l => /^ok +/.test(l) && (l.endsWith(`/${f}`) || l.includes(`/${f}: passed on a retry, `))), `no ok line for ${f}`)
       assert.ok(!/report\.test/.test(r.out)) }],
     ['S21: after, scoped gate, docsRepos []', async () => {
       const a = (await passes('S21')).args()
