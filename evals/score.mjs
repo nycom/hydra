@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Scores a finished live eval from its saved Workflow records and writes the run file report.mjs validates (evals/README.md, skills/run/tests/fixture-scenarios.md).
 //   node evals/score.mjs --scenario S21 --version x.y.z --id <id> --date YYYY-MM-DD --record <wf_*.json> [--record <call 2> ...]
-//     [--session <coordinator .jsonl>] [--judge <answers.json>] [--reason ".."] [--notes <file>] [--void ".."] [--out evals/runs] [--force]
+//     [--trial <n>] [--session <coordinator .jsonl>] [--judge <answers.json>] [--reason ".."] [--notes <file>] [--void ".."] [--out evals/runs] [--force]
 // A record is <project>/<session>/workflows/wf_X.json. A resume overwrites it, so copy each call's record before the next call; a copy may sit anywhere.
 // Exit 0 = written; 2 = refused; 3 = a question only a reader can answer: stdout holds {judge}, hand it to an agent and pass its JSON back with --judge.
 import fs from 'node:fs'
@@ -11,7 +11,7 @@ import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 import { cost } from '../skills/run/cost.mjs'
-import { validate, passBar, DEFECTS, SCENARIOS, RUNS_DIR } from './report.mjs'
+import { validate, passBar, flowKeys, DEFECTS, SCENARIOS, RUNS_DIR } from './report.mjs'
 
 const TESTS = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../skills/run/tests')
 const die = msg => { console.error(`score.mjs: ${msg}`); process.exit(2) }
@@ -24,11 +24,12 @@ const list = (xs, sep = ', ') => xs.join(sep) || 'none'
 
 let opt
 try {
-  opt = parseArgs({ options: { ...Object.fromEntries(['scenario', 'version', 'id', 'date', 'session', 'judge', 'reason', 'notes', 'void', 'out'].map(k => [k, { type: 'string' }])), record: { type: 'string', multiple: true, default: [] }, force: { type: 'boolean' } } }).values
+  opt = parseArgs({ options: { ...Object.fromEntries(['scenario', 'version', 'id', 'date', 'trial', 'session', 'judge', 'reason', 'notes', 'void', 'out'].map(k => [k, { type: 'string' }])), record: { type: 'string', multiple: true, default: [] }, force: { type: 'boolean' } } }).values
 } catch (e) { die(e.message) }
 if (!SCENARIOS.includes(opt.scenario)) die(`--scenario must be one of ${SCENARIOS.join(', ')}`)
 for (const k of ['version', 'id', 'date']) if (!opt[k]) die(`--${k} is required`)
 if (!/^[\w.-]+$/.test(opt.id)) die('--id must be a plain file name')
+if (opt.trial !== undefined && !/^[1-9]\d*$/.test(opt.trial)) die('--trial must be an integer from 1')
 if (!opt.record.length) die('--record is required')
 if (opt.void && opt.scenario === 'S16') die('S16 has no void: score it or re-run it')
 const outFile = path.join(opt.out ?? RUNS_DIR, `${opt.id}.json`)
@@ -57,7 +58,10 @@ const calls = opt.record.map(file => ({ file, rec: json(file) })).sort((a, b) =>
   const ids = new Set(agents.map(a => a.agentId)), results = new Map(rows.filter(r => r.type === 'result' && r.result).map(r => [r.agentId, r.result]))
   return { rec, dir, rows, ids, agents, args: rec.args ?? {}, result: rec.result, ws: id => rec.result.workstreams?.find(w => w.id === id), out: label => agents.filter(a => bare(a.label) === label).map(a => results.get(a.agentId)).filter(Boolean).pop(), ran: re => agents.filter(a => re.test(bare(a.label))) }
 })
-const last = calls[calls.length - 1]
+const last = calls[calls.length - 1], { replay } = last.rec // replay.mjs: the review step alone, so never a scenario's run
+if (replay && opt.scenario !== 'S17-seeded') die('a replay scores S17-seeded only')
+if (replay && !opt.trial) die('a replay needs --trial')
+if (replay && path.resolve(opt.out ?? RUNS_DIR) === RUNS_DIR) die('a replay never goes into evals/runs: pass --out evals/replays')
 if (calls[0].args.resume) die(`${calls[0].rec.runId}: the first call given is itself a resume; pass the copy of call 1's record`)
 if (family === 'S16' && calls.length > 1) die('S16 is one call: S20\'s call 1')
 if (['S15', 'S17', 'S27', 'S28'].includes(family) && calls.length > 1) die(`${family} is scored from one call's record, ${calls.length} given: a resumed run cannot be scored, run it again`)
@@ -349,21 +353,41 @@ function s27() {
 
 function s28() {
   const c = last, { repo } = planned(c, 'alpha-discount'), r = c.result.repos?.find(x => x.repo === repo) ?? {}, docs = r.docs ?? {}, label = 'alpha docs validate', val = c.out(label)
-  const plan = { seeds: {}, yesNo: {}, candidates: [], notes: ['correctedDocsPromoted n/a: no docs fix round exists. A docs-only miss fails a repo whose code is correct: today\'s design, recorded and not judged.'], score: () => ({ fields: { flow: { reachedValidator: false, namedByDocsValidator: false, notPromoted: false, reportedFail: false } } }) }
+  const keys = flowKeys('S28', opt.version), fixes = keys.includes('oneFixRound') // from 0.4.8 a docs-only miss gets one docs fix round
+  const plan = { seeds: {}, yesNo: {}, candidates: [], notes: fixes ? [] : ['correctedDocsPromoted n/a: no docs fix round exists. A docs-only miss fails a repo whose code is correct: today\'s design, recorded and not judged.'], score: () => ({ fields: { flow: Object.fromEntries(keys.map(k => [k, false])) } }) }
   if (opt.void) return plan
   // the fixture says what was built, not the result: its docs commit is the one with this subject, its feat/eval tip the parent
   const origin = remote(repo) ?? need(repo, 'feat/eval'), at = rev => git(origin, 'rev-parse', '-q', '--verify', rev), planted = git(origin, 'rev-list', '--all', '--grep=^Update README for discounted_total$')?.split('\n').pop(), built = planted && at(`${planted}^`)
   if (!built) die(`${origin} does not hold the docs commit of build.sh --decided`)
+  const died = l => c.ran(new RegExp(`^${l}$`)).length && !c.out(l) ? `the ${l.replace('alpha ', '')} died` : undefined
   plan.voidReason = c.ran(/^alpha docs$/).length ? 'the fault never fired: an alpha docs agent ran'
     : !val ? (c.ran(new RegExp(`^${label}$`)).length ? 'the docs validator died' : `docs validate never ran: the whole-branch pass is ${r.sha ? `at ${r.sha.slice(0, 7)}` : 'not a pass'} (${list((docs.notes ?? []).map(tidy), '; ')})`)
-    : !isSha(val.sha, planted) ? `the docs validator saw ${val.sha}, the planted commit is ${planted}` : !isSha(r.sha, built) ? `the whole-branch pass validated ${r.sha}, the built tip is ${built}` : undefined
+    : !isSha(val.sha, planted) ? `the docs validator saw ${val.sha}, the planted commit is ${planted}` : !isSha(r.sha, built) ? `the whole-branch pass validated ${r.sha}, the built tip is ${built}`
+    : fixes ? died('alpha docs fix') ?? died('alpha docs revalidate') ?? (c.result.budget?.stoppedBy?.includes('alpha docs fix') ? 'the token reserve kept the docs fix round from starting' : undefined) : undefined
   if (plan.voidReason) return plan
-  plan.candidates = (r.findings ?? []).filter(f => f.stage === 'docs').map(cand('docs'))
+  // the result keeps the last validation's findings, so what the first one named before a fix round is read from its own answer
+  plan.candidates = (fixes ? val.findings ?? [] : (r.findings ?? []).filter(f => f.stage === 'docs')).map(cand('docs'))
   plan.seeds = { condition: 'README.md\'s line on discounted_total (or LEDGER_MAX_DISCOUNT) leaves out that the cap holds only for totals under 100000: a total of 100000 or more is uncapped, so the line is wrong for it.' }
-  plan.notes.push(`git: feat/eval ${at('feat/eval') === built ? 'is at the built tip' : 'moved'}, feat/eval--docs ${at('feat/eval--docs') === planted ? 'is at the planted commit' : 'is not'}.`)
-  const notPromoted = at('feat/eval') === built && at('feat/eval--docs') === planted && !c.ran(/^alpha docs promote$/).length && isSha(r.finalSha, built)
-  const reportedFail = docs.verdict === 'fail' && r.verdict === 'fail' && (r.escalations ?? []).some(e => /left unpromoted/.test(e))
-  plan.score = a => ({ fields: { flow: { reachedValidator: true, namedByDocsValidator: !!a.condition?.length, notPromoted, reportedFail } } })
+  const tip = at('feat/eval'), promoted = c.ran(/^alpha docs promote$/).length > 0
+  if (!fixes) {
+    plan.notes.push(`git: feat/eval ${tip === built ? 'is at the built tip' : 'moved'}, feat/eval--docs ${at('feat/eval--docs') === planted ? 'is at the planted commit' : 'is not'}.`)
+    const notPromoted = tip === built && at('feat/eval--docs') === planted && !promoted && isSha(r.finalSha, built)
+    const reportedFail = docs.verdict === 'fail' && r.verdict === 'fail' && (r.escalations ?? []).some(e => /left unpromoted/.test(e))
+    plan.score = a => ({ fields: { flow: { reachedValidator: true, namedByDocsValidator: !!a.condition?.length, notPromoted, reportedFail } } })
+    return plan
+  }
+  const fix = c.out('alpha docs fix'), re = c.out('alpha docs revalidate'), same = (x, y) => isSha(x, y ?? '') || isSha(y, x ?? '')
+  const corrected = tip !== planted && git(origin, 'merge-base', '--is-ancestor', planted, tip) !== null
+  const lines = corrected ? git(origin, 'diff', '-U0', built, tip, '--', 'README.md').split('\n').filter(l => /^\+[^+]/.test(l)).map(l => l.slice(1).trim()).join(' ') : ''
+  const onlyDocs = corrected && git(origin, 'diff', '--name-only', built, tip).split('\n').every(f => f.endsWith('.md'))
+  if (lines) plan.yesNo.statesCondition = `The promoted README.md lines are: "${one(lines)}". Do they say that the LEDGER_MAX_DISCOUNT cap holds only for totals under 100000 (a total of 100000 or more is uncapped), and nothing that contradicts it?`
+  plan.notes.push(`docs fix round: ${fix ? `fix ${fix.sha?.slice(0, 7)}` : 'no fix'}, ${re ? `revalidate ${re.verdict} at ${re.sha?.slice(0, 7)}` : 'no revalidate'}; git: feat/eval is at ${corrected ? `the corrected commit ${tip.slice(0, 7)}${onlyDocs ? '' : ', which changes more than docs'}` : tip === planted ? 'the planted commit' : tip === built ? 'the built tip' : `${tip.slice(0, 7)}, which lacks the docs commit`}.`)
+  plan.score = a => ({ fields: { flow: {
+    reachedValidator: true, namedByDocsValidator: !!a.condition?.length,
+    oneFixRound: docs.fixRounds === 1 && !!fix && !same(fix.sha, planted) && !!re && same(re.sha, fix.sha),
+    correctedDocsPromoted: corrected && onlyDocs && promoted && isSha(r.finalSha, tip) && !!a.statesCondition,
+    reportedPass: docs.verdict === 'pass' && r.verdict === 'pass' && !(r.escalations ?? []).some(e => /left unpromoted/.test(e)),
+  } } })
   return plan
 }
 
@@ -404,7 +428,7 @@ const computed = (voidReason ? `void: ${voidReason}` : criteria.length ? (failin
 const deaths = k => `[${perCall.flatMap(c => c[k]).join(', ')}]`
 const mergedWs = (last.result.workstreams ?? []).filter(w => w.merged), checks = mergedWs.map(w => inFeature(last, w))
 const notes = [
-  plan.lead ?? (calls.length === 1 ? 'One call.' : `${calls.length} calls.`),
+  replay ? `Replay of the review step only: the cycle-1 review prompt, captured from workflow.js with a mock agent, on a rebuilt head, run by evals/replay.mjs as the shipped reviewer (claude -p, model ${replay.model}, effort ${replay.effort}); the author was answered by a script, and no fix, validator, test guard or merge ran. It is no run of the scenario and never in the headline score.` : plan.lead ?? (calls.length === 1 ? 'One call.' : `${calls.length} calls.`),
   opt.notes && one(fs.readFileSync(opt.notes, 'utf8')),
   ...plan.notes, ...(scored.notes ?? []),
   `Per call: ${perCall.map(c => `${c.agents} agents, ${c.outputTokens} output tokens, ${c.wallMinutes} min`).join('; ')}. cost.mjs failed ${deaths('failed')}, unfinished ${deaths('unfinished')}.`,
@@ -413,7 +437,7 @@ const notes = [
   coordinator && `Coordinator session (not in cost): ${coordinator.calls} calls, ${coordinator.outputTokens} output tokens, context ${Object.entries(coordinator.context).map(([k, v]) => `${k} ${v}`).join(', ')}.`,
   `Answer-key grep: ${hits.length ? `${hits.length} hits in ${toolCalls} agent tool calls: ${hits.join(' | ')}` : `clean (${toolCalls} agent tool calls)`}.`,
 ].filter(Boolean).join(' ')
-const run = { id: opt.id, date: opt.date, hydraVersion: opt.version, scenario: opt.scenario, verdict: '', ...(voidReason && { voidReason }), reason: scored.reason ?? '', ...scored.fields, cost: total, notes }
+const run = { id: opt.id, date: opt.date, hydraVersion: opt.version, scenario: opt.scenario, ...(opt.trial && { trial: +opt.trial }), verdict: '', ...(voidReason && { voidReason }), reason: scored.reason ?? '', ...scored.fields, cost: total, notes }
 run.verdict = passBar(run)
 // free text never replaces what a run failed or was voided on; a seeded run's own tally is set in seeded()
 const reason = run.reason ||= run.verdict === 'pass' ? opt.reason ?? computed : [computed, opt.reason].filter(Boolean).join(': ')
