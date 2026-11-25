@@ -118,7 +118,17 @@ await t('2e a gate that turns green after a "carried" answer merges, and the gat
   assert.equal(a.merged, true)
   assert.deepEqual(a.handed, [])
   assert.equal(a.findings.find(e => e.id === 'v1-G')?.status, 'fixed', JSON.stringify(a.findings)) })
-await t('2f (control) a carried claim on a finding that is not the gate still hands over and merges', async () => {
+await t('2f a red gate answered "answered" and listed verified is not settled either: every gate finding stays open, none reaches the next reviewer as settled', async () => {
+  const sc = { 'a implement': RED['a implement'] }
+  for (const i of [1, 2]) {
+    sc[`a fix c${i}`] = p => ({ sharedEdits: EDITS, answers: ['v1-G', 'v2-G'].filter(id => p.includes(id)).map(id => ({ id, action: 'answered', note: 'README.md' })) })
+    sc[`a validate c${i}`] = p => /clean, but no validator/.test(p) ? red : { ...red, verified: ['v1-G'] }
+  }
+  const { a, prompts } = await go({ cycles: 1, maxCycles: 2, workstreams: [ws('a')] }, sc)
+  assert.equal(a.merged, false)
+  assert.deepEqual(a.findings.map(e => [e.id, e.status]), [['v1-G', 'open'], ['v2-G', 'open']])
+  assert(prompts['a review c2'] && !prompts['a review c2'].includes('Settled in earlier cycles')) })
+await t('2g (control) a carried claim on a finding that is not the gate still hands over and merges', async () => {
   const { a } = await go(one, { 'a review c1': () => ({ findings: [F('c1-F1')] }), 'a validate c1': () => ({ verified: ['c1-F1'] }),
     'a fix c1': () => ({ answers: [{ id: 'c1-F1', action: 'carried', note: 'b/util.js' }] }) })
   assert.equal(a.merged, true)
@@ -145,7 +155,9 @@ await t('3a the author and the fixer are told to make the shared-file change the
 await t('3b the fix prompt alone says a red gate is never carried', async () => {
   const { prompts } = await go({ cycles: 1, workstreams: [ws('a')], repos: hotRepo() }, { ...busy, ...valTwice(), ...wbFix })
   assert.deepEqual(holds(prompts, NEVER), ['a fix c1'])
-  assert.equal(count(prompts['a fix c1'], NEVER), 1) })
+  assert.equal(count(prompts['a fix c1'], NEVER), 1)
+  const open = await go({ cycles: 1, workstreams: [ws('a', { files: undefined })], repos: hotRepo() }, { ...busy, ...valTwice() })
+  assert(open.prompts['a fix c1'].includes(NEVER), 'no files[] too: the answer it asks for is the same') })
 await t('3c both workstream validators get the rerun sentence in their gate step, only with shared edits', async () => {
   const args = { cycles: 1, workstreams: [ws('a')], repos: hotRepo() }
   const { all, prompts } = await go(args, { ...busy, ...valTwice(), ...wbFix })

@@ -794,7 +794,7 @@ Return headSha, gate, evidence, verified (ids confirmed resolved, or whose answe
         for (const f of found)
           if (val.verified.includes(f.id)) {
             const status = fix.answers.find(a => a.id === f.id)?.action || 'fixed'
-            if (f.where === 'gate' && status === 'carried') continue // never handed, so only a green gate settles it
+            if (f.where === 'gate' && (status === 'carried' || !val.gate.green)) continue // never handed, and only a green gate settles it
             ledger.push({ id: f.id, where: f.where, issue: f.issue, status })
             settle(book, f.id, status)
           }
