@@ -37,6 +37,7 @@ arg here goes at the level its name or the example shows.
 | `acceptance` | none | absolute path to the approved case table. Validators run each row this change touches black-box at their sha; reviewers block only on a broken row or a regression vs the base, and a failing row blocks even when the base fails it. Security, data loss and a red gate stay critical. A missing file is a critical finding from validators and `blocked` for authors and fixers; reviewers get no missing-file instruction |
 | `decisionLog` | none | absolute path to the log of the user's answers; binding for every agent through the hard rules (a missing file is critical, or `blocked` (or `ok=false` with notes) for any agent that pushes). Setting it also turns on the drift audit: one read-only `fable` agent after the repos are final, skipped when nothing shipped, during a `humanCheck` pause or an `incomplete` repo, or when the token reserve is short. Result `drift: {verdict: pass\|drift\|failed\|died\|skipped, items: [{repo, where, change}], sections, notes}` (`failed` = the agent could not read the log or a repo; its items are kept under `drift.unconfirmed`, never questions); each item becomes a revert-by-default question, and a `died`, `failed` or reserve-`skipped` audit adds one question whose default re-runs `stage: "wholeBranch"` to audit drift |
 | `wbReviewModel` | repo's highest `reviewModel` | `sonnet`, `opus` or `fable`; overrides only the integrated whole-branch review model, not the workstream reviews |
+| `agentTypes` | none | an object that replaces the agent type of a role: `{implementer, reviewer, validator}`, each optional, each an agent type name as the Agent tool lists it (`hydra:validator`, `my-reviewer`). Unset: the bare role names. Prompts and models are unchanged. Keep it the same on every resume |
 | `stepTool` | none | a tool name (`/^[\w-]+$/`). When set, every worker prompt ends with a paragraph telling the worker to report its steps with that tool and to send `failed` only when its own attempt failed (findings and a red gate it was asked to run are results). Unset: prompts are unchanged. Adds about 55 tokens per agent |
 | `workstreams[].lite` | `false` | for small pure files: implement, then the clean-review validator alone (acceptance tests, full-range test guard, gate, trial merge); no reviewer ever runs. A critical or major it files gets a fix and a delta validation per cycle, capped by `maxCycles` as usual. Still merged, and covered by the whole-branch pass. A lite workstream alone on its untouched base gets no reviewer at all: the integrated review is skipped too, so only validators see it |
 | `workstreams[].humanCheck` | none | instructions for the user's by-eye check. Once this workstream merges, its repo's whole-branch pass waits for the answer; other merges do not (see Human checks in `<skill dir>/references/questions-and-resume.md`) |
@@ -50,9 +51,9 @@ arg here goes at the level its name or the example shows.
 | `repos[].reviewSharedEdits` | `false` | after a merge that applied shared-file edits, one opus `validator` checks exactly those commits (each edit against its intent, the gate, hygiene) inside the merge lock, so before the next merge lands; its findings (and a red gate) join the repo's whole-branch fix rounds. Opt-in, not automatic: defaults stay as before, and it costs one opus agent per such merge while the whole-branch validator already reruns every suite. Turn it on when shared edits are code-like (generated clients, lockfiles, contract digests) |
 
 **Step reports** (`stepTool`, optional): when a progress panel offers a step
-tool, read the `tools:` line of the implementer, reviewer and validator agent
-files; only if all three list it, pass its name as `stepTool`. Workers then
-report their steps with it.
+tool, read the `tools:` line of the agent files of the three settled types; only
+if all three list it, pass its name as `stepTool`. Workers then report their steps
+with it. The shipped agents list no step tool, so this needs the user's own.
 
 ## Sizing
 

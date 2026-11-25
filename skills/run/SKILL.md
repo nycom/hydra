@@ -1,6 +1,6 @@
 ---
 name: run
-description: Hydra (formerly "delegate"), a multi-repo delegation workflow — one feature branch per repo, decompose into max-parallel workstreams branched off it, then a saved Workflow script (workflow.js) implements each in an isolated worktree, runs review/fix/delta-validate cycles until no critical or major finding is open (named cycle count = floor), merges the validated SHA back to the feature branch with shared-file edits applied in order, runs a double whole-branch review, a cross-repo contract check and a validated docs sync. Coordinator (Fable) decomposes, sets up, briefs and makes the final call. Use when the user asks to implement with hydra or delegation, "in parallel", "spawn agents", "delegation run", "run this plan", or to execute a multi-repo/multi-workstream implementation plan.
+description: Hydra (formerly "delegate"), a multi-repo delegation workflow — parallel workstreams in worktrees, review/fix/validate cycles until clean, validated merges. Use when the user asks to implement with hydra or delegation, "in parallel", "spawn agents", "delegation run", "run this plan", or to execute a multi-repo/multi-workstream implementation plan.
 ---
 
 # Hydra
@@ -18,6 +18,20 @@ Every step runs as a typed agent: authors, fixers, merge, promote and docs as
 `implementer` (merge, promote and docs are told they are no feature task: no
 tests, no test-first, no self-review fix pass, nothing changed beyond their steps), reviewers as `reviewer`, validators, the contract
 check and the state and health probes as `validator`. An untyped step would start a far larger default context.
+
+**Agent types.** Hydra ships the three roles as `hydra:<role>` (for example
+`hydra:validator`). They are the default; an agent of the user's or the project's
+with the bare name replaces them. Before section 1, settle each role from the
+Agent tool's list, in this order: a type the user names for this run, the bare
+name if the list has it, else `hydra:<role>`. Pass each role that is not its bare
+name in `agentTypes`, and use the settled types for your own spawns too, wherever
+this skill names a role. Pass the same `agentTypes` on every resume; a run that
+started without it resumes without it. Before launch, tell the user which type each
+role got. If the list shows that a bare-name agent lacks Bash (or, for the
+implementer, Edit or Write), ask instead of assuming; a type that is not in the list
+at all: stop and say so, the script would die on its first agent. The shipped agents
+inherit your model, so name a model on every spawn of your own (a fix-up: the
+workstream's).
 
 The ladder governs the run (the ponytail plugin, if installed, states the same rules): the plan is authored ladder-first (reuse > stdlib >
 native > one line > minimum code; no speculative tasks); every review cycle hunts
