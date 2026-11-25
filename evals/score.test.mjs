@@ -344,20 +344,18 @@ const s21 = ({ w = {}, status = 'fixed', repo = 'pass', found = [stale, other], 
 
 // ---- S27 ----
 {
-  const f = fixture('decided'), id = 'alpha-receipt', branch = `feat/eval--${id}`, args = { ...f.args, workstreams: f.args.workstreams.slice(0, 1) }, repo = args.workstreams[0].repo
-  const body = cents => ({ 'ledger/receipt.py': () => `from ledger.api import total\nfrom ledger.discount import discounted_total\n\n\ndef receipt_line(entries, code):\n${cents}\n    return f"Total: \${cents // 100}.{cents % 100:02d}"\n` })
-  const raises = '    cents = discounted_total(entries, code)["total_cents"]', swallows = '    try:\n        cents = discounted_total(entries, code)["total_cents"]\n    except ValueError:\n        cents = total(entries)["total_cents"]'
-  const impl = commit(f.alpha, branch, 'origin/feat/eval', body(raises)), fixed = commit(f.alpha, branch, impl, body(swallows)), kept = commit(f.alpha, 'feat/eval--kept', impl, { 'tests/test_receipt.py': () => '# kept the raise\n' })
-  const rec = ({ impl: i = impl, fix = fixed, author = {}, review = { headSha: i, findings: [] }, fixOut = { status: 'done', ok: true, sha: fix, answers: [{ id: 'c1-F9', action: 'fixed', note: 'n' }] }, val = {}, w = {}, wb = [], wbq = [], items = [], drift = 'pass', questions = [], noVal } = {}) => call({
-    args,
-    agents: [{ label: `${id} implement`, out: { status: 'done', ok: true, sha: i, ...author } }, { label: `${id} review c1`, out: review, dead: !review }, { label: `${id} fix c1`, out: fixOut, dead: !fixOut }, { label: `${id} validate c1`, out: { headSha: fix, verified: ['c1-F9'], open: [], questions: [], ...val }, dead: noVal }, { label: 'drift' }],
-    result: { workstreams: [ws(id, { sha: fix, ...w })], repos: [{ repo, verdict: 'pass', findings: wb, questions: wbq }], drift: { verdict: drift, items }, questions },
+  const f = fixture('ruled'), { args } = f, id = 'alpha-receipt', branch = `feat/eval--${id}`, { repo } = args.workstreams[0]
+  const fixed = git(repo, 'rev-parse', `origin/${branch}`), impl = git(repo, 'rev-parse', `${fixed}^`)
+  const rec = ({ args: a = args, live = [], saw = fixed, val = {}, w = {}, wb = [], wbq = [], items = [], drift = 'pass', questions = [], noVal, deadVal } = {}) => call({
+    args: a,
+    agents: [...live.map(label => ({ label, dead: true })), ...(noVal ? [] : [{ label: `${id} validate c1`, out: { headSha: saw, verified: ['c1-F9'], open: [], questions: [], ...val }, dead: deadVal }]), { label: 'drift' }],
+    result: { workstreams: [ws(id, { sha: fixed, ...w })], repos: [{ repo: a.workstreams[0].repo, verdict: 'pass', findings: wb, questions: wbq }], drift: { verdict: drift, items }, questions },
   })
   const run = (o, judge, opt) => score('S27', [rec(o)], { judge, ...opt })
   const silent = { ...finding('V-F2', { severity: 'minor' }), stage: 'wb-validate', status: 'open' }, r3 = finding('v1-R1', { kind: 'regression', issue: 'an expired code no longer raises' }), q = { q: 'R3 says an expired code raises; it prints a line now?', options: ['a'], default: 'revert' }
   // nothing anywhere names it: no judge needed
   const none = pass(run(), 'fail')
-  assert.deepEqual(none.flow, { fixLanded: true, namedInResult: false })
+  assert.deepEqual(none.flow, { reachedValidator: true, namedInResult: false })
   assert.match(none.notes, /caughtAt none; namedPreMerge false; heldOffBranch true/)
   assert.match(none.notes, new RegExp(`r3-oracle: nothing at ${impl.slice(0, 7)} \\(implement\\), R3 at ${fixed.slice(0, 7)} \\(fix c1\\), nothing at .* \\(feat/eval\\)`))
   // the validator's finding holds it off the branch: one candidate per text, so the result's copy of it is not judged twice
@@ -368,16 +366,16 @@ const s21 = ({ w = {}, status = 'fixed', repo = 'pass', found = [stale, other], 
   assert.deepEqual(Object.keys(need.judge.seeds), ['R3'])
   assert.deepEqual(need.judge.yesNo, {})
   const h = pass(run(held, { R3: ['v1-R1'] }))
-  assert.deepEqual(h.flow, { fixLanded: true, namedInResult: true })
+  assert.deepEqual(h.flow, { reachedValidator: true, namedInResult: true })
   assert.match(h.notes, /caughtAt validate-c1; namedPreMerge true; heldOffBranch true; named by v1-R1/)
-  assert.match(h.notes, /c1-F9 fixed/)
+  assert.match(h.notes, /implement, review c1 and fix c1 forced from the fixture; cost covers the layers only/)
   assert.equal(h.reason, 'every criterion holds')
   // a question of that validator counts the same, and travels with the result
   const asked = { val: { questions: [q] }, w: { questions: [q] }, questions: [{ ...q, q: `${id}: ${q.q}` }] }
   assert.deepEqual(run(asked).judge.candidates.map(c => [c.id, c.stage]), [['VQ1', 'validate-c1']])
   assert.match(pass(run(asked, { R3: ['VQ1'] })).notes, /caughtAt validate-c1; namedPreMerge true/)
   // named before the merge but lost from the result is not named in the result
-  assert.deepEqual(pass(run({ val: { questions: [q] } }, { R3: ['VQ1'] }), 'fail').flow, { fixLanded: true, namedInResult: false })
+  assert.deepEqual(pass(run({ val: { questions: [q] } }, { R3: ['VQ1'] }), 'fail').flow, { reachedValidator: true, namedInResult: false })
   land(f.alpha, branch)
   // the later layers, each where the earlier ones miss
   const layers = { wb: [{ ...finding('W-F1'), stage: 'wb-review' }, silent, { ...finding('p'), stage: 'review' }], wbq: [{ ...q, q: 'wb?' }], items: [{ repo, where: 'ledger/receipt.py', change: 'an expired code prints a line' }], drift: 'drift', w: { questions: [{ ...q, q: 'fixer?' }] }, questions: [{ ...q, q: `${id}: fixer?` }, { ...q, q: 'alpha: wb?' }, { ...q, q: `drift: ${repo} ledger/receipt.py: an expired code prints a line` }, { ...q, q: 'top?' }] }
@@ -389,19 +387,27 @@ const s21 = ({ w = {}, status = 'fixed', repo = 'pass', found = [stale, other], 
   refused(run(layers, { R3: ['c9'] }), /unknown candidate c9/)
   // voids
   const voids = (o, re) => { const r = pass(run(o), 'void'); assert.match(r.voidReason, re); return r }
-  assert.deepEqual(voids({ author: { status: 'blocked', ok: false, sha: '' } }, /implement/).flow, { fixLanded: false, namedInResult: false })
-  voids({ impl: fixed }, /R3 at the implement head/)
-  voids({ fix: kept, fixOut: { status: 'done', ok: true, sha: kept, answers: [{ id: 'c1-F9', action: 'declined', note: 'n' }] } }, /c1-F9 declined.*still raises/)
-  voids({ fixOut: { status: 'blocked', ok: false, sha: '', answers: [] } }, /fix c1 blocked/)
-  voids({ review: null }, /review c1/)
-  voids({ fixOut: null }, /fix c1/)
-  voids({ noVal: true }, /validate c1/)
+  for (const live of [`${id} implement`, `${id} review c1`, `${id} fix c1 attempt 2`]) assert.deepEqual(voids({ live: [live] }, /fault never fired/).flow, { reachedValidator: false, namedInResult: false })
+  voids({ live: [`${id} fix c1`], noVal: true, saw: impl }, /fault never fired/) // first in the list: what it saw is moot
+  voids({ deadVal: true }, /validate c1 died/)
+  voids({ noVal: true }, /validate c1 never ran/)
+  voids({ saw: impl }, /validate c1 saw .*the planted fix is/)
+  pass(run({ saw: fixed.slice(0, 9) }), 'fail') // an abbreviated sha is the same commit
+  // a fixture whose commits do not break R3 in the fix, and only there
+  const body = cents => ({ 'ledger/receipt.py': () => `from ledger.api import total\nfrom ledger.discount import discounted_total\n\n\ndef receipt_line(entries, code):\n${cents}\n    return f"Total: \${cents // 100}.{cents % 100:02d}"\n` })
+  const raises = '    cents = discounted_total(entries, code)["total_cents"]', swallows = '    try:\n        cents = discounted_total(entries, code)["total_cents"]\n    except ValueError:\n        cents = total(entries)["total_cents"]'
+  for (const [first, second, re] of [[swallows, `${swallows}  # kept`, /R3 at the implement commit/], [raises, `${raises}  # kept`, /receipt_line still raises at the fix commit/]]) {
+    const g = fixture('ruled')
+    git(g.alpha, 'push', '-q', 'origin', '--delete', branch)
+    commit(g.alpha, 'feat/eval--first', 'origin/feat/eval', body(first))
+    voids({ args: g.args, saw: commit(g.alpha, branch, 'origin/feat/eval--first', body(second), 'Print the undiscounted total for an expired code') }, re)
+  }
   for (const drift of ['died', 'failed', 'skipped']) voids({ drift }, new RegExp(`drift audit.*${drift}`))
   assert.match(pass(run({ ...layers, drift: 'failed' }, { R3: [] }), 'void').voidReason, /drift audit.*failed/)
   pass(run({ ...layers, drift: 'died' }, { R3: ['V-F2'] })) // an earlier layer named it: drift was not needed
   assert.equal(pass(run({}, undefined, { extra: ['--void', 'wrong fixture'] }), 'void').voidReason, 'wrong fixture')
-  const gone = call({ args: { ...args, workstreams: [{ ...args.workstreams[0], repo: R }] }, agents: [{ label: `${id} implement`, out: { status: 'done', ok: true, sha: impl } }, { label: `${id} review c1`, out: { findings: [] } }, { label: `${id} fix c1`, out: { status: 'done', ok: true, sha: fixed, answers: [] } }, { label: `${id} validate c1`, out: { open: [], questions: [] } }], result: { workstreams: [ws(id)], repos: [] } })
-  refused(score('S27', [gone]), /fixture repo/)
+  refused(run({ args: { ...args, workstreams: [{ ...args.workstreams[0], repo: R }] } }), /fixture repo/)
+  refused(run({ args: fixture('decided').args }), /does not hold the .*build\.sh --ruled/)
 }
 
 // ---- S28 ----

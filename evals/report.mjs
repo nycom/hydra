@@ -17,7 +17,7 @@ const FLOW = {
   S19: ['askedOncePerHead', 'carriedHeadKeptAnswer', 'roundIncrements'],
   S20: ['sameWorkstreamResumed', 'editListedAuthorised', 'merged'],
   S21: ['carriedToWholeBranch', 'noCycleOnIt', 'wholeBranchFixed'],
-  S27: ['fixLanded', 'namedInResult'],
+  S27: ['reachedValidator', 'namedInResult'],
   S28: ['reachedValidator', 'namedByDocsValidator', 'notPromoted', 'reportedFail'],
 }
 // per scenario family; an S15 run holds D1..D8 (fixtures before D9 and D10) or D1..D10

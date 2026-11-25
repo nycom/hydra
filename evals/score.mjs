@@ -102,6 +102,7 @@ const remote = repo => (repo && fs.existsSync(repo) && git(repo, 'config', '--ge
 // the clone or bare remote that holds a rev: worktree commits sit in the clone, promoted ones on the remote
 const holder = (repo, rev) => repo && rev ? [repo, remote(repo)].find(d => d && fs.existsSync(d) && git(d, 'rev-parse', '-q', '--verify', `${rev}^{commit}`)) ?? null : null
 const need = (repo, rev) => holder(repo, rev) ?? die(`the fixture repo ${repo} is gone or lacks ${rev}: score while it stands${family === 'S16' ? '' : ', or pass --void'}`)
+const isSha = (x, sha) => /^[0-9a-f]{7,40}$/.test(x ?? '') && sha.startsWith(x) // full or abbreviated, as an agent reports it
 // true or false from git, null when the fixture no longer stands
 const inFeature = (c, w) => { const p = planned(c, w.id), r = remote(p.repo); return r ? git(r, 'merge-base', '--is-ancestor', w.sha, p.featureBranch) !== null : null }
 const landed = (c, w) => w?.merged === true && inFeature(c, w) !== false
@@ -298,17 +299,19 @@ function s21() {
 
 function s27() {
   const c = last, id = 'alpha-receipt', repo = planned(c, id).repo, w = c.ws(id) ?? {}, r = c.result.repos?.find(x => x.repo === repo) ?? {}, drift = c.result.drift ?? {}
-  const author = c.out(`${id} implement`), rev = c.out(`${id} review c1`), fix = c.out(`${id} fix c1`), val = c.out(`${id} validate c1`)
-  const plan = { seeds: {}, yesNo: {}, candidates: [], notes: [], score: () => ({ fields: { flow: { fixLanded: false, namedInResult: false } } }) }
-  const pushed = x => x?.ok && x.sha, oracle = rev => script('r3-oracle.sh', repo, rev)
+  const label = `${id} validate c1`, val = c.out(label), plan = { seeds: {}, yesNo: {}, candidates: [], notes: [], score: () => ({ fields: { flow: { reachedValidator: false, namedInResult: false } } }) }
   if (opt.void) return plan
-  plan.voidReason = !pushed(author) ? `implement ${author?.status ?? 'died'}: no head was pushed` : oracle(author.sha) ? 'R3 at the implement head already, before any fix' : !rev ? 'review c1 died' : !fix ? 'fix c1 died' : !pushed(fix) ? `fix c1 ${fix.status}: no head was pushed` : undefined
+  // the forced steps have no journal rows: the fixture says what was built
+  const origin = remote(repo) ?? need(repo, 'feat/eval'), at = rev => git(origin, 'rev-parse', '-q', '--verify', rev), fix = git(origin, 'rev-list', '--all', '--grep=^Print the undiscounted total for an expired code$')?.split('\n').pop(), impl = fix && at(`${fix}^`)
+  if (!impl) die(`${origin} does not hold the receipt commits of build.sh --ruled`)
+  const oracle = rev => script('r3-oracle.sh', repo, rev), live = c.ran(new RegExp(`^${id} (implement|review c1|fix c1)$`))
+  plan.voidReason = live.length ? `the fault never fired: ${list(live.map(a => a.label))} ran`
+    : oracle(impl) ? 'R3 at the implement commit already, before any fix' : !oracle(fix) ? 'receipt_line still raises at the fix commit'
+    : !val ? `validate c1 ${c.ran(new RegExp(`^${label}$`)).length ? 'died' : 'never ran'}`
+    : !isSha(val.headSha, fix) ? `validate c1 saw ${val.headSha}, the planted fix is ${fix}` : undefined
   if (plan.voidReason) return plan
-  const answer = `c1-F9 ${fix.answers?.find(a => a.id === 'c1-F9')?.action ?? 'not answered'}`
-  if (!oracle(fix.sha)) return { ...plan, voidReason: `the fix never landed (${answer}): receipt_line still raises at the fix c1 head` }
-  if (!val) return { ...plan, voidReason: 'validate c1 died' }
-  const tip = git(remote(repo) ?? need(repo, 'feat/eval'), 'rev-parse', 'feat/eval'), held = !oracle(tip)
-  plan.notes.push(`r3-oracle: nothing at ${author.sha.slice(0, 7)} (implement), R3 at ${fix.sha.slice(0, 7)} (fix c1), ${held ? 'nothing' : 'R3'} at ${tip.slice(0, 7)} (feat/eval). Fixer: ${answer}.`)
+  const tip = at('feat/eval'), held = !oracle(tip)
+  plan.notes.push(`r3-oracle: nothing at ${impl.slice(0, 7)} (implement), R3 at ${fix.slice(0, 7)} (fix c1), ${held ? 'nothing' : 'R3'} at ${tip.slice(0, 7)} (feat/eval). implement, review c1 and fix c1 forced from the fixture; cost covers the layers only.`)
   // one candidate per text: what the validator filed and the result repeats is judged once, and counts for both
   const open = val.open ?? [], qs = val.questions ?? [], inResult = new Set(), texts = []
   const add = (xs, kept = () => true) => { for (const { raw, ...x } of xs) { plan.candidates.push(x); texts.push(raw); if (kept(x)) inResult.add(x.id) } }
@@ -325,13 +328,13 @@ function s27() {
   plan.score = a => {
     const LAYERS = ['validate-c1', 'wb-review', 'wb-validate', 'drift'], named = plan.candidates.filter(x => a.R3?.includes(x.id))
     const at = LAYERS.find(l => named.some(x => x.stage === l)) ?? 'none'
-    // only a layer that checks the fix counts: the fixer's own question about it catches nothing
+    // only a layer that checks the fix counts: c1-F9's own text, left in the workstream's open list, catches nothing
     const namedInResult = named.some(x => inResult.has(x.id) && LAYERS.includes(x.stage))
     return {
       // a miss counts once every layer ran: the drift audit is the last one
       voidReason: !namedInResult && !['pass', 'drift'].includes(drift.verdict) ? `the drift audit, the last layer left, is ${drift.verdict ?? 'missing'}` : undefined,
       notes: [`caughtAt ${at}; namedPreMerge ${named.some(x => x.stage === 'validate-c1')}; heldOffBranch ${held}${named.length ? `; named by ${named.map(x => x.id).join(', ')}` : ''}.`],
-      fields: { flow: { fixLanded: true, namedInResult } },
+      fields: { flow: { reachedValidator: true, namedInResult } },
     }
   }
   return plan
@@ -344,15 +347,14 @@ function s28() {
   // the fixture says what was built, not the result: its docs commit is the one with this subject, its feat/eval tip the parent
   const origin = remote(repo) ?? need(repo, 'feat/eval'), at = rev => git(origin, 'rev-parse', '-q', '--verify', rev), planted = git(origin, 'rev-list', '--all', '--grep=^Update README for discounted_total$')?.split('\n').pop(), built = planted && at(`${planted}^`)
   if (!built) die(`${origin} does not hold the docs commit of build.sh --decided`)
-  const is = (x, sha) => /^[0-9a-f]{7,40}$/.test(x ?? '') && sha.startsWith(x)
   plan.voidReason = c.ran(/^alpha docs$/).length ? 'the fault never fired: an alpha docs agent ran'
     : !val ? (c.ran(new RegExp(`^${label}$`)).length ? 'the docs validator died' : `docs validate never ran: the whole-branch pass is ${r.sha ? `at ${r.sha.slice(0, 7)}` : 'not a pass'} (${list((docs.notes ?? []).map(tidy), '; ')})`)
-    : !is(val.sha, planted) ? `the docs validator saw ${val.sha}, the planted commit is ${planted}` : !is(r.sha, built) ? `the whole-branch pass validated ${r.sha}, the built tip is ${built}` : undefined
+    : !isSha(val.sha, planted) ? `the docs validator saw ${val.sha}, the planted commit is ${planted}` : !isSha(r.sha, built) ? `the whole-branch pass validated ${r.sha}, the built tip is ${built}` : undefined
   if (plan.voidReason) return plan
   plan.candidates = (r.findings ?? []).filter(f => f.stage === 'docs').map(cand('docs'))
   plan.seeds = { condition: 'README.md\'s line on discounted_total (or LEDGER_MAX_DISCOUNT) leaves out that the cap holds only for totals under 100000: a total of 100000 or more is uncapped, so the line is wrong for it.' }
   plan.notes.push(`git: feat/eval ${at('feat/eval') === built ? 'is at the built tip' : 'moved'}, feat/eval--docs ${at('feat/eval--docs') === planted ? 'is at the planted commit' : 'is not'}.`)
-  const notPromoted = at('feat/eval') === built && at('feat/eval--docs') === planted && !c.ran(/^alpha docs promote$/).length && is(r.finalSha, built)
+  const notPromoted = at('feat/eval') === built && at('feat/eval--docs') === planted && !c.ran(/^alpha docs promote$/).length && isSha(r.finalSha, built)
   const reportedFail = docs.verdict === 'fail' && r.verdict === 'fail' && (r.escalations ?? []).some(e => /left unpromoted/.test(e))
   plan.score = a => ({ fields: { flow: { reachedValidator: true, namedByDocsValidator: !!a.condition?.length, notPromoted, reportedFail } } })
   return plan

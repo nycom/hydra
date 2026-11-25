@@ -163,7 +163,7 @@ const fail21 = variant(flow18, r => { r.scenario = 'S21'; r.flow = { carriedToWh
 validate(fail21, 'x.json')
 assert.equal(headline(fail21), 'failed: wholeBranchFixed')
 assert.equal(matrixCell(fail21).text, 'fail')
-const flow27 = variant(flow18, r => { r.id = 'f27'; r.scenario = 'S27'; r.flow = { fixLanded: true, namedInResult: true } })
+const flow27 = variant(flow18, r => { r.id = 'f27'; r.scenario = 'S27'; r.flow = { reachedValidator: true, namedInResult: true } })
 const flow28 = variant(flow18, r => { r.id = 'f28'; r.scenario = 'S28'; r.flow = { reachedValidator: true, namedByDocsValidator: true, notPromoted: true, reportedFail: true } })
 for (const f of [flow27, flow28]) {
   validate(f, 'x.json')
