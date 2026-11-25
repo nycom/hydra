@@ -149,7 +149,7 @@ await t('4b (control) with no files[] declared, "carried" is not offered and the
 // ---- 5. gate wrapper and health probe ----
 await t('5a every gate run goes through the pipefail wrapper that prints the exit code last', async () => {
   const { all } = await go({ cycles: 1, workstreams: [ws('a', { gate: 'npm test | tee log; npm run lint' })] }, {})
-  const cmd = `bash -c 'set -eo pipefail\nnpm test | tee log; npm run lint'; echo "gate exit=$?"`
+  const cmd = `bash -c '(set -eo pipefail\nnpm test | tee log; npm run lint\n); echo "gate exit=$?"'`
   for (const L of ['a implement', 'a validate c1', 'a merge', 'one validate']) assert(all[L][0].includes(cmd) && /"gate exit=0" is green\. Any other exit is red/.test(all[L][0]), L) })
 await t('5d a known-red failure stops the wrapper\'s chain, so the gate prompt says it is allowed and the commands after it still run', async () => {
   const { all } = await go({ cycles: 1, workstreams: [ws('a')], repos: [{ repo: '/r/one', knownRed: ['t_upstream'] }] }, {})

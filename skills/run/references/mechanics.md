@@ -10,7 +10,9 @@ its first validator settles (`fixed`) each one the final head resolves, the rest
 ride into the fix round. Workstream validators are told which files are shared
 and that their edits land at the merge, so a brief criterion on a shared file is
 met by the author's `sharedEdits`; only an edit missing from that list is a
-finding. A converged review of a head no validator has seen yet (typically a clean
+finding. The cycle reviewer is told which files are shared too, and that a change
+missing from them is not a finding (not the whole-branch reviewer: there the
+edits are applied). A converged review of a head no validator has seen yet (typically a clean
 cycle 1) gets one validator pass before it can merge; if that validator finds a
 critical or major, the same cycle goes straight to the fix. A blocker that
 survives two fix rounds (same id, or same `where`) gets its next fix on opus
@@ -109,12 +111,26 @@ merge result without both SHAs, or a feature branch that had moved past its
 base always gets the integrated review.
 
 **Gate wrapper:** every gate an agent runs goes through one fixed wrapper,
-`bash -c 'set -eo pipefail\n<gate>'; echo "gate exit=$?"`, so a failure behind a
-pipe or a `;` chain is red, and only `gate exit=0` is green. A non-zero exit
+`bash -c '(set -eo pipefail\n<gate>\n); echo "gate exit=$?"'`, so a failure behind a
+pipe or a `;` chain is red, and only `gate exit=0` is green. It is one command: a
+pipe an agent appends (`| tail -8`) cannot replace the gate's exit code. A non-zero exit
 whose every failure is allowed by the green rules (known-red, known-flaky, or
 proven flaky by the rerun rule) is not red, but the wrapper stopped there, so the
 agent runs each later command through the wrapper too and judges them all.
 Nothing is pushed on a red gate.
+
+**A gate that reads a shared file:** no workstream commits a shared file, so a
+test that reads the README line a brief asks for would be red until the merge.
+The author and the fixer make such a change in their worktree, never staged, so
+their gate sees it, and return it in `sharedEdits`. A workstream validator whose
+gate is red on a test that reads a shared file applies the listed edits
+uncommitted in its throwaway worktree, reruns once and reports that run, with
+"shared edits applied" in `gate.summary` (the sentence is in its prompt only when
+the repo has a hot list and the author returned edits). The merge applies the
+edits for real and runs the full gate on the result before it pushes: that stays
+the proof, and a red there is a rejected merge. A red gate is never `carried`: the
+script neither hands a gate finding to the whole-branch pass nor settles it on
+that answer, and it stays open until a validator's gate is green.
 
 ## Integration and merges
 

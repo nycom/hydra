@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# Builds the hydra live-eval fixture for S15-S21, S27 and S28 (see ../fixture-scenarios.md):
+# Builds the hydra live-eval fixture for S15-S21 and S26-S28 (see ../fixture-scenarios.md):
 # bare remotes <dest>/remotes/{alpha,beta}.git, working clones <dest>/{alpha,beta},
 # branches main, feat/eval-base and feat/eval. Prints the Workflow args as JSON on stdout.
-#   build.sh <dest> [--seed|--control|--impossible|--ws-seed|--ws-control|--flow|--decided|--ruled] [--force]
+#   build.sh <dest> [--seed|--control|--impossible|--ws-seed|--ws-control|--flow|--decided|--ruled|--shared] [--force]
 set -euo pipefail
 
-usage() { echo "usage: build.sh <dest> [--seed|--control|--impossible|--ws-seed|--ws-control|--flow|--decided|--ruled] [--force]" >&2; exit 2; }
+usage() { echo "usage: build.sh <dest> [--seed|--control|--impossible|--ws-seed|--ws-control|--flow|--decided|--ruled|--shared] [--force]" >&2; exit 2; }
 dest='' mode='' force=''
 for a in "$@"; do
   case $a in
-    --seed|--control|--impossible|--ws-seed|--ws-control|--flow|--decided|--ruled) [ -z "$mode" ] || usage; mode=${a#--} ;;
+    --seed|--control|--impossible|--ws-seed|--ws-control|--flow|--decided|--ruled|--shared) [ -z "$mode" ] || usage; mode=${a#--} ;;
     --force) force=1 ;;
     -*) usage ;;
     *) [ -z "$dest" ] || usage; dest=$a ;;
@@ -125,6 +125,20 @@ EOF
   elif [ "$mode" = decided ] && [ "$repo" = alpha ]; then
     mkdir "$dest/alpha/docs"
     rulings > "$dest/alpha/docs/decisions.md"
+  elif [ "$mode" = shared ] && [ "$repo" = alpha ]; then # S26: a new module turns this red until its README line is there
+    cat > "$dest/alpha/tests/test_readme.py" <<'EOF'
+import pathlib
+import unittest
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+
+
+class ReadmeTest(unittest.TestCase):
+    def test_every_module_is_listed(self):
+        readme = (ROOT / "README.md").read_text()
+        modules = sorted(p.name for p in (ROOT / "ledger").glob("*.py") if p.name != "__init__.py")
+        self.assertEqual([m for m in modules if f"- `ledger/{m}`: " not in readme], [])
+EOF
   fi
 }
 
@@ -387,7 +401,7 @@ args = {
         {"repo": beta, "featureBranch": "feat/eval", "gate": gate},
     ],
 }
-if mode in ("seed", "control", "ws-seed", "ws-control"):
+if mode in ("seed", "control", "ws-seed", "ws-control", "shared"):
     # no smoke: it would flag D6 for free (S13 covers false-green smoke), and then no skillDir is needed
     args["workstreams"] = [{
         "id": "alpha-report", "repo": alpha, "featureBranch": "feat/eval",
@@ -417,6 +431,10 @@ if mode in ("seed", "control", "ws-seed", "ws-control"):
             "ledger/report.py exists on this branch, so the tests import it directly.")
         args["workstreams"] = [a]
         args["repos"], args["docsRepos"] = args["repos"][:1], args["docsRepos"][:1]
+    elif mode == "shared":  # S26: files[] leaves the README out, so a fixer could answer the red gate "carried"; no criterion reads docs
+        a = {k: v for k, v in args["workstreams"][0].items() if k != "base"}
+        args["workstreams"] = [{**a, "files": ["ledger/report.py", "tests/test_report.py"]}]
+        args["repos"], args["docsRepos"] = args["repos"][:1], []
 elif mode == "flow":  # S18, S19, S21: each scenario adds its own after/humanCheck (fixture-scenarios.md)
     args["workstreams"] = [{
         "id": "alpha-discount", "repo": alpha, "featureBranch": "feat/eval",
@@ -470,7 +488,7 @@ elif mode == "impossible":
     }]
 else:
     args["workstreams"] = []  # baseline only: add a workstream before the Workflow call
-if mode not in ("seed", "control", "ws-seed", "ws-control", "flow", "decided", "ruled"):  # flow: no false-green scenario, so no smoke and no skillDir
+if mode not in ("seed", "control", "ws-seed", "ws-control", "flow", "decided", "ruled", "shared"):  # flow: no false-green scenario, so no smoke and no skillDir
     args["repos"][0]["smoke"] = "bash scripts/smoke.sh"
     args = {"skillDir": "<fill: plugin skill base dir>", **args}
 print(json.dumps(args, indent=2))
