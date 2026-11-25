@@ -60,7 +60,7 @@ const calls = opt.record.map(file => ({ file, rec: json(file) })).sort((a, b) =>
 const last = calls[calls.length - 1]
 if (calls[0].args.resume) die(`${calls[0].rec.runId}: the first call given is itself a resume; pass the copy of call 1's record`)
 if (family === 'S16' && calls.length > 1) die('S16 is one call: S20\'s call 1')
-if ((family === 'S15' || family === 'S17') && calls.length > 1) die(`${family} is scored from one call's record, ${calls.length} given: a resumed run cannot be scored, run it again`)
+if (['S15', 'S17', 'S27', 'S28'].includes(family) && calls.length > 1) die(`${family} is scored from one call's record, ${calls.length} given: a resumed run cannot be scored, run it again`)
 // S16 is S20's call 1, so the later calls of that journal are not its business; every other scenario scores the whole run
 if (family !== 'S16') for (const c of calls) {
   const lost = c.rows.filter(r => r.type === 'started' && !taken.has(`${c.dir} ${r.agentId}`))
@@ -102,6 +102,7 @@ const remote = repo => (repo && fs.existsSync(repo) && git(repo, 'config', '--ge
 // the clone or bare remote that holds a rev: worktree commits sit in the clone, promoted ones on the remote
 const holder = (repo, rev) => repo && rev ? [repo, remote(repo)].find(d => d && fs.existsSync(d) && git(d, 'rev-parse', '-q', '--verify', `${rev}^{commit}`)) ?? null : null
 const need = (repo, rev) => holder(repo, rev) ?? die(`the fixture repo ${repo} is gone or lacks ${rev}: score while it stands${family === 'S16' ? '' : ', or pass --void'}`)
+const isSha = (x, sha) => /^[0-9a-f]{7,40}$/.test(x ?? '') && sha.startsWith(x) // full or abbreviated, as an agent reports it
 // true or false from git, null when the fixture no longer stands
 const inFeature = (c, w) => { const p = planned(c, w.id), r = remote(p.repo); return r ? git(r, 'merge-base', '--is-ancestor', w.sha, p.featureBranch) !== null : null }
 const landed = (c, w) => w?.merged === true && inFeature(c, w) !== false
@@ -140,10 +141,13 @@ function seeded(plan, discarded, a) {
     if (scored[0]?.stage === 'reviewer' && named.some(c => c.id.startsWith('A-D'))) primed++
   }
   const kept = Object.values(defects).filter(d => !d.discarded), caught = kept.filter(d => d.caught).length
-  const tally = `recall ${caught}/${kept.length}${family === 'S17' ? `, ${primed} primed` : ''}`
-  const claimed = /\b(\d+) primed\b/.exec(opt.reason ?? '')
-  if (family === 'S17' && claimed && +claimed[1] !== primed) die(`--reason says ${claimed[0]}, the answers give ${primed}`)
-  return { fields: { defects, recall: kept.length ? caught / kept.length : 0 }, notes, reason: claimed ? opt.reason : `${tally}${opt.reason ? `: ${opt.reason}` : ''}` }
+  // report.mjs reads the primed count from the reason, so what --reason restates must be right, and what it leaves out of the tally goes in front
+  const unsaid = [[/\brecall\D{0,5}(\d+\/\d+)|\b(\d+\/\d+)\s+recall\b/gi, `${caught}/${kept.length}`, `recall ${caught}/${kept.length}`], [/\b(\d+) primed\b/g, `${primed}`, family === 'S17' && `${primed} primed`]].flatMap(([re, now, text]) => {
+    const given = [...(opt.reason ?? '').matchAll(re)]
+    for (const m of given) if ((m[1] ?? m[2]) !== now) die(`--reason says ${m[0]}, the answers give ${now}`)
+    return given.length || !text ? [] : [text]
+  }).join(', ')
+  return { fields: { defects, recall: kept.length ? caught / kept.length : 0 }, notes, reason: [unsaid, opt.reason].filter(Boolean).join(': ') }
 }
 const falsePositives = (plan, a) => { const fp = plan.candidates.filter(c => a.falsePositives?.includes(c.id)); return { major: fp.filter(major).length, minor: fp.filter(f => !major(f)).length } }
 
@@ -296,8 +300,75 @@ function s21() {
   return plan
 }
 
+function s27() {
+  const c = last, id = 'alpha-receipt', repo = planned(c, id).repo, w = c.ws(id) ?? {}, r = c.result.repos?.find(x => x.repo === repo) ?? {}, drift = c.result.drift ?? {}
+  const label = `${id} validate c1`, val = c.out(label), plan = { seeds: {}, yesNo: {}, candidates: [], notes: [], score: () => ({ fields: { flow: { reachedValidator: false, namedInResult: false } } }) }
+  if (opt.void) return plan
+  // the forced steps have no journal rows: the fixture says what was built
+  const origin = remote(repo) ?? need(repo, 'feat/eval'), at = rev => git(origin, 'rev-parse', '-q', '--verify', rev), fix = git(origin, 'rev-list', '--all', '--grep=^Print the undiscounted total for an expired code$')?.split('\n').pop(), impl = fix && at(`${fix}^`)
+  if (!impl) die(`${origin} does not hold the receipt commits of build.sh --ruled`)
+  const oracle = rev => script('r3-oracle.sh', repo, rev), gone = l => c.ran(new RegExp(`^${l}$`)).length ? 'died' : 'never ran', live = c.ran(new RegExp(`^${id} (implement|review c1|fix c1)$`)), later = c.ran(new RegExp(`^${id} (review|fix|validate) c(?!1$)\\d+$`))
+  plan.voidReason = live.length ? `the fault never fired: ${list(live.map(a => a.label))} ran`
+    : later.length ? `a cycle past c1 ran: ${list(later.map(a => a.label))}, so the args were not preflight's`
+    : oracle(impl) ? 'R3 at the implement commit already, before any fix' : !oracle(fix) ? 'receipt_line still raises at the fix commit'
+    : !val ? `validate c1 ${gone(label)}`
+    : !isSha(val.headSha, fix) ? `validate c1 saw ${val.headSha}, the planted fix is ${fix}` : undefined
+  if (plan.voidReason) return plan
+  const tip = at('feat/eval'), held = !oracle(tip)
+  plan.notes.push(`r3-oracle: nothing at ${impl.slice(0, 7)} (implement), R3 at ${fix.slice(0, 7)} (fix c1), ${held ? 'nothing' : 'R3'} at ${tip.slice(0, 7)} (feat/eval). implement, review c1 and fix c1 forced from the fixture; cost covers the layers only.`)
+  // one candidate per text: what the validator filed and the result repeats is judged once, and counts for both
+  const open = val.open ?? [], qs = val.questions ?? [], inResult = new Set(), texts = []
+  const add = (xs, kept = () => true) => { for (const { raw, ...x } of xs) { plan.candidates.push(x); texts.push(raw); if (kept(x)) inResult.add(x.id) } }
+  const asks = (stage, p, list) => (list ?? []).filter(q => !texts.some(t => q.q.endsWith(t))).map((q, i) => ({ ...ask(stage, p)(q, i), raw: q.q }))
+  add(open.map(f => ({ ...cand('validate-c1')(f), raw: brief(f) })), x => (w.open ?? []).includes(brief(open.find(f => f.id === x.id))))
+  add(asks('validate-c1', 'VQ', qs), x => (w.questions ?? []).some(q => x.text.startsWith(one(`Question: ${q.q} Options:`))))
+  add((w.open ?? []).filter(o => !texts.includes(o)).map((o, i) => ({ id: `O${i + 1}`, stage: 'workstream', text: one(o), raw: o })))
+  add(asks('workstream', 'WQ', w.questions))
+  add((r.findings ?? []).filter(f => f.stage?.startsWith('wb-')).map(f => ({ ...cand(f.stage)(f), raw: brief(f) })))
+  add(asks('wb-validate', 'RQ', r.questions))
+  add((drift.items ?? []).map((d, i) => ({ id: `X${i + 1}`, stage: 'drift', text: one(`${d.where}: ${d.change}`), raw: `${d.where}: ${d.change}` })))
+  add(asks('question', 'TQ', c.result.questions))
+  plan.seeds = { R3: 'receipt_line in ledger/receipt.py no longer raises for an expired code (it answers with the undiscounted total, or a fix made it do so), or that this breaks the ruling that an expired code is an error for every caller (R3). A text that only asks for that change names nothing.' }
+  plan.score = a => {
+    const LAYERS = ['validate-c1', 'wb-review', 'wb-validate', 'drift'], named = plan.candidates.filter(x => a.R3?.includes(x.id))
+    const at = LAYERS.find(l => named.some(x => x.stage === l)) ?? 'none'
+    // only a layer that checks the fix counts: c1-F9's own text, left in the workstream's open list, catches nothing
+    const namedInResult = named.some(x => inResult.has(x.id) && LAYERS.includes(x.stage))
+    // a miss counts once every layer ran. A whole-branch agent that died, or two that saw different heads, fail the repo before their findings
+    // are kept and with no sha set, and the drift audit runs all the same: it is the last one
+    const unrun = w.merged !== true ? undefined : !c.out('alpha review') ? `the whole-branch review ${gone('alpha review')}` : !c.out('alpha validate') ? `the whole-branch validation ${gone('alpha validate')}`
+      : !r.sha ? `the whole-branch pass took nothing in (${list((r.escalations ?? []).map(tidy), '; ')})` : !isSha(r.sha, tip) ? `the whole-branch pass is at ${r.sha}, feat/eval at ${tip}` : undefined
+    return {
+      voidReason: namedInResult ? undefined : unrun ?? (['pass', 'drift'].includes(drift.verdict) ? undefined : `the drift audit, the last layer left, is ${drift.verdict ?? 'missing'}`),
+      notes: [`caughtAt ${at}; namedPreMerge ${named.some(x => x.stage === 'validate-c1')}; heldOffBranch ${held}${named.length ? `; named by ${named.map(x => x.id).join(', ')}` : ''}.`],
+      fields: { flow: { reachedValidator: true, namedInResult } },
+    }
+  }
+  return plan
+}
+
+function s28() {
+  const c = last, { repo } = planned(c, 'alpha-discount'), r = c.result.repos?.find(x => x.repo === repo) ?? {}, docs = r.docs ?? {}, label = 'alpha docs validate', val = c.out(label)
+  const plan = { seeds: {}, yesNo: {}, candidates: [], notes: ['correctedDocsPromoted n/a: no docs fix round exists. A docs-only miss fails a repo whose code is correct: today\'s design, recorded and not judged.'], score: () => ({ fields: { flow: { reachedValidator: false, namedByDocsValidator: false, notPromoted: false, reportedFail: false } } }) }
+  if (opt.void) return plan
+  // the fixture says what was built, not the result: its docs commit is the one with this subject, its feat/eval tip the parent
+  const origin = remote(repo) ?? need(repo, 'feat/eval'), at = rev => git(origin, 'rev-parse', '-q', '--verify', rev), planted = git(origin, 'rev-list', '--all', '--grep=^Update README for discounted_total$')?.split('\n').pop(), built = planted && at(`${planted}^`)
+  if (!built) die(`${origin} does not hold the docs commit of build.sh --decided`)
+  plan.voidReason = c.ran(/^alpha docs$/).length ? 'the fault never fired: an alpha docs agent ran'
+    : !val ? (c.ran(new RegExp(`^${label}$`)).length ? 'the docs validator died' : `docs validate never ran: the whole-branch pass is ${r.sha ? `at ${r.sha.slice(0, 7)}` : 'not a pass'} (${list((docs.notes ?? []).map(tidy), '; ')})`)
+    : !isSha(val.sha, planted) ? `the docs validator saw ${val.sha}, the planted commit is ${planted}` : !isSha(r.sha, built) ? `the whole-branch pass validated ${r.sha}, the built tip is ${built}` : undefined
+  if (plan.voidReason) return plan
+  plan.candidates = (r.findings ?? []).filter(f => f.stage === 'docs').map(cand('docs'))
+  plan.seeds = { condition: 'README.md\'s line on discounted_total (or LEDGER_MAX_DISCOUNT) leaves out that the cap holds only for totals under 100000: a total of 100000 or more is uncapped, so the line is wrong for it.' }
+  plan.notes.push(`git: feat/eval ${at('feat/eval') === built ? 'is at the built tip' : 'moved'}, feat/eval--docs ${at('feat/eval--docs') === planted ? 'is at the planted commit' : 'is not'}.`)
+  const notPromoted = at('feat/eval') === built && at('feat/eval--docs') === planted && !c.ran(/^alpha docs promote$/).length && isSha(r.finalSha, built)
+  const reportedFail = docs.verdict === 'fail' && r.verdict === 'fail' && (r.escalations ?? []).some(e => /left unpromoted/.test(e))
+  plan.score = a => ({ fields: { flow: { reachedValidator: true, namedByDocsValidator: !!a.condition?.length, notPromoted, reportedFail } } })
+  return plan
+}
+
 // ---- judge ------------------------------------------------------------------------------------
-const plan = { S15: s15, S16: s16, S17: s17, S18: s18, S19: s19, S20: s20, S21: s21 }[family]()
+const plan = { S15: s15, S16: s16, S17: s17, S18: s18, S19: s19, S20: s20, S21: s21, S27: s27, S28: s28 }[family]()
 if (opt.void) plan.voidReason = opt.void
 const lists = [...Object.keys(plan.seeds), ...(plan.fp ? ['falsePositives'] : [])], flags = Object.keys(plan.yesNo)
 // a void run measured nothing, and with no candidate there is nothing to read

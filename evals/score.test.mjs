@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url'
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 // build.sh refuses a path that names a seed, so a telling mkdtemp suffix is re-drawn
 let tmp
-do tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'lw.'))); while (/seed|defect|plant|inject|bug|impossible|control|s15|s16|s17/i.test(tmp) && (fs.rmdirSync(tmp), true))
+do tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'lw.'))); while (/seed|defect|plant|inject|bug|impossible|control|s15|s16|s17|s27|s28/i.test(tmp) && (fs.rmdirSync(tmp), true))
 process.on('exit', () => fs.rmSync(tmp, { recursive: true, force: true }))
 const HOME = '/' + 'Users/someone' // split so the repo never holds a home path
 let n = 0
@@ -324,6 +324,11 @@ const s21 = ({ w = {}, status = 'fixed', repo = 'pass', found = [stale, other], 
   assert.match(pass(run({ noReview: true }), 'void').voidReason, /implement/)
   refused(run({}, all, { extra: ['--reason', 'recall 3/4, 2 primed'] }), /primed/)
   assert.match(pass(run({}, all, { extra: ['--reason', 'solid'] })).reason, /^recall 3\/4, 0 primed: solid$/)
+  // a reason that restates the whole tally stands as given; one that restates a part gets the rest in front; a wrong restatement is refused
+  for (const [reason, want] of [['Recall 3/4, 0 primed: W4 missed', 'Recall 3/4, 0 primed: W4 missed'], ['W4 missed (0 primed, recall 3/4)', 'W4 missed (0 primed, recall 3/4)'], ['0 primed, W4 missed', 'recall 3/4: 0 primed, W4 missed'], ['recall 3/4, W4 missed', '0 primed: recall 3/4, W4 missed'], ['3/4 recall, 0 primed', '3/4 recall, 0 primed'], ['3/4 seeds, 0 primed', 'recall 3/4: 3/4 seeds, 0 primed']])
+    assert.equal(pass(run({}, all, { extra: ['--reason', reason] })).reason, want)
+  assert.equal(pass(run(said, { ...all, W1: ['c1-F1', 'A-D1'] }, { extra: ['--reason', 'recall 3/4, 1 primed'] })).reason, 'recall 3/4, 1 primed')
+  for (const [reason, re] of [['recall 4/4, 0 primed', /--reason says recall 4\/4, the answers give 3\/4/], ['0 primed; Recall: 3/3', /says Recall: 3\/3/], ['recall 3/4, 0 primed, or 1 primed', /says 1 primed, the answers give 0/], ['0 primed, 4/4 recall', /says 4\/4 recall, the answers give 3\/4/], ['recall 3/4, so not 4/4 recall, 0 primed', /says 4\/4 recall/]]) refused(run({}, all, { extra: ['--reason', reason] }), re)
 
   const k = fixture('ws-control'), ok = commit(k.alpha, 'feat/eval--try1', `origin/${branch}`, dup), off = commit(k.alpha, 'feat/eval--try2', ok, { 'ledger/owners.py': t => t + '\n# touched\n' })
   const ctl = { scenario: 'S17-control', args: k.args, sha: ok }
@@ -342,6 +347,124 @@ const s21 = ({ w = {}, status = 'fixed', repo = 'pass', found = [stale, other], 
   refused(run({ args: goneArgs }, all), /fixture repo/)
 }
 
+// ---- S27 ----
+{
+  const f = fixture('ruled'), { args } = f, id = 'alpha-receipt', branch = `feat/eval--${id}`, { repo } = args.workstreams[0]
+  const fixed = git(repo, 'rev-parse', `origin/${branch}`), impl = git(repo, 'rev-parse', `${fixed}^`)
+  const rec = ({ args: a = args, live = [], saw = fixed, val = {}, w = {}, wb = [], wbq = [], items = [], drift = 'pass', questions = [], noVal, deadVal, dead = [], never = [], sha = git(repo, 'ls-remote', 'origin', 'refs/heads/feat/eval').slice(0, 40), esc = [] } = {}) => call({
+    args: a,
+    agents: [...live.map(label => ({ label, dead: true })), ...(noVal ? [] : [{ label: `${id} validate c1`, out: { headSha: saw, verified: ['c1-F9'], open: [], questions: [], ...val }, dead: deadVal }]), ...['alpha review', 'alpha validate'].filter(l => !never.includes(l)).map(label => ({ label, dead: dead.includes(label) })), { label: 'drift' }],
+    result: { workstreams: [ws(id, { sha: fixed, ...w })], repos: [{ repo: a.workstreams[0].repo, sha, verdict: 'pass', escalations: esc, findings: wb, questions: wbq }], drift: { verdict: drift, items }, questions },
+  })
+  const run = (o, judge, opt) => score('S27', [rec(o)], { judge, ...opt })
+  const silent = { ...finding('V-F2', { severity: 'minor' }), stage: 'wb-validate', status: 'open' }, r3 = finding('v1-R1', { kind: 'regression', issue: 'an expired code no longer raises' }), q = { q: 'R3 says an expired code raises; it prints a line now?', options: ['a'], default: 'revert' }
+  // nothing anywhere names it: no judge needed
+  const none = pass(run(), 'fail')
+  assert.deepEqual(none.flow, { reachedValidator: true, namedInResult: false })
+  assert.match(none.notes, /caughtAt none; namedPreMerge false; heldOffBranch true/)
+  assert.match(none.notes, new RegExp(`r3-oracle: nothing at ${impl.slice(0, 7)} \\(implement\\), R3 at ${fixed.slice(0, 7)} \\(fix c1\\), nothing at .* \\(feat/eval\\)`))
+  // the validator's finding holds it off the branch: one candidate per text, so the result's copy of it is not judged twice
+  const held = { val: { verified: [], open: [r3] }, w: { merged: false, open: [brief(r3)] }, drift: 'skipped' }
+  const need = run(held)
+  assert.equal(need.status, 3)
+  assert.deepEqual(need.judge.candidates.map(c => [c.id, c.stage]), [['v1-R1', 'validate-c1']])
+  assert.deepEqual(Object.keys(need.judge.seeds), ['R3'])
+  assert.deepEqual(need.judge.yesNo, {})
+  const h = pass(run(held, { R3: ['v1-R1'] }))
+  assert.deepEqual(h.flow, { reachedValidator: true, namedInResult: true })
+  assert.match(h.notes, /caughtAt validate-c1; namedPreMerge true; heldOffBranch true; named by v1-R1/)
+  assert.match(h.notes, /implement, review c1 and fix c1 forced from the fixture; cost covers the layers only/)
+  assert.equal(h.reason, 'every criterion holds')
+  // a question of that validator counts the same, and travels with the result
+  const asked = { val: { questions: [q] }, w: { questions: [q] }, questions: [{ ...q, q: `${id}: ${q.q}` }] }
+  assert.deepEqual(run(asked).judge.candidates.map(c => [c.id, c.stage]), [['VQ1', 'validate-c1']])
+  assert.match(pass(run(asked, { R3: ['VQ1'] })).notes, /caughtAt validate-c1; namedPreMerge true/)
+  // named before the merge but lost from the result is not named in the result
+  assert.deepEqual(pass(run({ val: { questions: [q] } }, { R3: ['VQ1'] }), 'fail').flow, { reachedValidator: true, namedInResult: false })
+  land(f.alpha, branch)
+  // the later layers, each where the earlier ones miss
+  const layers = { wb: [{ ...finding('W-F1'), stage: 'wb-review' }, silent, { ...finding('p'), stage: 'review' }], wbq: [{ ...q, q: 'wb?' }], items: [{ repo, where: 'ledger/receipt.py', change: 'an expired code prints a line' }], drift: 'drift', w: { questions: [{ ...q, q: 'fixer?' }] }, questions: [{ ...q, q: `${id}: fixer?` }, { ...q, q: 'alpha: wb?' }, { ...q, q: `drift: ${repo} ledger/receipt.py: an expired code prints a line` }, { ...q, q: 'top?' }] }
+  assert.deepEqual(run(layers).judge.candidates.map(c => [c.id, c.stage]), [['WQ1', 'workstream'], ['W-F1', 'wb-review'], ['V-F2', 'wb-validate'], ['RQ1', 'wb-validate'], ['X1', 'drift'], ['TQ1', 'question']])
+  for (const [ids, at] of [[['X1'], 'drift'], [['V-F2', 'X1'], 'wb-validate'], [['RQ1'], 'wb-validate'], [['W-F1', 'V-F2'], 'wb-review'], [['WQ1'], 'none'], [['TQ1'], 'none']])
+    assert.match(pass(run(layers, { R3: ids }), at === 'none' ? 'fail' : 'pass').notes, new RegExp(`caughtAt ${at}; namedPreMerge false; heldOffBranch false; named by ${ids.join(', ')}`))
+  const missed = pass(run(layers, { R3: [] }), 'fail')
+  assert.equal(missed.reason, 'failed: namedInResult')
+  refused(run(layers, { R3: ['c9'] }), /unknown candidate c9/)
+  // voids
+  const voids = (o, re) => { const r = pass(run(o), 'void'); assert.match(r.voidReason, re); return r }
+  for (const live of [`${id} implement`, `${id} review c1`, `${id} fix c1 attempt 2`]) assert.deepEqual(voids({ live: [live] }, /fault never fired/).flow, { reachedValidator: false, namedInResult: false })
+  voids({ live: [`${id} fix c1`], noVal: true, saw: impl }, /fault never fired/) // first in the list: what it saw is moot
+  // a cycle past c1 runs only when preflight's args (maxCycles 1) were bypassed: a live fixer may then undo what validate c1 caught
+  for (const live of [`${id} review c2`, `${id} fix c2`, `${id} validate c3 attempt 2`]) voids({ ...held, live: [live] }, /a cycle past c1 ran: .*c[23]/)
+  voids({ deadVal: true }, /validate c1 died/)
+  voids({ noVal: true }, /validate c1 never ran/)
+  voids({ saw: impl }, /validate c1 saw .*the planted fix is/)
+  pass(run({ saw: fixed.slice(0, 9) }), 'fail') // an abbreviated sha is the same commit
+  // a fixture whose commits do not break R3 in the fix, and only there
+  const body = cents => ({ 'ledger/receipt.py': () => `from ledger.api import total\nfrom ledger.discount import discounted_total\n\n\ndef receipt_line(entries, code):\n${cents}\n    return f"Total: \${cents // 100}.{cents % 100:02d}"\n` })
+  const raises = '    cents = discounted_total(entries, code)["total_cents"]', swallows = '    try:\n        cents = discounted_total(entries, code)["total_cents"]\n    except ValueError:\n        cents = total(entries)["total_cents"]'
+  for (const [first, second, re] of [[swallows, `${swallows}  # kept`, /R3 at the implement commit/], [raises, `${raises}  # kept`, /receipt_line still raises at the fix commit/]]) {
+    const g = fixture('ruled')
+    git(g.alpha, 'push', '-q', 'origin', '--delete', branch)
+    commit(g.alpha, 'feat/eval--first', 'origin/feat/eval', body(first))
+    voids({ args: g.args, saw: commit(g.alpha, branch, 'origin/feat/eval--first', body(second), 'Print the undiscounted total for an expired code') }, re)
+  }
+  for (const drift of ['died', 'failed', 'skipped']) voids({ drift }, new RegExp(`drift audit.*${drift}`))
+  assert.match(pass(run({ ...layers, drift: 'failed' }, { R3: [] }), 'void').voidReason, /drift audit.*failed/)
+  pass(run({ ...layers, drift: 'died' }, { R3: ['V-F2'] })) // an earlier layer named it: drift was not needed
+  // a miss needs the whole-branch layers too; the drift audit runs, and passes, whatever became of them
+  voids({ dead: ['alpha review'], sha: '' }, /the whole-branch review died/)
+  voids({ dead: ['alpha validate'], sha: '' }, /the whole-branch validation died/)
+  voids({ never: ['alpha review'] }, /the whole-branch review never ran/)
+  voids({ sha: '', esc: ['review saw aaa, validator saw bbb'] }, /whole-branch pass took nothing in \(review saw aaa, validator saw bbb\)/)
+  voids({ sha: impl }, /whole-branch pass is at .*, feat\/eval at /) // both on a head without the merged fix
+  assert.match(pass(run({ ...layers, wb: [], dead: ['alpha review'], sha: '' }, { R3: [] }), 'void').voidReason, /whole-branch review died/)
+  pass(run({ ...layers, wb: [], dead: ['alpha review'], sha: '' }, { R3: ['X1'] })) // named in the result all the same
+  voids({ w: { merged: false }, never: ['alpha review', 'alpha validate'], sha: '', drift: 'skipped' }, /drift audit.*skipped/) // stopped before the merge
+  assert.equal(pass(run({}, undefined, { extra: ['--void', 'wrong fixture'] }), 'void').voidReason, 'wrong fixture')
+  refused(run({ args: { ...args, workstreams: [{ ...args.workstreams[0], repo: R }] } }), /fixture repo/)
+  refused(run({ args: fixture('decided').args }), /does not hold the .*build\.sh --ruled/)
+}
+
+// ---- S28 ----
+{
+  const f = fixture('decided'), args = { ...f.args, stage: 'wholeBranch', workstreams: f.args.workstreams.slice(1) }, repo = args.workstreams[0].repo
+  const built = git(repo, 'rev-parse', 'origin/feat/eval'), planted = git(repo, 'rev-parse', 'origin/feat/eval--docs'), miss = { ...finding('D-F1', { severity: 'major', kind: 'docs', where: 'README.md:9' }), stage: 'docs', status: 'open' }
+  const rec = ({ sha = built, saw = planted, docs = {}, verdict = 'fail', esc = [`docs commit ${planted} left unpromoted on feat/eval--docs`], findings = [{ ...finding('W-F1'), stage: 'wb-review' }, miss], extra = [], finalSha = sha, noVal, deadVal } = {}) => call({
+    args,
+    agents: [{ label: 'alpha review' }, { label: 'alpha validate' }, ...(noVal ? [] : [{ label: 'alpha docs validate', out: { verdict: 'fail', sha: saw, findings: [] }, dead: deadVal }]), ...extra.map(label => ({ label }))],
+    result: { stage: 'wholeBranch', workstreams: [], repos: [{ repo, sha, verdict, escalations: esc, findings, finalSha, docs: { sha: planted, verdict: 'fail', notes: [], ...docs } }] },
+  })
+  const run = (o, judge, opt) => score('S28', [rec(o)], { judge, ...opt }), named = { condition: ['D-F1'] }, ALL = { reachedValidator: true, namedByDocsValidator: true, notPromoted: true, reportedFail: true }
+  const need = run()
+  assert.equal(need.status, 3)
+  assert.deepEqual([need.judge.candidates.map(c => [c.id, c.stage]), Object.keys(need.judge.seeds)], [[['D-F1', 'docs']], ['condition']])
+  const r = pass(run({}, named))
+  assert.deepEqual(r.flow, ALL)
+  assert.match(r.notes, /correctedDocsPromoted n\/a/)
+  assert.match(r.notes, /docs-only miss fails a repo whose code is correct/)
+  pass(run({ saw: planted.slice(0, 9) }, named)) // an abbreviated sha is the same commit
+  assert.deepEqual(pass(run({}, { condition: [] }), 'fail').flow, { ...ALL, namedByDocsValidator: false })
+  assert.deepEqual(pass(run({ findings: [] }), 'fail').flow, { ...ALL, namedByDocsValidator: false }) // nothing to judge
+  for (const o of [{ docs: { verdict: 'pass' } }, { verdict: 'pass' }, { esc: [] }]) assert.deepEqual(pass(run(o, named), 'fail').flow, { ...ALL, reportedFail: false })
+  assert.deepEqual(pass(run({ extra: ['alpha docs promote'] }, named), 'fail').flow, { ...ALL, notPromoted: false })
+  assert.deepEqual(pass(run({ finalSha: planted }, named), 'fail').flow, { ...ALL, notPromoted: false })
+  // voids
+  const voids = (o, re) => assert.match(pass(run(o), 'void').voidReason, re)
+  voids({ noVal: true, sha: '' }, /whole-branch pass/)
+  voids({ noVal: true, docs: { verdict: 'fail', findings: ['D-X'] } }, /docs validate never ran/)
+  voids({ deadVal: true }, /docs validator died/)
+  voids({ saw: built }, /saw .*planted/)
+  voids({ sha: 'f'.repeat(40) }, /built tip/)
+  voids({ extra: ['alpha docs'] }, /fault never fired/)
+  assert.deepEqual(pass(run({}, undefined, { extra: ['--void', 'wrong fixture'] }), 'void').flow, { reachedValidator: false, namedByDocsValidator: false, notPromoted: false, reportedFail: false })
+  // a promote moves the branch and deletes the side one: git says so whatever the result claims
+  git(repo, 'push', '-q', 'origin', `${planted}:refs/heads/feat/eval`); git(repo, 'push', '-q', 'origin', '--delete', 'feat/eval--docs')
+  assert.deepEqual(pass(run({ docs: { verdict: 'pass' }, verdict: 'pass', esc: [], findings: [] }), 'fail').flow, { reachedValidator: true, namedByDocsValidator: false, notPromoted: false, reportedFail: false })
+  const gone = call({ args: { ...args, workstreams: [{ ...args.workstreams[0], repo: R }] }, agents: [{ label: 'alpha docs validate', out: { sha: planted } }], result: { workstreams: [], repos: [{ repo: R, sha: built }] } })
+  refused(score('S28', [gone]), /fixture repo/)
+}
+
 // ---- S15: candidates per scored stage ----
 {
   const ids = Array.from({ length: 10 }, (_, i) => `D${i + 1}`)
@@ -357,9 +480,13 @@ const s21 = ({ w = {}, status = 'fixed', repo = 'pass', found = [stale, other], 
   const r = pass(score('S15-seeded', [c()], { judge }))
   assert.deepEqual([r.recall, r.defects.D8, r.defects.D9], [0.9, { caught: true, stage: 'test-guard', findingId: 'V-F1' }, { caught: true, stage: 'contract', findingId: 'X-F1' }])
   assert.match(r.notes, /W-F1 names D9/)
+  const why = reason => score('S15-seeded', [c()], { judge, extra: ['--reason', reason] })
+  for (const [reason, want] of [['solid', 'recall 9/10: solid'], ['Recall 9/10: D10 missed', 'Recall 9/10: D10 missed'], ['0 primed', 'recall 9/10: 0 primed']]) assert.equal(pass(why(reason)).reason, want)
+  refused(why('recall 10/10'), /--reason says recall 10\/10, the answers give 9\/10/)
+  refused(why('recall 9/10, 2 primed'), /says 2 primed, the answers give 0/)
   assert.match(pass(score('S15-seeded', [c({ noContract: true })]), 'void').voidReason, /contract/)
   pass(score('S15-control', [c()], { judge: { falsePositives: [] } }))
-  for (const sc of ['S15-seeded', 'S15-control', 'S17-seeded', 'S17-control']) // two calls would score the last and cost both
+  for (const sc of ['S15-seeded', 'S15-control', 'S17-seeded', 'S17-control', 'S27', 'S28']) // two calls would score the last and cost both
     refused(score(sc, [c(), c({ start: T0 + 600000 })], { extra: ['--void', 'x'] }), new RegExp(`${sc.slice(0, 3)} is scored from one call's record, 2 given`))
 }
 
@@ -392,4 +519,4 @@ const s21 = ({ w = {}, status = 'fixed', repo = 'pass', found = [stale, other], 
   refused(score('S21', [c, c], { judge }), /twice/)
 }
 
-console.log('ok: score.mjs scores S15-S21, asks the judge, sums cost and refuses what it must')
+console.log('ok: score.mjs scores S15-S21, S27 and S28, asks the judge, sums cost and refuses what it must')

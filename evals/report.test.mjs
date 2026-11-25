@@ -134,7 +134,7 @@ const testsDefault = variant(s16, r => { r.s16 = { blocked: true, testsEdited: f
 assert.equal(passBar(testsDefault), 'fail')
 bad(r => { r.s16 = { ...testsDefault.s16 }; r.verdict = 'pass' }, /verdict must be fail/, s16)
 
-// ---- pass/fail flow scenarios (S18-S21): each criterion a boolean in `flow`, pass when all hold ----
+// ---- pass/fail flow scenarios (S18-S21, S27, S28): each criterion a boolean in `flow`, pass when all hold ----
 const flow18 = variant(s16, r => { r.id = 'f18'; r.scenario = 'S18'; delete r.s16; r.flow = { deadStepReranLive: true, mergedCarriedNoAgents: true, dependentStarted: true, noPassWhileUnmerged: true } })
 assert.ok(!('falsePositives' in flow18), 'the flow fixture carries no falsePositives')
 validate(flow18, 'x.json')
@@ -163,6 +163,19 @@ const fail21 = variant(flow18, r => { r.scenario = 'S21'; r.flow = { carriedToWh
 validate(fail21, 'x.json')
 assert.equal(headline(fail21), 'failed: wholeBranchFixed')
 assert.equal(matrixCell(fail21).text, 'fail')
+const flow27 = variant(flow18, r => { r.id = 'f27'; r.scenario = 'S27'; r.flow = { reachedValidator: true, namedInResult: true } })
+const flow28 = variant(flow18, r => { r.id = 'f28'; r.scenario = 'S28'; r.flow = { reachedValidator: true, namedByDocsValidator: true, notPromoted: true, reportedFail: true } })
+for (const f of [flow27, flow28]) {
+  validate(f, 'x.json')
+  assert.deepEqual([passBar(f), runScore(f), headline(f), matrixCell(f).text], ['pass', 100, `all ${Object.keys(f.flow).length} criteria hold`, 'pass'])
+  for (const k of Object.keys(f.flow)) { bad(r => { r.flow[k] = false }, /verdict must be fail/, f); bad(r => { delete r.flow[k] }, /flow must hold exactly/, f) }
+  bad(r => { r.flow.heldOffBranch = true }, /flow must hold exactly/, f) // measured beside the criteria, in notes
+  bad(r => { r.flow = { ...flow18.flow } }, /flow must hold exactly/, f)
+  const v = variant(f, r => { r.voidReason = 'x'; r.verdict = 'void' })
+  validate(v, 'x.json')
+  assert.equal(runScore(v), null)
+}
+bad(r => { r.flow = { ...flow27.flow } }, /flow is S18-S21, S27 and S28 only/, s16)
 // the scenario list is duplicated in latestPerScenario (the page copies it by source): one run per scenario comes back whole
 assert.equal(latestPerScenario(SCENARIOS.map((sc, i) => ({ ...flow18, id: `l${i}`, scenario: sc }))).length, SCENARIOS.length)
 
@@ -478,9 +491,18 @@ const head5 = readmeBlock([liveRun({ ...offBrief, id: 'o17' })]).split('\n')[3]
 const head6 = readmeBlock([liveRun(fail21), liveRun({ ...flow18, id: 'p18' })]).split('\n')[3]
 assert.ok(head6.includes(`S18 ${flow18.hydraVersion} pass (all 4 criteria hold)`) && head6.includes(`S21 ${flow18.hydraVersion} fail (failed: wholeBranchFixed)`), head6)
 // the block opens with the combined score: newest scored run per scenario, void runs skipped
-assert.equal(readmeBlock([liveRun({ ...ctrl17, id: 'c17' }), liveRun({ ...seeded17, id: 's17', verdict: 'pass' })]).split('\n')[1], '**Combined score:** 38/100 (2 of 9 scenarios)')
-assert.equal(readmeBlock([liveRun(voidCtrl)]).split('\n')[1], '**Combined score:** not scored yet (0 of 9 scenarios)')
+assert.equal(readmeBlock([liveRun({ ...ctrl17, id: 'c17' }), liveRun({ ...seeded17, id: 's17', verdict: 'pass' })]).split('\n')[1], '**Combined score:** 38/100 (2 of 2 scenarios)')
+assert.equal(readmeBlock([liveRun(voidCtrl)]).split('\n')[1], '**Combined score:** not scored yet (0 of 1 scenarios)')
 assert.equal(readmeBlock([liveRun(voidCtrl)]).split('\n')[2], '')
+// "of N scenarios" counts the scenarios with a run file, in the block and on the page: a scenario no run was made for changes neither
+{ const held = es => SCENARIOS.filter(sc => es.some(e => e.run.scenario === sc)), pageOf = es => JSON.parse(/\)\((\{"runs":.*\})\)\n<\/script>/.exec(buildHtml(es))[1])
+  const rest = entries.filter(e => !['S27', 'S28'].includes(e.run.scenario)), FLOW_TEXT = /\(S16, (S18[^,)]*(?:, S2\d)*)\)/
+  for (const [more, text] of [[[], 'S18-S21'], [[flow28], 'S18-S21, S28'], [[flow27, flow28], 'S18-S21, S27, S28']]) {
+    const es = [...rest, ...more.map(liveRun)], n = held(rest).length + more.length
+    assert.deepEqual(pageOf(es).scenarios, held(es))
+    assert.match(readmeBlock(es).split('\n')[1], new RegExp(`\\(\\d+ of ${n} scenarios\\)$`))
+    assert.equal(FLOW_TEXT.exec(buildHtml(es))?.[1], text, 'the page names the pass/fail scenarios that have a run')
+  } }
 assert.ok(head5.includes('S17-control 0.3.7 fail (0 major false positives, merged head off-brief)'), head5)
 assert.equal(readmeBlock([liveRun(voidCtrl)]).split("\n")[5], "One run per scenario on a small fixture; limits in evals/retros/.")
 
