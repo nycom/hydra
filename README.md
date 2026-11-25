@@ -67,9 +67,9 @@ Stacked PRs are an opt-in mode, used only when asked for.
 /plugin install hydra@hydra
 ```
 
-Expects `implementer`, `reviewer` and `validator` subagents in `~/.claude/agents/`.
+Hydra ships its three agents: `hydra:implementer`, `hydra:reviewer` and `hydra:validator`. They are lean on purpose: they skip your user-level instruction files and read the CLAUDE.md / AGENTS.md of the repo they work in.
 
-Hydra does not ship these agents, and their definitions decide how much context every worker starts with. To keep workers lean, set `omitClaudeMd: true` in the three files and tell the agents in their bodies to read the CLAUDE.md / AGENTS.md of the repo they work in, since the flag drops those too. On the author's setup, which also keeps another plugin's session-start text out of these agents, first calls went from 17,000-19,000 to 6,500-8,200 tokens; the saving depends on the size of your own instruction files.
+To replace one, put an agent with the bare name (`implementer`, `reviewer` or `validator`) in `~/.claude/agents/` or the project's `.claude/agents/`: yours is used instead, so an existing setup runs as before. For one run, name any agent type and Hydra passes it as `agentTypes`. Your agent's definition decides how much context every worker starts with; set `omitClaudeMd: true` to keep it lean. On the author's own agents, with another plugin's session-start text kept out too, first calls went from 17,000-19,000 to 6,500-8,200 tokens.
 
 Optional, for per-worker step bars in a progress mod that offers a step tool: add that tool to the `tools:` list of the implementer, reviewer and validator agent types, then pass `stepTool` (see `skills/run/references/args-and-sizing.md`).
 

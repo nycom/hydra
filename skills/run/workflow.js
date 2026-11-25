@@ -77,6 +77,10 @@ if (A.cycles != null && !(Number.isInteger(A.cycles) && A.cycles >= 1)) throw ne
 if (A.stopRule != null && !(typeof A.stopRule === 'string' && A.stopRule.trim())) throw new Error('stopRule must be a non-empty string naming the wrong actions that block, e.g. "wrong output for a listed case, lost user data, a crash"')
 const absArg = k => { if (A[k] != null && !(typeof A[k] === 'string' && /^\//.test(A[k]))) throw new Error(`${k} must be an absolute path`) }
 if (A.stepTool != null && !(typeof A.stepTool === 'string' && /^[\w-]+$/.test(A.stepTool))) throw new Error('stepTool must be a tool name (letters, digits, _ and -)')
+// opt-in replacement of a role's agent type, e.g. the shipped `hydra:validator`; unset keeps the bare names, so existing runs are unchanged
+const ROLES = ['implementer', 'reviewer', 'validator']
+if (A.agentTypes != null && !(typeof A.agentTypes === 'object' && !Array.isArray(A.agentTypes) && Object.entries(A.agentTypes).every(([r, v]) => ROLES.includes(r) && typeof v === 'string' && /^[\w-]+(:[\w-]+)*$/.test(v)))) throw new Error('agentTypes must map implementer, reviewer or validator to an agent type name')
+const TYPE = Object.fromEntries(ROLES.map(r => [r, A.agentTypes?.[r] ?? r]))
 // opt-in worker step reports: empty unless stepTool is set, so default prompts are unchanged
 const STEP = A.stepTool ? `\n\nProgress: report your steps with the ${A.stepTool} tool (total once, then done as each step finishes). Send failed: true, with reason and error, only when your own attempt at this step failed. Findings you report, and a red gate or check you were asked to run, are results, not failures.` : ''
 absArg('acceptance')
@@ -441,7 +445,7 @@ const unran = {} // label -> attempts that returned without running the gate, fo
 // a failed probe ends the step as a resumable infra fault instead of a third blind retry.
 const infra = {} // label -> the health probe failed
 const HEALTH = { type: 'object', properties: { ok: { type: 'boolean', description: 'true if the command ran' }, notes: { type: 'string' } }, required: ['ok', 'notes'] }
-const healthy = async o => !!(await agent(`Health check: run git --version in a shell and return ok=true with its output in notes. Change nothing. ${HARD}`, { label: `health ${o.label}`, phase: o.phase, agentType: 'validator', model: 'sonnet', effort: 'low', schema: HEALTH }))?.ok
+const healthy = async o => !!(await agent(`Health check: run git --version in a shell and return ok=true with its output in notes. Change nothing. ${HARD}`, { label: `health ${o.label}`, phase: o.phase, agentType: TYPE.validator, model: 'sonnet', effort: 'low', schema: HEALTH }))?.ok
 // checks: how many checks the prompt carries; the schema asks for their exits, and in a gated step a missing or short checkExits never ran
 async function step(prompt, { gated, checks = 0, ...opts }, anySha = false) {
   opts.schema = withChecks(opts.schema, checks)
@@ -481,7 +485,7 @@ ${NOT_FEATURE}
 3. Only after a verified push: git -C ${repo} push ${O} --delete ${sides.join(' ')} (a side branch that is already gone is fine).
 No worktree, no checkout, no commits; never touch the user's checkout of ${repo}. ${HARD}
 Return ok, the remote sha of ${branch} and notes (every step not done and why; empty when all succeeded).`,
-    { label, phase, agentType: 'implementer', model: 'sonnet', effort: 'low', schema: PROMOTED })
+    { label, phase, agentType: TYPE.implementer, model: 'sonnet', effort: 'low', schema: PROMOTED })
   if (!(p?.ok && same(p.sha, to))) return p ? p.notes.join('; ') || `${branch} is at ${p.sha}` : died('promote agent', label)
   leftovers[repo] = [...(leftovers[repo] || []), ...p.notes.map(x => `${label}: ${x}`)]
   return ''
@@ -505,7 +509,7 @@ ${GREEN(c.knownRed, w.repo)} ${FLAKY}
 ${RO(w.repo, `shared-${w.id}`)}
 ${SEV}
 sha = the commit you validated. Ids: ${S}-F1, ${S}-F2, ...`,
-    { label, phase: 'Merge', agentType: 'validator', model: 'opus', effort: 'high', schema: VERDICT, gated: true })
+    { label, phase: 'Merge', agentType: TYPE.validator, model: 'opus', effort: 'high', schema: VERDICT, gated: true })
   const fs = v && same(v.sha, m.sha) ? [...v.findings, ...redGate(v, `${S}-G`)] : [{ id: `${S}-X`, severity: 'critical', kind: 'regression', where: `shared edits of ${w.id}`, issue: `${range} is unchecked: ${v ? `the shared-edits validator saw ${v.sha}, the merge pushed ${m.sha}` : died('shared-edits validator', label)}`, evidence: 'the script\'s own check' }]
   if (v) noteFlaky(w.repo, v)
   ;(sharedFound[w.repo] ||= []).push(...fs)
@@ -647,7 +651,7 @@ ${authorGate()}
 ${CHECKS(w)}${GIT(w.repo, w.id)}
 Commit and push to ${w.branch}. Nothing to change (the branch already meets the brief and the gate is green): no commit, no push, status "done", sha = the current ${O}/${w.branch} head, ok = true.
 Return status ("done" only when the gate is green and the push verified, or nothing to change), ok, the verified remote sha, a one-line test summary, gateTail, sharedEdits, decisions (up to 10), questions and notes.`,
-    { label: `${tag} implement`, phase: 'Implement', agentType: 'implementer', model: w.model, schema: IMPLEMENTED, checks: w.checks?.length })
+    { label: `${tag} implement`, phase: 'Implement', agentType: TYPE.implementer, model: w.model, schema: IMPLEMENTED, checks: w.checks?.length })
   if (!impl) return stop(unusable('implement', w.branch, `${tag} implement`))
   absorb(impl)
   if (!pushed(impl, 'implement')) return blocked('implement', impl)
@@ -679,7 +683,7 @@ ${LENSES(i === 1)}
 ${ACC_REVIEW}${DROP}
 ${w.quickGate ? `Probes: to confirm a suspicion by running code, use the quick gate (${w.quickGate}) or single tests; the full gate is the validators' job.\n` : ''}${ledger.length ? `Settled in earlier cycles — do not re-raise unless the code under it changed:\n${JSON.stringify(ledger)}\n` : ''}${carry.length ? `The last validation left these open — re-check each, keep the ones still valid (same id):\n${JSON.stringify(carry)}\n` : ''}${SEV}
 New finding ids: c${i}-F1, c${i}-F2, ...`,
-        { label: `${tag} review c${i}`, phase: 'Review cycles', agentType: 'reviewer', model: w.reviewModel, schema: FINDINGS })
+        { label: `${tag} review c${i}`, phase: 'Review cycles', agentType: TYPE.reviewer, model: w.reviewModel, schema: FINDINGS })
       if (!rev) return stop(died(`review c${i}`, `${tag} review c${i}`))
       if (!same(rev.headSha, out.sha)) return stop(`review c${i} saw ${rev.headSha}, the author pushed ${out.sha}`)
       out.cyclesRun = i
@@ -705,7 +709,7 @@ ${GREEN(c.knownRed, w.repo)} ${FLAKY}
 ${CHECKS(w)}${RO(w.repo, `${w.id}-val${i}`, c.regen)}
 ${SEV}
 Return headSha, gate, evidence, verified (empty), open (ids v${i}-F1, ...) and questions.`,
-          { label: `${tag} validate c${i}`, phase: 'Review cycles', agentType: 'validator', model: 'opus', effort: 'high', schema: DELTA, gated: true, checks: w.checks?.length }), w, authored)
+          { label: `${tag} validate c${i}`, phase: 'Review cycles', agentType: TYPE.validator, model: 'opus', effort: 'high', schema: DELTA, gated: true, checks: w.checks?.length }), w, authored)
         if (!val) return stop(died(`validate c${i}`, `${tag} validate c${i}`))
         if (!same(val.headSha, out.sha)) return stop(`validate c${i} saw ${val.headSha}, the head is ${out.sha}`)
         out.evidence[`validate c${i}`] = val.evidence
@@ -744,7 +748,7 @@ sharedEdits: return the complete current list; it replaces the earlier one${out.
 ${authorGate()}
 ${CHECKS(w)}${GIT(w.repo, `${w.id}-fix${i}`)}
 Return status, ok, verified sha, tests, gateTail, one answer per finding id, sharedEdits, decisions (new or changed only), questions (only what code, spec and brief cannot settle; use action "escalated") and notes.`,
-          { label: `${tag} fix c${i}`, phase: 'Review cycles', agentType: 'implementer', model: stuck.length ? 'opus' : w.model, schema: FIXED, checks: w.checks?.length })
+          { label: `${tag} fix c${i}`, phase: 'Review cycles', agentType: TYPE.implementer, model: stuck.length ? 'opus' : w.model, schema: FIXED, checks: w.checks?.length })
         if (!fix) return stop(unusable(`fix c${i}`, w.branch, `${tag} fix c${i}`))
         absorb(fix)
         if (!pushed(fix, `fix c${i}`)) return blocked(`fix c${i}`, fix)
@@ -771,7 +775,7 @@ ${GREEN(c.knownRed, w.repo)} ${FLAKY}
 ${CHECKS(w)}${RO(w.repo, `${w.id}-val${i}`, c.regen)}
 ${SEV}
 Return headSha, gate, evidence, verified (ids confirmed resolved, or whose answer or decline you accept), open (same id for an unresolved finding; unresolved, indefensible, plus regressions as kind "regression" with ids v${i}-R1, ...) and questions.`,
-          { label: `${tag} validate c${i}`, phase: 'Review cycles', agentType: 'validator', model: 'opus', effort: 'high', schema: DELTA, gated: true, checks: w.checks?.length }), w, authored)
+          { label: `${tag} validate c${i}`, phase: 'Review cycles', agentType: TYPE.validator, model: 'opus', effort: 'high', schema: DELTA, gated: true, checks: w.checks?.length }), w, authored)
         if (!val) return stop(died(`validate c${i}`, `${tag} validate c${i}`))
         if (!same(val.headSha, fix.sha)) return stop(`validate c${i} saw ${val.headSha}, the fix pushed ${fix.sha}`)
         out.evidence[`validate c${i} delta`] = val.evidence
@@ -839,7 +843,7 @@ Red gate: do not push, return ok=false with the failure.
 ${HYGIENE(`${O}/${w.featureBranch}..HEAD`, w.repo)}
 ${GIT(w.repo, `merge-${w.id}`)}
 Push to ${w.featureBranch} (plain push; if rejected, fetch and redo every step on the new tip). Return status, ok, verified sha, tests, gateTail, notes, preMergeSha (git rev-parse of your pushed merge commit's first parent, the ${w.featureBranch} tip it landed on) and baseAtMerge (git rev-parse ${O}/${w.base} after your last fetch).`,
-        { label: `${tag} merge`, phase: 'Merge', agentType: 'implementer', model: 'sonnet', effort: out.sharedEdits.length ? 'medium' : 'low', schema: MERGED }, !readsMergeSha) // a malformed sha gets the repair call only when a later step reads it
+        { label: `${tag} merge`, phase: 'Merge', agentType: TYPE.implementer, model: 'sonnet', effort: out.sharedEdits.length ? 'medium' : 'low', schema: MERGED }, !readsMergeSha) // a malformed sha gets the repair call only when a later step reads it
       if (m?.ok && m.status === 'done') {
         if (!done.includes(w)) done.push(w)
         mergeShas[w.id] = m.sha
@@ -949,7 +953,7 @@ ${LENSES(false)}
 ${ACC_REVIEW}${DROP}
 ${SEV}
 headSha = the ${O}/${r.featureBranch} commit you reviewed. Ids: W-F1, W-F2, ...`,
-      { label: `${n} review`, phase: 'Whole-branch', agentType: 'reviewer', model: A.wbReviewModel || top(r.ws.map(w => w.reviewModel)), schema: SEAMS }),
+      { label: `${n} review`, phase: 'Whole-branch', agentType: TYPE.reviewer, model: A.wbReviewModel || top(r.ws.map(w => w.reviewModel)), schema: SEAMS }),
     async () => judged(await step(
       `Independent whole-branch validation of ${r.repo}, feature branch ${r.featureBranch} vs ${O}/${r.base}. Trust nothing; re-derive everything yourself. ${REFUTE}
 ${ACC_RUN(`the head of ${O}/${r.featureBranch}`)}${RO(r.repo, 'wb-val')}
@@ -968,7 +972,7 @@ ${briefs}
 
 ${SEV}
 sha = the ${O}/${r.featureBranch} commit you validated. Ids: V-F1, V-F2, ...; questions for brief conflicts.`,
-      { label: `${n} validate`, phase: 'Whole-branch', agentType: 'validator', model: 'opus', effort: 'high', schema: RECHECK, gated: true, checks: tip.checks.length }), tip),
+      { label: `${n} validate`, phase: 'Whole-branch', agentType: TYPE.validator, model: 'opus', effort: 'high', schema: RECHECK, gated: true, checks: tip.checks.length }), tip),
   ])
   if (!rev || !val) return fail(!rev ? died('integrated review', `${n} review`) : died('whole-branch validator', `${n} validate`))
   if (!solo && !same(rev.headSha, val.sha)) return fail(`review saw ${rev.headSha}, validator saw ${val.sha}`)
@@ -1007,7 +1011,7 @@ Briefs:
 ${briefs}
 
 Return status, ok, verified sha, tests, gateTail, one answer per finding id, questions and notes.`,
-      { label: `${n} fix r${round}`, phase: 'Whole-branch', agentType: 'implementer', model: top(r.ws.map(w => w.model)), schema: without(FIXED, 'sharedEdits', 'decisions') })
+      { label: `${n} fix r${round}`, phase: 'Whole-branch', agentType: TYPE.implementer, model: top(r.ws.map(w => w.model)), schema: without(FIXED, 'sharedEdits', 'decisions') })
     if (!fix) return fail(unusable(`whole-branch fix r${round}`, side, `${n} fix r${round}`))
     res.questions.push(...fix.questions)
     res.notes.push(...fix.notes)
@@ -1032,7 +1036,7 @@ ${briefs}
 
 ${SEV}
 sha = the commit you checked. verdict pass only if nothing critical or major is open; verified = finding ids confirmed resolved, or whose answer or decline you accept; findings = everything still open (same id for a carried finding, new ids R${round}-F1, ...); questions for brief conflicts.`,
-      { label: `${n} recheck r${round}`, phase: 'Whole-branch', agentType: 'validator', model: 'opus', effort: 'high', schema: RECHECK, gated: true, checks: tip.checks.length }), tip)
+      { label: `${n} recheck r${round}`, phase: 'Whole-branch', agentType: TYPE.validator, model: 'opus', effort: 'high', schema: RECHECK, gated: true, checks: tip.checks.length }), tip)
     if (!re) return fail(died(`recheck r${round}`, `${n} recheck r${round}`))
     if (!same(re.sha, fix.sha)) return fail(`recheck r${round} saw ${re.sha}, the fix pushed ${fix.sha}`)
     noteFlaky(r.repo, re)
@@ -1107,7 +1111,7 @@ if (A.resume && STAGE !== 'wholeBranch') {
     `Resume of run ${A.resume}, call ${CALL} (inputs ${inputs}): read the git state of ${r.repo}; change nothing. git -C ${r.repo} fetch ${O}; featureSha = git -C ${r.repo} rev-parse ${O}/${r.featureBranch}. For each workstream branch below: head = git -C ${r.repo} rev-parse ${O}/<branch> (empty if the branch does not exist on ${O}); merged = true only if head is non-empty and git -C ${r.repo} merge-base --is-ancestor <head> ${O}/${r.featureBranch} succeeds.
 ${r.ws.map(w => `${w.id}: ${w.branch}`).join('\n')}
 No worktree, no checkout, no commits, no pushes; never touch the user's checkout. ${HARD}`,
-    { label: `${name(r.repo)} state`, phase: 'Implement', agentType: 'validator', model: 'sonnet', effort: 'low', schema: STATE }, true)))
+    { label: `${name(r.repo)} state`, phase: 'Implement', agentType: TYPE.validator, model: 'sonnet', effort: 'low', schema: STATE }, true)))
   states.forEach((st, i) => {
     if (st) featureShaOf[REPOS[i].repo] = st.featureSha
     if (!st) return log(`${name(REPOS[i].repo)}: the resume state probe died; its workstreams start from implement, which carries a merged branch as merged`)
@@ -1150,7 +1154,7 @@ Sections (verdict per section):
 2. The merge order the contracts require (which repo's contract must land first) and every re-vendor or digest step still missing.
 ${SEV}
 Ids: X-F1, X-F2, ...`,
-    { label: 'contracts', phase: 'Contracts', agentType: 'validator', model: 'opus', effort: 'high', schema: CONTRACT })
+    { label: 'contracts', phase: 'Contracts', agentType: TYPE.validator, model: 'opus', effort: 'high', schema: CONTRACT })
     .then(x => x || { verdict: 'fail', sections: died('contract validator', 'contracts'), findings: [] }),
   () => parallel(DOCS.map(d => async () => {
     if (!shipped || paused || skipped.has(d.repo)) return null
@@ -1175,7 +1179,7 @@ Set up: worktree docs-sync, detached at ${O}/${d.featureBranch}; push to the sid
 5. Before pushing: ${HYGIENE(`${O}/${d.featureBranch}..HEAD`, d.repo)}
 Nothing stale and the graph unchanged: no commit, empty sha, ok=true.
 ${GIT(d.repo, 'docs-sync')}`,
-      { label: `${name(d.repo)} docs`, phase: 'Docs sync', agentType: 'implementer', model: 'sonnet', schema: DOCS_OUT })
+      { label: `${name(d.repo)} docs`, phase: 'Docs sync', agentType: TYPE.implementer, model: 'sonnet', schema: DOCS_OUT })
     if (!o || !o.sha) return o
     if (rs && !same(o.baseSha, rs.sha)) return { ...o, verdict: 'fail', findings: [{ id: 'D-X', severity: 'critical', kind: 'docs', where: o.sha, issue: `docs started from ${o.baseSha}, but the whole-branch pass validated ${rs.sha}`, evidence: 'the script\'s own check' }] }
     // The docs commit becomes the repo's finalSha only once its own read-only validator passes it.
@@ -1190,7 +1194,7 @@ ${PINS}
 ${RO(d.repo, 'docs-val')}
 ${SEV}
 sha = the commit you validated. Ids: D-F1, D-F2, ...`,
-      { label: `${name(d.repo)} docs validate`, phase: 'Docs sync', agentType: 'validator', model: 'opus', effort: 'high', schema: VERDICT, gated: !!gate })
+      { label: `${name(d.repo)} docs validate`, phase: 'Docs sync', agentType: TYPE.validator, model: 'opus', effort: 'high', schema: VERDICT, gated: !!gate })
     noteFlaky(d.repo, v)
     const vOk = v && same(v.sha, o.sha)
     const findings = vOk ? [...v.findings, ...redGate(v, 'D-G')] : [{ id: 'D-X', severity: 'critical', kind: 'docs', where: o.sha, issue: v ? `docs validator saw ${v.sha}, docs pushed ${o.sha}` : died('docs validator', `${name(d.repo)} docs validate`), evidence: 'the script\'s own check' }]
@@ -1206,7 +1210,7 @@ ${W.filter(w => !dropped.includes(w.id)).map(w => `## ${w.id}\n${w.brief}`).join
 Read the decision log ${A.decisionLog}. For each repo, list every user-visible change in ${O}/<base>...<pinned sha> (copy, spoken or printed lines, defaults, prompts, thresholds, UI, removed hints or options). Map each one to a decision-log line or a brief clause. Return in drift only the changes with neither.
 If you cannot read the decision log or a repo: ok=false, the reason in notes; still list what you could check.
 ${RO(REPOS[0].repo, 'drift')}`,
-    { label: 'drift', phase: 'Drift audit', agentType: 'reviewer', model: 'fable', schema: DRIFT_OUT }) : null,
+    { label: 'drift', phase: 'Drift audit', agentType: TYPE.reviewer, model: 'fable', schema: DRIFT_OUT }) : null,
 ])
 // a failed audit's items are kept as unconfirmed, never questions: with the log unread every change looks undecided, and each item's default is a revert
 const drift = !driftRan ? { verdict: 'skipped', items: [], unconfirmed: [], sections: '', notes: driftShort ? ['token budget below the reserve'] : [] }
