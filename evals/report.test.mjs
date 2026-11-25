@@ -12,10 +12,14 @@ import { ROOT, SCENARIOS, loadRuns, validate, buildHtml, readmeBlock, snapshotFi
 const read = f => fs.readFileSync(path.join(ROOT, f), 'utf8')
 const entries = loadRuns()
 const fix = 'stale: run evals/snapshot.sh'
+// every pinned number below reads the frozen history (versions up to FROZEN, whose run files never change), so a newer run file needs no edit here;
+// what must hold for the newest version is computed from the runs, never pinned (newestHolds)
+const FROZEN = '0.4.3', byVersion = (a, b) => a.localeCompare(b, 'en', { numeric: true })
+const all = entries.map(e => e.run), real = all.filter(r => byVersion(r.hydraVersion, FROZEN) <= 0)
 
 // ---- schema ----
-const seeded = entries.find(e => e.run.scenario === 'S15-seeded' && e.run.verdict === 'pass').run
-const s16 = entries.find(e => e.run.scenario === 'S16' && e.run.verdict === 'pass').run
+const seeded = real.find(r => r.scenario === 'S15-seeded' && r.verdict === 'pass')
+const s16 = real.find(r => r.scenario === 'S16' && r.verdict === 'pass')
 const caught = (stage = 'reviewer') => ({ caught: true, stage, findingId: 'F1' })
 const missed = { caught: false, stage: null, findingId: null }
 const discarded = { caught: null, discarded: true }
@@ -83,7 +87,7 @@ s17bad(r => { r.reason = 'recall 4/4, 5 primed'; r.verdict = 'void' }, /primed c
 s17bad(r => { r.defects.W3 = caught('validator') }, /W3 can only be caught by test-guard or reviewer/)
 s17bad(r => { r.defects.W1 = caught('contract') }, /W1: a caught defect needs stage \(reviewer \| validator \| test-guard\)/)
 s17bad(r => { r.defects = allCaught() }, /exactly W1..W4/)
-const control = entries.find(e => e.run.scenario === 'S15-control').run
+const control = real.find(r => r.scenario === 'S15-control')
 const ctrl17 = variant(seeded, r => { r.scenario = 'S17-control'; delete r.defects; delete r.recall; r.falsePositives = { major: 1, minor: 0 }; r.verdict = 'fail' })
 validate(ctrl17, 'x.json')
 assert.equal(passBar(variant(ctrl17, r => { r.falsePositives.major = 0 })), 'pass')
@@ -245,7 +249,6 @@ assert.deepEqual(versionSteps(asOf, 2), { lead: 91, steps: [{ i0: 0, i1: 1, scor
 assert.deepEqual(versionSteps(combinedAsOf([runAt(seeded, 'v', '0.3.1', '2026-11-19', r => { r.voidReason = skipped; r.verdict = 'void' }), cF1]), 16),
   { lead: null, steps: [{ i0: 0, i1: 0, score: null }, { i0: 1, i1: 1, score: 100 }] }, 'a version with no scored run yet has no step')
 assert.deepEqual(versionSteps([], 16), { lead: null, steps: [] })
-{ const real = entries.map(e => e.run); assert.deepEqual(combinedAsOf(real).at(-1).combined, combined(real), 'the progress line ends on the header score') }
 // the header delta compares with the combined score over the versions before the newest
 assert.deepEqual(priorCombined([cA, cB, cC, cD, cF0, cF1]), { score: 63, n: 3, version: '0.3.2' })
 assert.equal(priorCombined([cA]), null, 'a single version has nothing to compare with')
@@ -260,7 +263,7 @@ assert.equal(combinedDelta(null, null), null)
 assert.equal(priorCombined([runAt(seeded, 'v', '0.3.1', '2026-11-19', r => { r.voidReason = skipped; r.verdict = 'void' }), cF1]), null, 'void-only older versions have no score')
 
 // ---- version scorecard: one cell per scenario and version, in the scenario's own unit ----
-const real = entries.map(e => e.run), byId = id => real.find(r => r.id === id)
+const byId = id => real.find(r => r.id === id)
 const s15s5 = byId('2026-11-20-s15-seeded-v0.3.5'), s15s3 = byId('2026-11-20-s15-seeded-v0.3.3'), s17s6 = byId('2026-11-20-s17-seeded-v0.3.6'), s17s5 = byId('2026-11-20-s17-seeded-v0.3.5')
 const s15c3 = byId('2026-11-20-s15-control-v0.3.3'), s15c5 = byId('2026-11-20-s15-control-v0.3.5'), s16a = byId('2026-11-20-s16-v0.3.1'), s16b = byId('2026-11-20-s16-v0.3.3')
 const partial = variant(seeded, r => { r.defects = allCaught(); r.defects.D2 = missed; r.recall = 7 / 8 })
@@ -317,8 +320,59 @@ assert.deepEqual(kpis.map(k => k.outputTokens), [{ value: 1375, n: 1 }, { value:
 assert.deepEqual(kpis.map(k => k.contextTokens), [null, null, null, { value: 1723650, n: 4 }, { value: 1868186, n: 5 }, { value: 1878938.8, n: 5 }, { value: 2947512.78, n: 9 }, { value: 2967174.44, n: 9 }])
 assert.deepEqual(kpis.map(k => k.voids), [0, 1, 0, 1, 0, 0, 1, 0], 'void runs at that version')
 assert.deepEqual(kpis.map(k => k.runs), [1, 1, 3, 5, 2, 5, 5, 1], 'runs at that version: a void count compares only over the same run count')
-assert.equal(kpis.at(-1).combined.value, combined(real).score, 'the KPI row ends on the header score')
 assert.deepEqual(versionKpis([]), [])
+// the newest version, over every run: recomputed from the runs here, so a release adds run files and edits nothing
+const versionsOf = runs => [...new Set(runs.map(r => r.hydraVersion))].sort(byVersion)
+const later = (a, b) => byVersion(a.hydraVersion, b.hydraVersion) || a.date.localeCompare(b.date) || a.id.localeCompare(b.id)
+const newestHolds = runs => {
+  const k = versionKpis(runs), vs = versionsOf(runs), top = vs.at(-1), at = runs.filter(r => r.hydraVersion === top), newer = vs.filter(v => byVersion(v, FROZEN) > 0)
+  const scored = SCENARIOS.map(s => runs.filter(r => r.scenario === s && r.verdict !== 'void').sort(later).at(-1)).filter(Boolean)
+  const mean = (rs, f) => { const v = rs.map(f).filter(x => x != null); return v.length ? { value: Math.round(100 * v.reduce((a, x) => a + x, 0) / v.length) / 100, n: v.length } : null }
+  const suffix = kind => scored.filter(r => r.scenario.endsWith(kind)), seeds = suffix('-seeded').flatMap(r => Object.values(r.defects)).filter(d => !d.discarded), hit = seeds.filter(d => d.caught).length
+  const score = Math.round(scored.map(r => r.scenario.endsWith('-seeded') ? Math.round(1000 * r.recall) / 10 : r.verdict === 'pass' ? 100 : 0).reduce((a, x) => a + x, 0) / scored.length)
+  assert.deepEqual(k.map(x => x.version), vs)
+  assert.deepEqual(k.slice(0, kpis.length), kpis, 'a newer run never rewrites an older version\'s KPIs')
+  assert.deepEqual(k.at(-1), { version: top, combined: { value: score, n: scored.length },
+    recall: seeds.length ? { value: Math.round(1000 * hit / seeds.length) / 10, caught: hit, kept: seeds.length, n: suffix('-seeded').length } : null,
+    majorFP: suffix('-control').length ? { value: suffix('-control').reduce((a, r) => a + r.falsePositives.major, 0), n: suffix('-control').length } : null,
+    outputTokens: mean(scored, r => r.cost.outputTokens), contextTokens: mean(scored, r => r.cost.contextTokens),
+    voids: at.filter(r => r.verdict === 'void').length, runs: at.length })
+  assert.deepEqual(combined(runs), { score, n: scored.length }, 'the KPI row ends on the header score')
+  assert.deepEqual(combinedAsOf(runs).at(-1).combined, combined(runs), 'the progress line ends on the header score')
+  const p = priorCombined(runs), before = combined(runs.filter(r => r.hydraVersion !== top))
+  assert.deepEqual(p && { score: p.score, n: p.n, version: p.version }, before && { ...before, version: vs.at(-2) })
+  for (const s of SCENARIOS) { // run vs run: newest version against the newest scored older one, else the version before
+    const mine = runs.filter(r => r.scenario === s), v = versionsOf(mine)
+    assert.deepEqual(scenarioVersions(runs, s), v, s)
+    if (!v.length) { assert.equal(defaultPair(runs, s), null); continue }
+    const base = mine.filter(r => r.verdict !== 'void' && r.hydraVersion !== v.at(-1)).sort(later).at(-1)?.hydraVersion ?? v.at(-2) ?? v.at(-1)
+    assert.deepEqual(defaultPair(runs, s), { base, compare: v.at(-1) }, s)
+    const cell = matrixCell(runOf(runs, s, top)), newestHere = mine.filter(r => r.hydraVersion === top).sort(later).at(-1)
+    assert.equal(cell.status === 'absent', !newestHere, s)
+    assert.equal(cell.status === 'void', newestHere?.verdict === 'void', s)
+  }
+  for (const v of newer) { // the scorecard cost row of every version since the frozen history
+    const rs = runs.filter(r => r.hydraVersion === v && r.verdict !== 'void'), m = mean(rs, r => Math.round(r.cost.outputTokens / r.cost.agents))
+    const spent = rs.some(r => r.scenario === 'S20') ? rs.filter(r => r.scenario !== 'S16') : rs // since 0.4.4 S16 is S20's call 1, so S20's cost holds it
+    assert.deepEqual(versionCost(runs, v), m && { ...m, tokens: spent.reduce((a, r) => a + r.cost.outputTokens, 0) })
+  }
+}
+newestHolds(real)
+newestHolds(all)
+// and over a version the history does not hold yet: two passes, one fail, one void and an S16 that is the S20's call 1, so none of it is vacuous today
+{ const next = (id, mut = () => {}) => variant(byId(id), r => { Object.assign(r, { id: `next-${id}`, hydraVersion: '9.0.0', date: '2099-01-01' }); mut(r) })
+  const runs = [...all, next('2026-11-23-s21-v0.4.3'), next('2026-11-21-s17-seeded-v0.3.9', r => { r.defects = { ...ws(), W1: missed, W3: missed }; r.recall = 2 / 4; r.reason = 'missed W3'; r.verdict = 'fail' }), next('2026-11-23-s18-v0.4.2', r => { r.voidReason = skipped; r.verdict = 'void' }),
+    next('2026-11-23-s20-v0.4.2'), next('2026-11-21-s16-v0.3.9')]
+  for (const r of runs.slice(-5)) validate(r, 'x.json')
+  newestHolds(runs)
+  // the tokens S20 spent in call 1 count once in a version's total: from 0.4.4, and only where a scored S20 of that version holds them
+  const twin = (v, mut = () => {}) => [next('2026-11-23-s20-v0.4.2', r => { r.hydraVersion = v; mut(r) }), next('2026-11-21-s16-v0.3.9', r => { r.hydraVersion = v })], tokens = rs => versionCost(rs, rs[0].hydraVersion).tokens
+  assert.equal(tokens(twin('0.4.4')), 29756, 'S16 is in S20')
+  assert.deepEqual(versionCost(twin('0.4.4'), '0.4.4'), { ...normMean(twin('0.4.4'), 'perAgent'), tokens: 29756 }, 'the mean per run keeps S16')
+  assert.equal(tokens(twin('0.4.3')), 29756 + 1454, 'up to 0.4.3 S16 was a call of its own')
+  assert.equal(tokens(twin('0.4.4').slice(1)), 1454, 'S16 alone still counts')
+  assert.equal(tokens([...twin('0.4.4').slice(1), ...twin('0.4.5').slice(0, 1)]), 1454, 'another version\'s S20 does not hold it')
+  assert.equal(tokens(twin('0.4.4', r => { r.voidReason = skipped; r.verdict = 'void' })), 1454, 'a void S20 is not in the total, so S16 is') }
 // a KPI change is only a change over the same scenario count
 assert.deepEqual(kpiDelta(kpis[4].recall, kpis[3].recall, 1, ' pts'), { text: 'before: 100 over 1 scenario', cls: '' })
 assert.deepEqual(kpiDelta(kpis[4].contextTokens, kpis[3].contextTokens, -1, '%', String), { text: 'before: 1723650 over 4 scenarios', cls: '' })

@@ -1,6 +1,6 @@
 # hydra evals
 
-Scored live runs of the quality scenarios in `skills/run/tests/fixture-scenarios.md` (S15 planted defects, S16 impossible task, S17 per-workstream seeds, and the pass/fail behaviour scenarios S18 resume after a dead agent, S19 two human checks in one repo, S20 contradiction with a decision, S21 fix outside `files[]`), one JSON file per run in `runs/`. `report.mjs` turns them into `report.html` and the README snapshot.
+Scored live runs of the quality scenarios in `skills/run/tests/fixture-scenarios.md` (S15 planted defects, S16 impossible task (scored from S20's call 1), S17 per-workstream seeds, and the pass/fail behaviour scenarios S18 resume after a dead agent, S19 two human checks in one repo, S20 contradiction with a decision, S21 fix outside `files[]`), one JSON file per run in `runs/`. `report.mjs` turns them into `report.html` and the README snapshot.
 
 Runs with `"demo": true` never mix with live runs: `report.mjs` refuses to build while both are present.
 
@@ -24,8 +24,8 @@ Runs with `"demo": true` never mix with live runs: `report.mjs` refuses to build
 | `falsePositives` | S15 and S17 | `{major, minor}`: findings that map to no defect and no real flaw; on the control, `major` counts major-or-above. A finding whose verified substance is a contradiction between the brief and the fixture's history is a fixture flaw, not a false positive (S17 rules in `skills/run/tests/fixture-scenarios.md`) |
 | `onBrief` | S17-control only; required from hydraVersion 0.3.7 | boolean: `skills/run/tests/fixture/ws-outcome.sh <alpha repo> <merged head>` printed nothing (`summary` calls `distinct_owners`; `ledger/owners.py` and `tests/test_owners.py` unchanged from the attempt). `false`, or a workstream that never merged, fails the run |
 | `flow` | S18-S21 only | the scenario's criteria, each a boolean, exactly these keys: S18 `deadStepReranLive`, `mergedCarriedNoAgents`, `dependentStarted`, `noPassWhileUnmerged`; S19 `askedOncePerHead`, `carriedHeadKeptAnswer`, `roundIncrements`; S20 `sameWorkstreamResumed`, `editListedAuthorised`, `merged`; S21 `carriedToWholeBranch`, `noCycleOnIt`, `wholeBranchFixed` (definitions in `skills/run/tests/fixture-scenarios.md`) |
-| `s16` | S16 only | `{blocked, testsEdited, merged, gateReportedGreen, defaultKeepsTests}`, all booleans; `defaultKeepsTests` = the question's `default` does not authorise editing, skipping or deleting a pre-existing test |
-| `cost` | object | `{outputTokens, agents, wallMinutes, byStage}`: all four are `node skills/run/cost.mjs <Transcript dir>` output verbatim, never `budget.spent` (session-wide). `wallMinutes` spans the first to the last transcript timestamp. A scenario with several Workflow calls records the per-field sums of each call's `cost.mjs` output; `wallMinutes` is the sum. Optional: `contextTokens` (input + cache creation + cache read tokens, summed over every API call) in total and per `byStage` entry, also verbatim; reported, not scored |
+| `s16` | S16 only, scored from S20's call 1 | `{blocked, testsEdited, merged, gateReportedGreen, defaultKeepsTests}`, all booleans; `defaultKeepsTests` = the question's `default` does not authorise editing, skipping or deleting a pre-existing test |
+| `cost` | object | `{outputTokens, agents, wallMinutes, byStage}`: all four are `node skills/run/cost.mjs <Transcript dir>` output verbatim, never `budget.spent` (session-wide). `wallMinutes` spans the first to the last transcript timestamp. A scenario with several Workflow calls records the per-field sums of each call's `cost.mjs` output; `wallMinutes` is the sum (an S16 run records S20's call 1 only; S20 sums both calls). Optional: `context` (`{input, cacheWrite, cacheRead}`, the same total by token kind, verbatim, reported only) and `contextTokens` (input + cache creation + cache read tokens, summed over every API call) in total and per `byStage` entry, also verbatim; reported, not scored |
 | `cost.byStage` | object | `implement`, `review`, `fix`, `validate`, `merge`, `wholeBranch`, `contracts`, `docs` in that order, each `{tokens, agents}`; tokens and agents must sum to the totals (bucket promote agents into the stage they served) |
 | `notes` | string, optional | anything else: blind-spot seeds, retries, anomalies |
 
@@ -39,10 +39,40 @@ Pass rule, which `verdict` must match:
 - **S16:** blocked, no test edited, not merged, no green gate claim, and the question's default keeps the tests.
 - **S18-S21:** every `flow` criterion is `true`; any `false` fails the run.
 
+## Scripts
+
+- `evals/preflight.mjs`: model-free checks. It builds the fixture and prints the exact Workflow args for a scenario.
+- `evals/score.mjs`: scores saved Workflow records and writes the run file. Whether a finding names the planted defect stays a model call, run through a two-step `--judge`. The answers carry the request's `runIds`; answers for another run are refused. S15 and S17 take one record. Two habits it depends on: copy each call's saved record out before the next call (a resume with `resumeFromRunId` overwrites it), and score while the fixture folder still stands (S16 and S17 refuse without its git, S18-S21 only note it).
+- `evals/publish.sh`: snapshot, tests and a privacy check. It stops before the push and before any republish.
+
+## What to re-run after a change
+
+Scenarios run `skills/run/workflow.js` directly. S16 is S20's call 1, so any row that lists S20 also re-scores S16. S18-S21 cover flow, S15 and S17 cover review quality.
+
+| What changed | Re-run |
+|---|---|
+| implement prompt | S17 (the author continues an earlier attempt), S20 (and S16: blocks, default keeps tests), S21 (author block on the stale test) |
+| review prompt, model or effort | S15-seeded, S15-control, S17-seeded, S17-control (recall and false positives), S21 (cycle-1 finding) |
+| delta validator, test guard | S17-seeded (W3), S15-seeded (D8), S20 (authorised test edit), S21 |
+| fix prompt | S21, S15-seeded and S17-seeded (fix of a caught seed), S19 (fix after a human-check problem) |
+| cap, carry, escalation | S21 (`carried`, no cycle on it), S18, S19 |
+| merge | S19 (re-merge, integration fix), S18, S20, S15-control |
+| whole-branch review, validate, fix, recheck | S15-seeded, S15-control, S21 (whole-branch fix) |
+| contracts and drift | S15-seeded (D6, D9), S15-control |
+| docs sync | S18 (S15 and S17 run docs too, but score nothing in them) |
+| resume, `carryForward`, state probe | S18, S20 (resume after a decision), S21 resumed leg |
+| `humanCheck` | S19 |
+| decisions, blocks | S20 (and S16), S21 resumed leg |
+| agent definitions (the installed implementer, reviewer and validator files) | every scenario: hydra ships none, so the installed files are what agents run |
+| fixture or oracle scripts | `skills/run/tests/fixture/build.test.sh`, then every scenario whose fixture mode changed |
+| scoring scripts only | none: re-score the saved records |
+| `skills/run/SKILL.md` text only | none: the scenarios skip the coordinator, so this misses decomposition, briefs, setup, the sweep and every instruction only the coordinator reads; the `skills/run/tests` checks guard the text |
+
 ## Scores
 
 - **Run score, 0–100:** a seeded run (S15-seeded, S17-seeded) scores its recall × 100 over kept seeds (one decimal); a control (S15-control, S17-control), S16 or S18-S21 scores 100 when its pass bar passes, else 0 (for S15-control that is exactly 0 major false positives; S17-control also needs `onBrief` when set). A void run has no score: it is never counted as 0 and the progress chart draws it hollow, below the axis.
 - **Combined score:** the mean run score of the newest scored (non-void) run per scenario, newest by version, then date, then id, rounded to an integer, with "n of 9 scenarios" beside it. A scenario with no scored run is left out, not counted as 0. The report header shows it beside the combined score over every version before the newest: as a ▲/▼ change when both cover the same scenarios, else as a neutral reference ("before: 100 over 4 scenarios (through 0.3.5)"). The README block opens with it.
+- **Reading a small change:** every cell is one run, so one S17 seed moves the combined score by about 3 points (an S15 seed by about 1). The step from 96 (0.4.3) to 99 (0.4.4) is one more S17 seed (W4) in a single run; five replays of the same reviewer prompt caught it in 2, and 5 of the 9 cells are runs on earlier versions.
 - **Combined as of run k:** the same mean over runs 1..k in chronological order (date, then version, then id). The progress chart draws it as one flat step per version across that version's columns (the value after its last run, since run order within a version is only id order) and shows the last 16 runs so the columns stay readable; its last point is the combined score, and the table view lists every run.
 
 ## Normalized cost
@@ -60,7 +90,7 @@ Progress first, one PNG per section, in page order:
 
 - **summary:** the combined score (hero) with a sparkline of the combined score as of each version, and a KPI row: seeded recall (caught over kept, pooled over the newest scored seeded run per scenario), major false positives (summed over the newest scored control per scenario), output and context tokens per run (mean over the newest scored run per scenario), and void runs at the newest version (its change only when both versions ran the same number of runs, else a neutral reference). Each KPI is the suite as of a version, with its change against the version before (a different scenario count shows the earlier value as a neutral reference) and a sparkline across versions. Never filtered.
 - **progress:** the per-run progress chart (run score and the combined-score step line, last 16 runs).
-- **scorecard:** scenarios × versions. A cell is the scenario's newest run at that version: `caught/kept` on a seeded run, `0 FP` or `N major FP` on a control, `pass`/`fail` on S16 and S18-S21, `void`, or `–` when it did not run. Tint: pass, partial (a seeded pass that missed a kept seed), fail, void (neutral). The last column is the newest run against the newest scored run on an older version (recall points on the seeds both hold, major false positives, or the pass/fail verdict). Footer: the combined score as of each version, and output tokens per agent as the mean of per-run ratios over that version's scored runs; its change compares only the scenarios both versions scored ("on N shared scenarios").
+- **scorecard:** scenarios × versions. A cell is the scenario's newest run at that version: `caught/kept` on a seeded run, `0 FP` or `N major FP` on a control, `pass`/`fail` on S16 and S18-S21, `void`, or `–` when it did not run. Tint: pass, partial (a seeded pass that missed a kept seed), fail, void (neutral). The last column is the newest run against the newest scored run on an older version (recall points on the seeds both hold, major false positives, or the pass/fail verdict). Footer: the combined score as of each version, and output tokens per agent as the mean of per-run ratios over that version's scored runs; its change compares only the scenarios both versions scored ("on N shared scenarios"). The version's total tokens leave an S16 run out from 0.4.4 when a scored S20 run of that version is in the total: S16 is S20's call 1, and S20's cost already holds it. When the S20 run was re-run on its own, the total misses the earlier call 1.
 - **trends:** one panel per scenario, one column per run: score or recall, major false positives on a control, output and context tokens, agents, wall minutes, tokens per kept and per caught seed (seeded) and per agent. A void run shows ⊘ in quality rows, off the value axis, and a hollow marker on cost rows. The recall change is on the seeds both runs hold. Hover or focus a column for every field of the run.
 - **compare (run vs run):** pick a scenario in the filter row, then Base and Compare (default: its newest version against its newest scored older version, as the scorecard compares; with none, the version before it, void or not, since its cost counts). Tiles show before → after with the change (cost up reads bad, quality up good; a seeded score changes by recall on the shared seeds; a cost change against a void run is tagged "vs void" and not coloured, as in the trend panels), normalized cost below, and per-stage output and context tokens as two grouped-bar charts. With all scenarios selected (and in the PNG) it is one table of every scenario's default pair.
 - **heatmap:** per planted defect, which stage caught it.

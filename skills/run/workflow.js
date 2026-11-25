@@ -210,7 +210,7 @@ const AI_TRACE = 'co-authored-by|generated with|\\bclaude\\b|anthropic|\\.claude
 const runBranches = repo => [...new Set([...W.filter(w => w.repo === repo).flatMap(w => [w.featureBranch, w.branch]), ...DOCS.filter(d => d.repo === repo).map(d => d.featureBranch)])]
 const HYGIENE = (range, repo) => `Hygiene: the commits git log --author="$(git config user.email)" ${range} lists (messages, trailers, added lines) and any PR body written for this branch must have zero matches for grep -iE '${AI_TRACE}' (real code identifiers such as an API-key env var name are not trace). A hit in a run-authored commit is critical (kind hygiene); if you are the agent pushing, do not push and return ok=false. Commits by other authors: report a hit once as a minor hygiene finding, never rewrite them.${conf(repo).copyExcluded.length ? ` Git-excluded copies stay out of every commit: git diff --name-only ${range} -- ${conf(repo).copyExcluded.map(sq).join(' ')} must print nothing; a hit is critical (kind hygiene).` : ''}${A.localOnly ? ` Local-only run: git -C ${repo} for-each-ref --format='%(refname)' ${runBranches(repo).flatMap(b => [sq(`refs/remotes/*/${b}`), sq(`refs/remotes/*/${b}--*`)]).join(' ')} | grep -v '^refs/remotes/${O}/' must print nothing: a line there is a run branch pushed to a network remote, critical (kind hygiene).` : ''}`
 const TEST_GUARD = 'Test integrity: list pre-existing test files the range modified, deleted or renamed (git diff --diff-filter=MDR --name-only on test paths). A changed input or weakened assertion needs a reason from the brief or spec, else it is a major. Each of these is a critical unless the brief names it: a deleted or renamed pre-existing test; an added skip marker (skip|xfail|\\.only\\(|@Disabled|pytest.mark.skip|it.todo|describe.skip); an edit to test-runner config (jest/vitest/playwright/pytest config, pyproject [tool.pytest], conftest, coverage thresholds); a rewritten snapshot. For each changed assertion, mutate the production line it guards in your worktree and confirm the test goes red; one that stays green is a regression. Each new or changed test must pass 3 consecutive runs at the head (run it alone); a red run is a major (kind bug).'
-const TRIAL = w => `Integration: in your worktree, trial-merge ${O}/${w.featureBranch} into the head (git merge --no-commit --no-ff, never committed or pushed) and run the gate there too. A failure or conflict the merge introduces is a regression of kind "integration" (critical or major by SEV), even when it surfaces in another workstream's files.`
+const TRIAL = w => `Integration: in your worktree, trial-merge ${O}/${w.featureBranch} into the head (git merge --no-commit --no-ff, never committed or pushed) and run the gate there too. A failure or conflict the merge introduces is a regression of kind "integration" (critical or major by the severity rule), even when it surfaces in another workstream's files.`
 const REFUTE = 'For each claim, try to REFUTE it; a claim you cannot prove with a command you ran stays open. Comments, docstrings and commit messages are claims, not evidence.'
 const MERGE_EDITS = (hot, edits) => hot.length ? `Shared-file edits are applied by the merge on the feature-branch tip, never in this range (shared files = ${hot.join(', ')}): a brief criterion on a shared file is met when the author's sharedEdits carry it (${edits.length ? JSON.stringify(edits) : 'none returned'}). Its absence from this range or head is never a finding; only a brief shared edit missing from that list is a finding. ` : ''
 // merge, promote and docs run as the lean implementer type, whose own instructions are written for feature work
@@ -304,7 +304,9 @@ const PUSHED = {
 const ALREADY = { type: 'boolean', description: 'true when the validated head was already an ancestor of the feature branch: success, nothing merged again' }
 const IMPLEMENTED = { ...PUSHED, properties: { ...PUSHED.properties, alreadyMerged: ALREADY, sha: { type: 'string', pattern: '^([0-9a-f]{40})?$', description: `full 40-hex remote SHA verified via git ls-remote; nothing to change: the current ${O} branch head` }, ok: { type: 'boolean', description: 'gate green AND pushed AND ls-remote verified; nothing to change: gate green, no push' } } }
 // the merge also reports where it landed, so a lone workstream merged onto an untouched base can skip the seam review
-const MERGED = { ...PUSHED, properties: { ...PUSHED.properties, alreadyMerged: ALREADY, preMergeSha: { type: 'string', description: 'the feature-branch tip your pushed merge commit sits on (its first parent)' }, baseAtMerge: { type: 'string', description: `git rev-parse ${O}/<base> after your last fetch` } }, required: [...PUSHED.required, 'preMergeSha', 'baseAtMerge'] }
+const without = (s, ...keys) => ({ ...s, properties: Object.fromEntries(Object.entries(s.properties).filter(([k]) => !keys.includes(k))), required: s.required.filter(k => !keys.includes(k)) })
+const LANDED = without(PUSHED, 'sharedEdits', 'decisions', 'questions') // the merge authors nothing, so it reports none
+const MERGED = { ...LANDED, properties: { ...LANDED.properties, alreadyMerged: ALREADY, preMergeSha: { type: 'string', description: 'the feature-branch tip your pushed merge commit sits on (its first parent)' }, baseAtMerge: { type: 'string', description: `git rev-parse ${O}/<base> after your last fetch` } }, required: [...LANDED.required, 'preMergeSha', 'baseAtMerge'] }
 const FIXED = {
   type: 'object',
   properties: {
@@ -439,7 +441,7 @@ const unran = {} // label -> attempts that returned without running the gate, fo
 // a failed probe ends the step as a resumable infra fault instead of a third blind retry.
 const infra = {} // label -> the health probe failed
 const HEALTH = { type: 'object', properties: { ok: { type: 'boolean', description: 'true if the command ran' }, notes: { type: 'string' } }, required: ['ok', 'notes'] }
-const healthy = async o => !!(await agent(`Health check: run git --version in a shell and return ok=true with its output in notes. Change nothing. ${HARD}`, { label: `health ${o.label}`, phase: o.phase, model: 'sonnet', effort: 'low', schema: HEALTH }))?.ok
+const healthy = async o => !!(await agent(`Health check: run git --version in a shell and return ok=true with its output in notes. Change nothing. ${HARD}`, { label: `health ${o.label}`, phase: o.phase, agentType: 'validator', model: 'sonnet', effort: 'low', schema: HEALTH }))?.ok
 // checks: how many checks the prompt carries; the schema asks for their exits, and in a gated step a missing or short checkExits never ran
 async function step(prompt, { gated, checks = 0, ...opts }, anySha = false) {
   opts.schema = withChecks(opts.schema, checks)
@@ -724,6 +726,10 @@ Return headSha, gate, evidence, verified (empty), open (ids v${i}-F1, ...) and q
         const fix = await step(
           `You are the author of workstream ${w.id} (${w.repo}, branch ${w.branch}). Review cycle ${i} findings:
 ${JSON.stringify(found)}
+
+Brief:
+${w.brief}
+
 ${stuck.map(({ f, t }) => `${f.id}: a prior fixer attempted this ${t.rounds.size} times: ${t.answers.join(' | ')}. Those attempts did not hold: find the root cause rather than repeat them; if no fix can hold, say why in the answer.\n`).join('')}${decisions.length ? `Your earlier reasoning:\n${JSON.stringify(decisions)}\n` : ''}${asked.length ? `Optional questions this workstream raised earlier (it continued on their defaults), still open for the user:\n${JSON.stringify(asked)}\n${SETTLES}\n` : ''}
 Set up: worktree ${w.id}-fix${i}, detached at ${O}/${w.branch} (expected ${prev}; if it moved, an earlier attempt of this step pushed it: continue from it); push back to ${w.branch}.
 Critical and major: fix bugs with a test you ran RED before the fix and green after; answer every kind "question" with a defensible reason or a change; delete what the over-engineering findings say to delete.
@@ -832,7 +838,7 @@ ${GATE(w.gate, c.knownRed, w.repo)}
 Red gate: do not push, return ok=false with the failure.
 ${HYGIENE(`${O}/${w.featureBranch}..HEAD`, w.repo)}
 ${GIT(w.repo, `merge-${w.id}`)}
-Push to ${w.featureBranch} (plain push; if rejected, fetch and redo every step on the new tip). Return status, ok, verified sha, tests, gateTail, notes, preMergeSha (git rev-parse of your pushed merge commit's first parent, the ${w.featureBranch} tip it landed on) and baseAtMerge (git rev-parse ${O}/${w.base} after your last fetch); sharedEdits, decisions and questions empty.`,
+Push to ${w.featureBranch} (plain push; if rejected, fetch and redo every step on the new tip). Return status, ok, verified sha, tests, gateTail, notes, preMergeSha (git rev-parse of your pushed merge commit's first parent, the ${w.featureBranch} tip it landed on) and baseAtMerge (git rev-parse ${O}/${w.base} after your last fetch).`,
         { label: `${tag} merge`, phase: 'Merge', agentType: 'implementer', model: 'sonnet', effort: out.sharedEdits.length ? 'medium' : 'low', schema: MERGED }, !readsMergeSha) // a malformed sha gets the repair call only when a later step reads it
       if (m?.ok && m.status === 'done') {
         if (!done.includes(w)) done.push(w)
@@ -988,7 +994,7 @@ sha = the ${O}/${r.featureBranch} commit you validated. Ids: V-F1, V-F2, ...; qu
       `Whole-branch fix round ${round} on ${r.repo}, feature branch ${r.featureBranch}. Findings:
 ${JSON.stringify(findings)}
 ${ALSO(findings)}
-${(x => x.length ? `Handed findings (${x.join(', ')}) are this pass's to fix in any file, pre-existing tests included (never escalated for that), unless a finding says a brief names that file by path, directory or glob as not to be edited: escalate that one. A clause that names no path, directory or glob does not bar a handed fix.\n` : '')(handed.filter(h => findings.some(f => f.id === h.id)).map(h => h.id))}${softAsked.length ? `Optional questions the workstreams raised earlier (they continued on the defaults), still open for the user:\n${JSON.stringify(softAsked.map(({ w, ...q }) => q))}\n${SETTLES}\n` : ''}Set up: worktree wb-fix${round}, detached at ${head} (fetch first); push to the side branch ${side}, never to ${r.featureBranch}: it fast-forwards to your fix only after the recheck passes. If ${O}/${side} already exists and contains ${head}, an earlier attempt of this step pushed it: continue from it; if it does not contain ${head}, it is a leftover of an earlier run: delete it first (git push ${O} --delete ${side}).
+${(x => x.length ? `Handed findings (${x.join(', ')}) are this pass's to fix in any file, pre-existing tests included (never escalated for that), unless a brief or finding names that file by path, directory or glob as not to be edited: escalate that one. A clause that names no path, directory or glob does not bar a handed fix.\n` : '')(handed.filter(h => findings.some(f => f.id === h.id)).map(h => h.id))}${softAsked.length ? `Optional questions the workstreams raised earlier (they continued on the defaults), still open for the user:\n${JSON.stringify(softAsked.map(({ w, ...q }) => q))}\n${SETTLES}\n` : ''}Set up: worktree wb-fix${round}, detached at ${head} (fetch first); push to the side branch ${side}, never to ${r.featureBranch}: it fast-forwards to your fix only after the recheck passes. If ${O}/${side} already exists and contains ${head}, an earlier attempt of this step pushed it: continue from it; if it does not contain ${head}, it is a leftover of an earlier run: delete it first (git push ${O} --delete ${side}).
 Critical and major: resolve every one (red-verified tests for bug fixes; defensible answers to questions; delete what over-engineering findings name). ${ESCALATE}${STOP_FIX && ' ' + STOP_FIX.trim()} Minor, including those carried from the workstream cycles: fix only if it is a one-liner, otherwise decline with a reason. Minimal fixes.
 Nothing to change (all answered, declined or escalated): no commit, no push, sha = ${head} (or the ${O}/${side} head if an earlier attempt pushed it), ok = true.
 Never merge a workstream branch: an unmerged workstream is the coordinator's call. If you change the source of a generated file, ${c.regen ? `rerun: ${c.regen}` : 'regenerate it with the repo\'s own script'}.
@@ -996,8 +1002,12 @@ ${ACC_READ}${LADDER}
 ${GATE(gates, c.knownRed, r.repo)}
 ${GIT(r.repo, `wb-fix${round}`)}
 In notes, list each file you changed as "changed: <path>".
-Return status, ok, verified sha, tests, gateTail, one answer per finding id, questions and notes; sharedEdits and decisions empty.`,
-      { label: `${n} fix r${round}`, phase: 'Whole-branch', agentType: 'implementer', model: top(r.ws.map(w => w.model)), schema: FIXED })
+
+Briefs:
+${briefs}
+
+Return status, ok, verified sha, tests, gateTail, one answer per finding id, questions and notes.`,
+      { label: `${n} fix r${round}`, phase: 'Whole-branch', agentType: 'implementer', model: top(r.ws.map(w => w.model)), schema: without(FIXED, 'sharedEdits', 'decisions') })
     if (!fix) return fail(unusable(`whole-branch fix r${round}`, side, `${n} fix r${round}`))
     res.questions.push(...fix.questions)
     res.notes.push(...fix.notes)
@@ -1097,7 +1107,7 @@ if (A.resume && STAGE !== 'wholeBranch') {
     `Resume of run ${A.resume}, call ${CALL} (inputs ${inputs}): read the git state of ${r.repo}; change nothing. git -C ${r.repo} fetch ${O}; featureSha = git -C ${r.repo} rev-parse ${O}/${r.featureBranch}. For each workstream branch below: head = git -C ${r.repo} rev-parse ${O}/<branch> (empty if the branch does not exist on ${O}); merged = true only if head is non-empty and git -C ${r.repo} merge-base --is-ancestor <head> ${O}/${r.featureBranch} succeeds.
 ${r.ws.map(w => `${w.id}: ${w.branch}`).join('\n')}
 No worktree, no checkout, no commits, no pushes; never touch the user's checkout. ${HARD}`,
-    { label: `${name(r.repo)} state`, phase: 'Implement', model: 'sonnet', effort: 'low', schema: STATE }, true)))
+    { label: `${name(r.repo)} state`, phase: 'Implement', agentType: 'validator', model: 'sonnet', effort: 'low', schema: STATE }, true)))
   states.forEach((st, i) => {
     if (st) featureShaOf[REPOS[i].repo] = st.featureSha
     if (!st) return log(`${name(REPOS[i].repo)}: the resume state probe died; its workstreams start from implement, which carries a merged branch as merged`)
@@ -1126,7 +1136,7 @@ const dropped = wsResults.filter(w => w.dropped).map(w => w.id)
 const skipped = new Set(repoResults.filter(r => r.verdict === 'skipped').map(r => r.repo))
 const shipped = skipped.size < REPOS.length
 const paused = repoResults.some(r => r.verdict === 'paused' || r.verdict === 'incomplete') // contracts, docs and the drift audit wait for the user's human check, or for every planned workstream
-const PINS = repoResults.map(r => `${r.repo} @ ${r.featureBranch} = ${r.sha || `${O}/${repoMap[r.repo].base} (nothing merged)`}`).join('\n') + '\n' + STALE
+const PINS = repoResults.map(r => `${r.repo} @ ${r.featureBranch} = ${r.sha || 'nothing merged'} (base ${O}/${repoMap[r.repo].base})`).join('\n') + '\n' + STALE
 const driftWanted = !!A.decisionLog && shipped && !paused
 const driftShort = driftWanted && short('drift audit') // short last: it records a stop only when the audit would run
 const driftRan = driftWanted && !driftShort

@@ -238,9 +238,11 @@ function compareRows(a, b) {
     row('Minutes per agent', na.minPerAgent, nb.minPerAgent, -1)].filter(Boolean)
 }
 // output tokens per agent of a version's scored runs: the mean of per-run ratios, the runs it is over, and their total tokens
+// (from 0.4.4 an S16 run is S20's call 1, whose tokens the S20 run already holds: a total over both leaves S16 out)
 function versionCost(runs, version) {
   const rs = runs.filter(r => r.hydraVersion === version && passBar(r) !== 'void'), m = normMean(rs, 'perAgent')
-  return m && { ...m, tokens: rs.reduce((a, r) => a + r.cost.outputTokens, 0) }
+  const inS20 = vcmp(version, '0.4.3') > 0 && rs.some(r => r.scenario === 'S20')
+  return m && { ...m, tokens: rs.reduce((a, r) => a + (inS20 && r.scenario === 'S16' ? 0 : r.cost.outputTokens), 0) }
 }
 // the change in that mean from version p to c, only over the scenarios both versions scored: cost compares within a scenario
 function sharedCostDelta(runs, c, p) {

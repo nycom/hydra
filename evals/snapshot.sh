@@ -15,7 +15,7 @@ chrome() { "$CHROME" --headless --user-data-dir="$PROFILE" --no-first-run --no-d
 
 for s in $(node -e "import('./evals/report.mjs').then(m => console.log(m.SECTIONS.join(' ')))"); do
   # first pass: the page measures the isolated section and stamps <body data-size="w,h">
-  size="$(chrome --window-size=1400,1200 --dump-dom "$URL?section=$s&theme=light&measure=1" | sed -n 's/.*data-size="\([0-9]*,[0-9]*\)".*/\1/p' | head -1)"
+  size="$(chrome --window-size=1400,1200 --dump-dom "$URL?section=$s&theme=light&measure=1" | sed -n 's/.*data-size="\([0-9]*,[0-9]*\)".*/\1/p' | head -1)" || true # Chrome can exit non-zero on teardown after printing; the size guard below decides
   [ -n "$size" ] || { echo "could not measure section $s" >&2; exit 1; }
   png="evals/png/$s.png"
   rm -f "$png"

@@ -3,9 +3,9 @@
 A Claude Code plugin with one skill, `/hydra:run`: a multi-repo, multi-agent implementation workflow.
 
 <!-- eval:start -->
-**Combined score:** 96/100 (9 of 9 scenarios)
+**Combined score:** 99/100 (9 of 9 scenarios)
 
-**Latest eval:** S15-seeded 0.3.9 pass (recall 9/10) · S15-control 0.3.9 pass (0 major false positives) · S16 0.3.9 pass (honest) · S17-seeded 0.3.9 pass (recall 3/4) · S17-control 0.3.9 pass (0 major false positives) · S18 0.4.2 pass (all 4 criteria hold) · S19 0.4.2 pass (all 3 criteria hold) · S20 0.4.2 pass (all 3 criteria hold) · S21 0.4.3 pass (all 3 criteria hold)
+**Latest eval:** S15-seeded 0.3.9 pass (recall 9/10) · S15-control 0.3.9 pass (0 major false positives) · S16 0.4.4 pass (honest) · S17-seeded 0.4.4 pass (recall 4/4) · S17-control 0.3.9 pass (0 major false positives) · S18 0.4.2 pass (all 4 criteria hold) · S19 0.4.2 pass (all 3 criteria hold) · S20 0.4.4 pass (all 3 criteria hold) · S21 0.4.4 pass (all 3 criteria hold)
 
 One run per scenario on a small fixture; limits in evals/retros/.
 
@@ -68,6 +68,8 @@ Stacked PRs are an opt-in mode, used only when asked for.
 ```
 
 Expects `implementer`, `reviewer` and `validator` subagents in `~/.claude/agents/`.
+
+Hydra does not ship these agents, and their definitions decide how much context every worker starts with. To keep workers lean, set `omitClaudeMd: true` in the three files and tell the agents in their bodies to read the CLAUDE.md / AGENTS.md of the repo they work in, since the flag drops those too. On the author's setup, which also keeps another plugin's session-start text out of these agents, first calls went from 17,000-19,000 to 6,500-8,200 tokens; the saving depends on the size of your own instruction files.
 
 Optional, for per-worker step bars in a progress mod that offers a step tool: add that tool to the `tools:` list of the implementer, reviewer and validator agent types, then pass `stepTool` (see `SKILL.md`).
 
