@@ -69,6 +69,8 @@ Stacked PRs are an opt-in mode, used only when asked for.
 
 Expects `implementer`, `reviewer` and `validator` subagents in `~/.claude/agents/`.
 
+Hydra does not ship these agents, and their definitions decide how much context every worker starts with. To keep workers lean, set `omitClaudeMd: true` in the three files and tell the agents in their bodies to read the CLAUDE.md / AGENTS.md of the repo they work in, since the flag drops those too. On the author's setup, which also keeps another plugin's session-start text out of these agents, first calls went from 17,000-19,000 to 6,500-8,200 tokens; the saving depends on the size of your own instruction files.
+
 Optional, for per-worker step bars in a progress mod that offers a step tool: add that tool to the `tools:` list of the implementer, reviewer and validator agent types, then pass `stepTool` (see `SKILL.md`).
 
 ## Tests

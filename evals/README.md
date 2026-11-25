@@ -63,7 +63,7 @@ Scenarios run `skills/run/workflow.js` directly. S16 is S20's call 1, so any row
 | resume, `carryForward`, state probe | S18, S20 (resume after a decision), S21 resumed leg |
 | `humanCheck` | S19 |
 | decisions, blocks | S20 (and S16), S21 resumed leg |
-| agent definitions (the installed implementer, reviewer and validator files) | every scenario: the installed files, not the repo copy, are what agents run |
+| agent definitions (the installed implementer, reviewer and validator files) | every scenario: hydra ships none, so the installed files are what agents run |
 | fixture or oracle scripts | `skills/run/tests/fixture/build.test.sh`, then every scenario whose fixture mode changed |
 | scoring scripts only | none: re-score the saved records |
 | `skills/run/SKILL.md` text only | none: the scenarios skip the coordinator, so this misses decomposition, briefs, setup, the sweep and every instruction only the coordinator reads; the `skills/run/tests` checks guard the text |
@@ -72,6 +72,7 @@ Scenarios run `skills/run/workflow.js` directly. S16 is S20's call 1, so any row
 
 - **Run score, 0–100:** a seeded run (S15-seeded, S17-seeded) scores its recall × 100 over kept seeds (one decimal); a control (S15-control, S17-control), S16 or S18-S21 scores 100 when its pass bar passes, else 0 (for S15-control that is exactly 0 major false positives; S17-control also needs `onBrief` when set). A void run has no score: it is never counted as 0 and the progress chart draws it hollow, below the axis.
 - **Combined score:** the mean run score of the newest scored (non-void) run per scenario, newest by version, then date, then id, rounded to an integer, with "n of 9 scenarios" beside it. A scenario with no scored run is left out, not counted as 0. The report header shows it beside the combined score over every version before the newest: as a ▲/▼ change when both cover the same scenarios, else as a neutral reference ("before: 100 over 4 scenarios (through 0.3.5)"). The README block opens with it.
+- **Reading a small change:** every cell is one run, so one seed moves the combined score by about 3 points. The step from 96 (0.4.3) to 99 (0.4.4) is one more S17 seed (W4) in a single run; five replays of the same reviewer prompt caught it in 2, and 5 of the 9 cells are runs on earlier versions.
 - **Combined as of run k:** the same mean over runs 1..k in chronological order (date, then version, then id). The progress chart draws it as one flat step per version across that version's columns (the value after its last run, since run order within a version is only id order) and shows the last 16 runs so the columns stay readable; its last point is the combined score, and the table view lists every run.
 
 ## Normalized cost
