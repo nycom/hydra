@@ -176,7 +176,7 @@ const F9 = { id: 'c1-F9', severity: 'major', kind: 'bug', where: 'ledger/receipt
   evidence: 'receipt_line([{"amount": 10000}], "EXPIRED") raises ValueError: discount code expired' }
 function handover(c) {
   const impl = origin(c, `${RECEIPT}^`), fix = origin(c, RECEIPT)
-  const pushed = sha => ({ status: 'done', ok: true, sha, tests: 'pre-pushed by the fixture', gateTail: 'gate exit=0', sharedEdits: [], decisions: [], questions: [], notes: ['pre-pushed by the fixture: no agent ran this step'] })
+  const pushed = sha => ({ status: 'done', ok: true, sha, tests: 'pre-pushed by the fixture', gateTail: 'pre-pushed by the fixture', sharedEdits: [], decisions: [], questions: [], notes: ['pre-pushed by the fixture: no agent ran this step'] })
   return {
     [IMPLEMENT]: pushed(impl),
     [REVIEW]: { headSha: impl, findings: [F9] },

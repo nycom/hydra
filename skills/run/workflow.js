@@ -439,11 +439,11 @@ const unaccounted = (prior, verified, open) => prior.filter(f => blocking(f) && 
 // the first path:line (or path:from-to) in a finding's where; null for 'gate', 'merge' and other non-file wheres
 const loc = f => { const m = f.where.match(/([^\s:,()]+):(\d+)(?:-(\d+))?/); return m && { file: m[1], from: +m[2], to: +(m[3] || m[2]) } }
 const fileOf = f => loc(f)?.file || '' // churn ignores ''
-const inDocs = f => /(^|\/)(readme|changelog)(\.[\w-]+)*$|(^|\/)docs\//i.test(fileOf(f))
-// What makes an author's or fixer's result a fabrication, else ''. No honest result has an all-zero sha. A placeholder gateTail (no "gate exit=" line, no number,
-// no second line: not even a cut gate output) counts only on a commit that is new against from; a fixer that changed nothing runs no gate and says so.
+const inDocs = f => /(^|\/)(readme|changelog)(\.[\w-]+)*$|(^|\/)docs\/.*\.(md|mdx|rst|adoc|txt)$/i.test(fileOf(f))
+// What makes an author's or fixer's result a fabrication, else ''. No honest result has an all-zero sha. A gateTail counts only when it is nothing but
+// a placeholder word, on a commit that is new against from: a terse gate's output may be one word or none, cut above its "gate exit=" line.
 const fabricated = (r, from) => !r?.ok ? '' : /^0{40}$/.test(r.sha) ? 'an all-zero sha'
-  : from && r.status === 'done' && hex(r.sha) && !same(r.sha, from) && !/gate exit=|\d|\n/.test(r.gateTail.trim()) ? 'a new commit with a placeholder gateTail' : ''
+  : from && r.status === 'done' && hex(r.sha) && !same(r.sha, from) && /^\W*(placeholder|tbd|todo)\W*$/i.test(r.gateTail) ? 'a new commit with a placeholder gateTail' : ''
 // A dead agent is replaced by a fresh one of the same role that redoes the whole step, up to 2 replacements.
 // The attempt number changes the prompt, so a resume can never hand back the dead attempt's cached result.
 // A done+ok result without a full 40-hex sha would orphan a correct push: the next attempt only repairs the sha,
@@ -1269,7 +1269,7 @@ ${NOT_FEATURE}
 Set up: worktree docs-fix, detached at ${O}/${side} (expected ${o.sha}; if it moved, an earlier attempt of this step pushed it: continue from it); push back to ${side}, never to ${d.featureBranch}.
 Change only the doc lines the findings name, so each says what the code at these pinned heads does:
 ${PINS}
-${limits && `${limits} A line a docs change extended or reworded: restore that line as it is at ${o.baseSha}. What a limit bars: leave it and say so in notes.\n`}A finding you cannot settle without changing code: leave it and say so in notes.
+${limits && `${limits} A line a docs change extended or reworded goes back to what it is at ${o.baseSha}, keeping only a correction of what was false there. What a limit bars: leave it and say so in notes.\n`}A finding you cannot settle without changing code: leave it and say so in notes.
 Nothing to change: no commit, no push, sha = the current ${O}/${side} head (${o.sha} unless an earlier attempt moved it), ok = true.
 ${gate ? `${GATE(gate, knownRed, d.repo)}\nRed gate: do not push, ok=false.` : 'No gate for this repo.'}
 Before pushing: ${HYGIENE(`${o.sha}..HEAD`, d.repo)}

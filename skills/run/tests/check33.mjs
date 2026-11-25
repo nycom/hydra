@@ -52,7 +52,7 @@ const three = L => [L, `${L} attempt 2`, `${L} attempt 3`]
 // ---- 1. a fabricated result is a dead attempt ----
 const REPAIR = 'Do not redo the work: git ls-remote'
 const zeros = [['an all-zero sha and placeholders', { sha: ZERO, tests: 'placeholder', gateTail: 'placeholder' }], ['an all-zero sha', { sha: ZERO }]]
-const blanks = [['a placeholder gateTail', { tests: 'placeholder', gateTail: 'placeholder' }], ['an empty gateTail', { gateTail: ' ' }]]
+const blanks = [['a placeholder gateTail', { tests: 'placeholder', gateTail: 'placeholder' }], ['another placeholder word', { gateTail: ' [TBD] ' }]]
 const once = own => (p, k) => k === 1 ? own : undefined
 const then = (own, real) => (p, k) => k === 1 ? own : real
 const found = { 'a review c1': () => ({ findings: [F('c1-F1')] }), 'a validate c1': () => ({ verified: ['c1-F1'] }) }
@@ -140,8 +140,8 @@ await t('1i2 (control) nor when an earlier attempt moved the head: a dead one, a
     assert.deepEqual([again.ran('one fix r1').length, again.one.verdict], [1, 'pass'], `wholeBranch: ${gateTail}`)
     const fresh = await go(ONE, { ...r1(() => moved), 'a implement': () => ({ alreadyMerged: true }) })
     assert.deepEqual([fresh.ran('one fix r1').length, fresh.one.verdict], [1, 'pass'], `a fresh run over merged work: ${gateTail}`) } })
-await t('1i3 (control) a gate output cut above its last line is a gate output', async () => {
-  for (const gateTail of ['Ran 15 tests in 0.004s\n\nOK', '12 passed', '[INFO] BUILD SUCCESS\n[INFO] done', 'lint clean\nall checks passed', 'gate exit=0'])
+await t('1i3 (control) a gate output cut above its last line is a gate output, a terse gate\'s one word or nothing included', async () => {
+  for (const gateTail of ['Ran 15 tests in 0.004s\n\nOK', '12 passed', '[INFO] BUILD SUCCESS\n[INFO] done', 'lint clean\nall checks passed', 'All checks passed!', 'OK', 'BUILD SUCCESSFUL', '', undefined, 'the placeholder tests pass', 'gate exit=0'])
     for (const x of [await go(ONE, c1(() => ({ gateTail }))), await go(ONE, r1(() => ({ gateTail }))), await go(ONE, { 'a implement': () => ({ gateTail }) })])
       assert(x.a.merged && x.one.verdict === 'pass' && !x.order.some(l => /attempt/.test(l)), gateTail) })
 await t('1i4 (control) an author has no given head, so its gateTail is never judged; a result that claims no push is not either', async () => {
@@ -149,6 +149,8 @@ await t('1i4 (control) an author has no given head, so its gateTail is never jud
     assert.equal((await go(ONE, { 'a implement': () => ({ gateTail }) })).ran('a implement').length, 1, gateTail)
   const m = await go(ONE, { 'a implement': () => ({ alreadyMerged: true, gateTail: 'already merged, not run' }) })
   assert.deepEqual([m.ran('a implement').length, m.a.merged, m.ran('a merge').length], [1, true, 0], 'already merged')
+  const softFix = await go(ONE, c1(() => ({ status: 'blocked', gateTail: 'placeholder', questions: [Q('Round up?')] })))
+  assert.equal(softFix.ran('a fix c1').length, 1, 'a soft block is judged on its sha alone')
   for (const own of [{ ok: false, sha: '', gateTail: 'gate exit=1' }, { ok: false, sha: '', gateTail: '' }, { status: 'blocked', ok: false, sha: '', gateTail: '', questions: [Q('which?')] }, { status: 'failed', ok: false, sha: ZERO, gateTail: '' }])
     assert.equal((await go(ONE, { 'a implement': () => own })).ran('a implement').length, 1, JSON.stringify(own)) })
 await t('1j (control) an honest empty sha keeps its sha repair: no redo, and the first result stays', async () => {
@@ -200,8 +202,8 @@ await t('2d after a docs fix round the revalidation decides', async () => {
   const lost = await go(ONE, { ...open(M), ...round, 'one docs revalidate': () => ({ verified: [] }) })
   assert.deepEqual([lost.one.verdict, status(lost.one, 'V-F1')], ['pass', 'open']) })
 await t('2e only open minors in doc files that are not already a question for the user are given', async () => {
-  const yes = ['README.md:9', 'pkg/README.he.md:1', 'docs/a.md:3', 'x/docs/b.txt:2-4', 'CHANGELOG.md:2', 'readme:5'].map((w, i) => F(`V-F${i}`, w, 'minor', 'docs'))
-  const no = ['a/x.py:3', 'a/readme_parser.py:3', 'README.md', 'a/documents.py:1'].map((w, i) => F(`V-N${i}`, w, 'minor'))
+  const yes = ['README.md:9', 'pkg/README.he.md:1', 'docs/a.md:3', 'x/docs/b.txt:2-4', 'app/docs/v/c.RST:2', 'CHANGELOG.md:2', 'readme:5'].map((w, i) => F(`V-F${i}`, w, 'minor', 'docs'))
+  const no = ['a/x.py:3', 'a/readme_parser.py:3', 'README.md', 'a/documents.py:1', 'app/docs/views.py:3', 'docs/conf.py:9'].map((w, i) => F(`V-N${i}`, w, 'minor'))
   const asked = F('V-Q', 'README.md:7', 'minor', 'docs'), mine = F('v1-Q', 'README.md:8', 'minor', 'docs')
   const { prompts, one } = await go(ONE, { 'a validate c1': () => ({ open: [mine], questions: [Q('v1-Q: shorten it?')] }), 'one validate': () => ({ findings: [...yes, ...no, asked], questions: [Q('V-Q: which wording?')] }),
     'one docs validate': () => ({ verified: ['V-N0', 'V-Q', 'a:v1-Q', 'V-F0'] }) })
@@ -228,7 +230,7 @@ await t('3a the merged shared edits are limits for the docs agent, the docs fixe
   const L = ['one docs', 'one docs fix', 'one docs revalidate', 'one docs validate']
   assert.deepEqual(holds(all, RULE), L)
   for (const l of L) assert(all[l][0].includes(`${JSON.stringify([ROW])}`) && all[l][0].split(RULE).length === 2, l)
-  assert(all['one docs fix'][0].includes(`restore that line as it is at ${BASE}`))
+  assert(all['one docs fix'][0].includes(`goes back to what it is at ${BASE}, keeping only a correction of what was false there.`))
   assert(opts['one docs validate'].schema.required.includes('questions')) })
 await t('3b a docs commit that reworded a merged row is filed, fixed in the one round and leaves nothing open', async () => {
   const { one, ran } = await go(ONE, { ...edited, 'one docs validate': judge })
@@ -255,7 +257,7 @@ await t('3d2 a re-merge after a human check adds to the limits, and the implemen
   const check = { cycles: 1, workstreams: [ws('a', { humanCheck: 'look at it' })] }, extra = { file: 'README.md', intent: 'row a2' }
   const first = await go(check, edited)
   const again = await go({ ...check, resume: 'run-1', carryForward: JSON.parse(JSON.stringify(first.r.carryForward)), humanChecks: { a: [{ sha: first.a.validatedSha, answer: 'wrong colour' }] } },
-    { 'one state': () => ({ workstreams: [{ id: 'a', head: first.a.validatedSha, merged: true }] }), 'a fix c1': () => ({ sha: SHA(299), sharedEdits: [extra] }), 'a validate c1': () => ({ verified: ['H1-F1'] }) })
+    { 'one state': () => ({ workstreams: [{ id: 'a', head: first.a.validatedSha, merged: true }] }), 'a fix c1': () => ({ sha: SHA(299), sharedEdits: [ROW, extra] }), 'a validate c1': () => ({ verified: ['H1-F1'] }) })
   assert.deepEqual(again.r.carryForward.workstreams.a.sharedEdits, [ROW, extra])
   const found2 = await go({ cycles: 1, workstreams: [ws('a')], resume: 'run-1', carryForward: { workstreams: { a: {} } } }, { 'a implement': () => ({ alreadyMerged: true, sharedEdits: [ROW] }) })
   assert(found2.prompts['one docs'].includes(JSON.stringify([ROW]))) })
@@ -274,6 +276,10 @@ await t('3g a question of the first docs validation survives the fix round and i
   const { r, prompts } = await go(ONE, { ...edited, 'one docs validate': () => ({ verdict: 'fail', findings: [reworded], questions: [ask] }), 'one docs revalidate': () => ({ questions: [ask] }) })
   assert(prompts['one docs revalidate'].includes(`Already asked of the user, never re-ask: ${JSON.stringify([ask.q])}`))
   assert.deepEqual(r.questions.map(q => q.q), [`one: ${ask.q}`]) })
+await t('3i (control) a question of a docs validator that saw another commit is not asked', async () => {
+  const { r, one } = await go(ONE, { ...edited, 'one docs validate': () => ({ sha: SHA(77), questions: [Q('Extend?')] }) })
+  assert.deepEqual([one.verdict, r.questions], ['fail', []])
+  assert(one.findings.some(f => f.id === 'D-X')) })
 await t('3h a docs round that fails still hands its question over', async () => {
   const { r, one } = await go(ONE, { ...edited, 'one docs validate': () => ({ verdict: 'fail', findings: [reworded], questions: [Q('Extend?')] }), 'one docs fix': () => ({ sha: '' }) })
   assert.deepEqual([one.verdict, r.questions.map(q => q.q)], ['fail', ['one: Extend?']]) })
