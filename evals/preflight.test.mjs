@@ -90,6 +90,7 @@ test('preflight', par, async t => {
     ['an uncommitted change to a file the run executes fails; docs and checks do not', async () => {
       const root = plugin()
       fs.appendFileSync(path.join(root, 'skills/run/SKILL.md'), '\n')
+      fs.appendFileSync(path.join(root, 'skills/run/references/results.md'), '\n')
       fs.appendFileSync(path.join(root, 'skills/run/tests/check17.mjs'), '\n')
       await passes('S20', { root })
       fs.appendFileSync(path.join(root, 'skills/run/workflow.js'), '\n')

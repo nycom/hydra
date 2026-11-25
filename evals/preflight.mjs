@@ -247,7 +247,7 @@ await check(`plugin under test is ${opt.values.version}`, () => {
 await check('what the run executes is committed', () => {
   // the skill's scripts and the fixture; docs and check files run in no eval, so an edit there does not block one
   const dirty = must('git', ['-C', c.root, 'status', '--porcelain', '-uall', '--', '.claude-plugin', 'skills/run',
-    ...['skills/run/*.md', 'skills/run/tests/*.md', 'skills/run/tests/*.mjs'].map(g => `:(exclude,glob)${g}`)])
+    ...['skills/run/*.md', 'skills/run/references/*.md', 'skills/run/tests/*.md', 'skills/run/tests/*.mjs'].map(g => `:(exclude,glob)${g}`)])
   assert.equal(dirty, '', `uncommitted:\n${dirty}`)
   c.sha = must('git', ['-C', c.root, 'rev-parse', 'HEAD'])
   return `${must('git', ['-C', c.root, 'rev-parse', '--abbrev-ref', 'HEAD'])} ${c.sha.slice(0, 7)}`

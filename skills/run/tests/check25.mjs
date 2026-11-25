@@ -3,6 +3,7 @@
 import { Run } from './run.mjs'
 import assert from 'node:assert'
 import { readFileSync } from 'node:fs'
+import { skillText } from './skill-text.mjs'
 const SHA = n => (n + '').padStart(40, 'a')
 const parallel = fs => Promise.all(fs.map(f => f().catch(() => null)))
 const free = { total: null, spent: () => 0, remaining: () => Infinity }
@@ -273,7 +274,7 @@ await t('4b a hard-blocked author resumed with that answer reaches the carry and
 
 // ---- docs and version ----
 await t('3a SKILL.md states the drop; plugin.json is at least 0.4.3', async () => {
-  const s = readFileSync(new URL('../SKILL.md', import.meta.url), 'utf8')
+  const s = skillText
   assert(/dropped the question about it/.test(s), 'the drop note')
   assert(/drop\s+a\s+held\s+question\s+that\s+starts\s+with\s+an\s+id\s+such\s+a\s+note\s+names/.test(s) && /a\s+question\s+from\s+an\s+earlier\s+call\s+under\s+the\s+\"<ws\s+id>:\s+\"\s+tag/.test(s) && /the\s+bare\s+`<id>`\s+only\s+under\s+that\s+workstream's\s+tag/.test(s), 'the held-question drop')
   assert(s.includes('a file a brief names by path, directory or glob as not to be edited') && !/may not stop that fix/.test(s), 'the widened carve-out')

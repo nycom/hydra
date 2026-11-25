@@ -3,7 +3,7 @@
 // Every scenario fails against the 0.3.7 script except the ones marked (control).
 import { Run } from './run.mjs'
 import assert from 'node:assert'
-import { readFileSync } from 'node:fs'
+import { skillText } from './skill-text.mjs'
 const SHA = n => (n + '').padStart(40, 'a')
 const parallel = fs => Promise.all(fs.map(f => f().catch(() => null)))
 const free = { total: null, spent: () => 0, remaining: () => Infinity }
@@ -65,7 +65,7 @@ const dirtyB = { 'b review c1': () => ({ findings: [F('c1-F1')] }), 'b validate 
 
 // B1. the progress panel's phase enum has no "hydra"
 await t('B1 SKILL.md calls the progress panel with phase delegate while running and close at the end', async () => {
-  const s = readFileSync(new URL('../SKILL.md', import.meta.url), 'utf8')
+  const s = skillText
   assert(!/phase: "hydra"/.test(s) && /phase: "delegate"/.test(s) && /phase: "close"/.test(s)) })
 
 // F1. local-only: every git step targets a local bare remote, and hygiene checks no network remote got a run branch

@@ -36,9 +36,9 @@ Interactive report: [evals/report.html](evals/report.html), open locally (GitHub
 - A `carried` claim (the only fix lies outside `files[]`) is checked by the validator; a rejected claim goes back to the fixer for one more cycle, counted by the usual stop rules. A soft block that continued on its defaults reads `status: done`, with a note. An infra stop says how many times the agent actually died and that the step can be resumed. Unconfirmed drift-audit items are kept under `drift.unconfirmed`, with no question.
 - With a progress panel, the coordinator sends a progress call at every return, the review phase and dropped workstreams included. The coordinator also runs each merged workstream's `checks` once itself at `finalSha`.
 - Smaller prompt fixes: the churn question no longer repeats the repo name, the decision-log sentence is emitted only with `decisionLog`, a regression under a stop rule has one meaning (it worked at the base or before a fix in this run), the drift prompt opens with its task and says what to do with an unreadable log, and the whole-branch fixer lists each file it changed as `changed: <path>` in notes.
-- The mechanical part lives in `skills/run/workflow.js` (a Claude Code Workflow script); `skills/run/SKILL.md` is the coordinator's procedure.
+- The mechanical part lives in `skills/run/workflow.js` (a Claude Code Workflow script); `skills/run/SKILL.md` is the coordinator's procedure, and `skills/run/references/` holds the parts it reads only when they apply.
 
-Opt-in, per run (details and every arg in `skills/run/SKILL.md`):
+Opt-in, per run (details and every arg in `skills/run/SKILL.md` and `skills/run/references/`):
 
 - `localOnly: true`: nothing reaches the network. Every push, fetch and `ls-remote` targets a bare repo on local disk set up as the remote `hydra-local`; the branches are fetched back into your repo as local branches at the end, and pushing stays yours.
 - `workstreams[].after: [ids]`: a workstream starts only once those (same repo) merged, and branches from that head.
@@ -71,7 +71,7 @@ Expects `implementer`, `reviewer` and `validator` subagents in `~/.claude/agents
 
 Hydra does not ship these agents, and their definitions decide how much context every worker starts with. To keep workers lean, set `omitClaudeMd: true` in the three files and tell the agents in their bodies to read the CLAUDE.md / AGENTS.md of the repo they work in, since the flag drops those too. On the author's setup, which also keeps another plugin's session-start text out of these agents, first calls went from 17,000-19,000 to 6,500-8,200 tokens; the saving depends on the size of your own instruction files.
 
-Optional, for per-worker step bars in a progress mod that offers a step tool: add that tool to the `tools:` list of the implementer, reviewer and validator agent types, then pass `stepTool` (see `SKILL.md`).
+Optional, for per-worker step bars in a progress mod that offers a step tool: add that tool to the `tools:` list of the implementer, reviewer and validator agent types, then pass `stepTool` (see `skills/run/references/args-and-sizing.md`).
 
 ## Tests
 

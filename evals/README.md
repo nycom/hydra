@@ -66,7 +66,7 @@ Scenarios run `skills/run/workflow.js` directly. S16 is S20's call 1, so any row
 | agent definitions (the installed implementer, reviewer and validator files) | every scenario: hydra ships none, so the installed files are what agents run |
 | fixture or oracle scripts | `skills/run/tests/fixture/build.test.sh`, then every scenario whose fixture mode changed |
 | scoring scripts only | none: re-score the saved records |
-| `skills/run/SKILL.md` text only | none: the scenarios skip the coordinator, so this misses decomposition, briefs, setup, the sweep and every instruction only the coordinator reads; the `skills/run/tests` checks guard the text |
+| `skills/run/SKILL.md` or `skills/run/references/` text only | none: the scenarios skip the coordinator, so this misses decomposition, briefs, setup, the sweep and every instruction only the coordinator reads; the `skills/run/tests` checks guard the text |
 
 ## Scores
 

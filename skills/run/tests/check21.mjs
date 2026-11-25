@@ -2,7 +2,7 @@
 // Every scenario fails against the 0.3.10 script except the ones marked (control).
 import { Run } from './run.mjs'
 import assert from 'node:assert'
-import { readFileSync } from 'node:fs'
+import { skillText } from './skill-text.mjs'
 const SHA = n => (n + '').padStart(40, 'a')
 const parallel = fs => Promise.all(fs.map(f => f().catch(() => null)))
 const free = { total: null, spent: () => 0, remaining: () => Infinity }
@@ -169,7 +169,7 @@ await t('T1h a red check is never rerun', async () => {
 })
 
 await t('T1 docs: SKILL.md has the knownRedChecks row and the coordinator re-run', async () => {
-  const s = readFileSync(new URL('../SKILL.md', import.meta.url), 'utf8')
+  const s = skillText
   assert(/^\| `workstreams\[\]\.knownRedChecks` \| none \|/m.test(s), 'args row')
   assert(s.includes("run each merged workstream's `checks` once yourself at `finalSha`"), 'final-call re-run')
 })

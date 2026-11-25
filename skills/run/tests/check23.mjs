@@ -3,6 +3,7 @@
 import { Run } from './run.mjs'
 import assert from 'node:assert'
 import { readFileSync } from 'node:fs'
+import { skillText } from './skill-text.mjs'
 const SHA = n => (n + '').padStart(40, 'a')
 const parallel = fs => Promise.all(fs.map(f => f().catch(() => null)))
 const free = { total: null, spent: () => 0, remaining: () => Infinity }
@@ -138,7 +139,7 @@ await t('3b (control) a whole-branch settle whose pass fails is not applied', as
 
 // ---- docs and version ----
 await t('6a SKILL.md states the per-call probe and settled questions; plugin.json is at least 0.4.1', async () => {
-  const s = readFileSync(new URL('../SKILL.md', import.meta.url), 'utf8')
+  const s = skillText
   const row = s.split('\n').find(l => l.startsWith('| `resume` |'))
   assert(/call ordinal/.test(row) && /digest/.test(row) && !/its prompt names that id, so it always runs live/.test(row), 'resume row')
   assert(/`settles`/.test(s), 'settled questions')
