@@ -163,6 +163,9 @@ test('preflight', par, async t => {
         ["action: { enum: ['fixed',", "action: { enum: ['repaired',", 'alpha-receipt fix c1: answers\\[0\\]: action: "fixed" is none of'],
         ["{40})?$', description: 'full 40-hex remote SHA verified via git ls-remote; empty", "{64})?$', description: 'full 40-hex remote SHA verified via git ls-remote; empty", 'alpha-receipt fix c1: sha: "[0-9a-f]{40}" is no string'],
       ]) await fails('S27', new RegExp(`FAIL .*schema[^]*${re}`), { root: plugin(d => edit(d, 'skills/run/workflow.js', from, to)) }) }],
+    ['a fault copy that changes what a live step is called with is caught (S27): model, agent type, schema', async () => {
+      for (const change of ["opts.model = 'haiku'", "opts.agentType = 'other'", 'opts.schema = {}'])
+        await fails('S27', /FAIL every prompt[^]*alpha-receipt validate c1 step/, { root: plugin(d => edit(d, 'evals/preflight.mjs', '))})[opts.label] ?? `', `))})[opts.label] ?? (${change}, null) ?? \``)) }) }],
     ['a fix commit that keeps the raise is caught (S27)', async () => {
       const root = plugin(d => edit(d, 'skills/run/tests/fixture/build.sh', "except ValueError:\\n        total_cents = total(entries)[\"total_cents\"]\\n'", "except ValueError:\\n        raise\\n'"))
       await fails('S27', /FAIL .*oracle/, { root }) }],

@@ -234,10 +234,11 @@ function fixHandedOver(c) {
       for (const l of forced) assert.ok(shipped.labels.includes(l), `${l}: the shipped script has no such step`)
       same(faulted.labels, shipped.labels.filter(l => !forced.includes(l)), 'steps')
       same([...faulted.labels].sort(), [VALIDATE, MERGE, ...LATER].sort(), 'steps') }],
-    ['every prompt of the copy is the shipped script\'s, and none says what the fixture did', async () => {
+    ['every prompt of the copy is the shipped script\'s, with the same schema, model and agent type, and none says what the fixture did', async () => {
       const { faulted, shipped } = await both()
       for (const l of faulted.labels) {
         assert.ok(faulted.prompts[l] === shipped.prompts[l], `the ${l} prompt differs from the shipped script's`)
+        assert.ok(JSON.stringify(faulted.calledWith[l]) === JSON.stringify(shipped.calledWith[l]), `the ${l} step's schema, model, effort or agent type differs from the shipped script's`)
         assert.ok(!/fixture|pre-pushed/i.test(faulted.prompts[l].replaceAll(c.dest, '')), `the ${l} prompt names the fixture`) // the dest path is the operator's choice
       } }],
     ['validate c1 judges the pushed range against c1-F9 and the fixer\'s claim, merge takes the fix, and validate c1, the whole-branch validation and drift hold the log path', async () => {
@@ -249,7 +250,7 @@ function fixHandedOver(c) {
       same([labels, r.repos.map(x => x.verdict), r.drift.verdict], [[VALIDATE], ['skipped'], 'skipped'], 'steps, repo, drift') }],
     ['each forced answer fits the schema the shipped script gives its step', async () => {
       const { shipped } = await both()
-      same(forced.flatMap(l => misfits(answers[l], shipped.schemas[l], l)), [], 'misfits') }],
+      same(forced.flatMap(l => misfits(answers[l], shipped.calledWith[l].schema, l)), [], 'misfits') }],
   ]
 }
 // S28: in step() the docs author answers with the pre-pushed docs commit, so its validator, the promote decision and the result are the shipped ones
@@ -315,13 +316,13 @@ const GREEN = { green: true, summary: '12 passed', command: 'mock gate', flaky: 
 async function dry(c, args, { file = 'workflow.js', own = {} } = {}) {
   process.argv[2] = path.join(c.runDir, file) // run.mjs loads the script named there, as for the checks
   const { Run } = await import(`${pathToFileURL(path.join(c.skill, 'tests/run.mjs'))}?${file}`)
-  const prompts = {}, schemas = {}, labels = [], heads = {}, tips = {}, unknown = []
+  const prompts = {}, calledWith = {}, labels = [], heads = {}, tips = {}, unknown = []
   let n = 1000
   const next = () => SHA(++n)
   const agent = async (prompt, o) => {
     const label = o.label.replace(/ attempt \d+$/, ''), id = label.split(' ')[0], w = args.workstreams.find(x => x.id === id)
     const tip = tips[w ? path.basename(w.repo) : id] ||= next()
-    prompts[label] = prompt; schemas[label] = o.schema; labels.push(label)
+    prompts[label] = prompt; calledWith[label] = o; labels.push(label)
     const mine = own[label]?.(prompt)
     const verdict = { verdict: 'pass', sections: 's', sha: tip, tests: 't', gate: GREEN, findings: [], verified: [], questions: [] }
     const reply = x => ({ ...x, ...mine })
@@ -347,7 +348,7 @@ async function dry(c, args, { file = 'workflow.js', own = {} } = {}) {
   const hung = new Promise((_, no) => { timer = setTimeout(() => no(new Error('the dry run hung')), 120000) })
   const r = await Promise.race([Run(structuredClone(args), agent, parallel, () => {}, { total: null, spent: () => 0, remaining: () => Infinity }), hung]).finally(() => clearTimeout(timer))
   assert.deepEqual(unknown, [], `the dry run's mock does not know the steps ${unknown.join(', ')}: teach dry() about them`)
-  return { r, prompts, schemas, labels, heads }
+  return { r, prompts, calledWith, labels, heads }
 }
 
 // ---- main ----

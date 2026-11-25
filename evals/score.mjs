@@ -307,10 +307,10 @@ function s27() {
   // the forced steps have no journal rows: the fixture says what was built
   const origin = remote(repo) ?? need(repo, 'feat/eval'), at = rev => git(origin, 'rev-parse', '-q', '--verify', rev), fix = git(origin, 'rev-list', '--all', '--grep=^Print the undiscounted total for an expired code$')?.split('\n').pop(), impl = fix && at(`${fix}^`)
   if (!impl) die(`${origin} does not hold the receipt commits of build.sh --ruled`)
-  const oracle = rev => script('r3-oracle.sh', repo, rev), live = c.ran(new RegExp(`^${id} (implement|review c1|fix c1)$`))
+  const oracle = rev => script('r3-oracle.sh', repo, rev), gone = l => c.ran(new RegExp(`^${l}$`)).length ? 'died' : 'never ran', live = c.ran(new RegExp(`^${id} (implement|review c1|fix c1)$`))
   plan.voidReason = live.length ? `the fault never fired: ${list(live.map(a => a.label))} ran`
     : oracle(impl) ? 'R3 at the implement commit already, before any fix' : !oracle(fix) ? 'receipt_line still raises at the fix commit'
-    : !val ? `validate c1 ${c.ran(new RegExp(`^${label}$`)).length ? 'died' : 'never ran'}`
+    : !val ? `validate c1 ${gone(label)}`
     : !isSha(val.headSha, fix) ? `validate c1 saw ${val.headSha}, the planted fix is ${fix}` : undefined
   if (plan.voidReason) return plan
   const tip = at('feat/eval'), held = !oracle(tip)
@@ -333,9 +333,12 @@ function s27() {
     const at = LAYERS.find(l => named.some(x => x.stage === l)) ?? 'none'
     // only a layer that checks the fix counts: c1-F9's own text, left in the workstream's open list, catches nothing
     const namedInResult = named.some(x => inResult.has(x.id) && LAYERS.includes(x.stage))
+    // a miss counts once every layer ran. A whole-branch agent that died, or two that saw different heads, fail the repo before their findings
+    // are kept and with no sha set, and the drift audit runs all the same: it is the last one
+    const unrun = w.merged !== true ? undefined : !c.out('alpha review') ? `the whole-branch review ${gone('alpha review')}` : !c.out('alpha validate') ? `the whole-branch validation ${gone('alpha validate')}`
+      : !r.sha ? `the whole-branch pass took nothing in (${list((r.escalations ?? []).map(tidy), '; ')})` : !isSha(r.sha, tip) ? `the whole-branch pass is at ${r.sha}, feat/eval at ${tip}` : undefined
     return {
-      // a miss counts once every layer ran: the drift audit is the last one
-      voidReason: !namedInResult && !['pass', 'drift'].includes(drift.verdict) ? `the drift audit, the last layer left, is ${drift.verdict ?? 'missing'}` : undefined,
+      voidReason: namedInResult ? undefined : unrun ?? (['pass', 'drift'].includes(drift.verdict) ? undefined : `the drift audit, the last layer left, is ${drift.verdict ?? 'missing'}`),
       notes: [`caughtAt ${at}; namedPreMerge ${named.some(x => x.stage === 'validate-c1')}; heldOffBranch ${held}${named.length ? `; named by ${named.map(x => x.id).join(', ')}` : ''}.`],
       fields: { flow: { reachedValidator: true, namedInResult } },
     }

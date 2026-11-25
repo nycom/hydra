@@ -351,10 +351,10 @@ const s21 = ({ w = {}, status = 'fixed', repo = 'pass', found = [stale, other], 
 {
   const f = fixture('ruled'), { args } = f, id = 'alpha-receipt', branch = `feat/eval--${id}`, { repo } = args.workstreams[0]
   const fixed = git(repo, 'rev-parse', `origin/${branch}`), impl = git(repo, 'rev-parse', `${fixed}^`)
-  const rec = ({ args: a = args, live = [], saw = fixed, val = {}, w = {}, wb = [], wbq = [], items = [], drift = 'pass', questions = [], noVal, deadVal } = {}) => call({
+  const rec = ({ args: a = args, live = [], saw = fixed, val = {}, w = {}, wb = [], wbq = [], items = [], drift = 'pass', questions = [], noVal, deadVal, dead = [], never = [], sha = git(repo, 'ls-remote', 'origin', 'refs/heads/feat/eval').slice(0, 40), esc = [] } = {}) => call({
     args: a,
-    agents: [...live.map(label => ({ label, dead: true })), ...(noVal ? [] : [{ label: `${id} validate c1`, out: { headSha: saw, verified: ['c1-F9'], open: [], questions: [], ...val }, dead: deadVal }]), { label: 'drift' }],
-    result: { workstreams: [ws(id, { sha: fixed, ...w })], repos: [{ repo: a.workstreams[0].repo, verdict: 'pass', findings: wb, questions: wbq }], drift: { verdict: drift, items }, questions },
+    agents: [...live.map(label => ({ label, dead: true })), ...(noVal ? [] : [{ label: `${id} validate c1`, out: { headSha: saw, verified: ['c1-F9'], open: [], questions: [], ...val }, dead: deadVal }]), ...['alpha review', 'alpha validate'].filter(l => !never.includes(l)).map(label => ({ label, dead: dead.includes(label) })), { label: 'drift' }],
+    result: { workstreams: [ws(id, { sha: fixed, ...w })], repos: [{ repo: a.workstreams[0].repo, sha, verdict: 'pass', escalations: esc, findings: wb, questions: wbq }], drift: { verdict: drift, items }, questions },
   })
   const run = (o, judge, opt) => score('S27', [rec(o)], { judge, ...opt })
   const silent = { ...finding('V-F2', { severity: 'minor' }), stage: 'wb-validate', status: 'open' }, r3 = finding('v1-R1', { kind: 'regression', issue: 'an expired code no longer raises' }), q = { q: 'R3 says an expired code raises; it prints a line now?', options: ['a'], default: 'revert' }
@@ -410,6 +410,15 @@ const s21 = ({ w = {}, status = 'fixed', repo = 'pass', found = [stale, other], 
   for (const drift of ['died', 'failed', 'skipped']) voids({ drift }, new RegExp(`drift audit.*${drift}`))
   assert.match(pass(run({ ...layers, drift: 'failed' }, { R3: [] }), 'void').voidReason, /drift audit.*failed/)
   pass(run({ ...layers, drift: 'died' }, { R3: ['V-F2'] })) // an earlier layer named it: drift was not needed
+  // a miss needs the whole-branch layers too; the drift audit runs, and passes, whatever became of them
+  voids({ dead: ['alpha review'], sha: '' }, /the whole-branch review died/)
+  voids({ dead: ['alpha validate'], sha: '' }, /the whole-branch validation died/)
+  voids({ never: ['alpha review'] }, /the whole-branch review never ran/)
+  voids({ sha: '', esc: ['review saw aaa, validator saw bbb'] }, /whole-branch pass took nothing in \(review saw aaa, validator saw bbb\)/)
+  voids({ sha: impl }, /whole-branch pass is at .*, feat\/eval at /) // both on a head without the merged fix
+  assert.match(pass(run({ ...layers, wb: [], dead: ['alpha review'], sha: '' }, { R3: [] }), 'void').voidReason, /whole-branch review died/)
+  pass(run({ ...layers, wb: [], dead: ['alpha review'], sha: '' }, { R3: ['X1'] })) // named in the result all the same
+  voids({ w: { merged: false }, never: ['alpha review', 'alpha validate'], sha: '', drift: 'skipped' }, /drift audit.*skipped/) // stopped before the merge
   assert.equal(pass(run({}, undefined, { extra: ['--void', 'wrong fixture'] }), 'void').voidReason, 'wrong fixture')
   refused(run({ args: { ...args, workstreams: [{ ...args.workstreams[0], repo: R }] } }), /fixture repo/)
   refused(run({ args: fixture('decided').args }), /does not hold the .*build\.sh --ruled/)
