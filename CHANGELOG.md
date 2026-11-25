@@ -2,7 +2,7 @@
 
 What each version changed, newest first. A line describes the version it stands under; the behaviour now is in `skills/run/references/`.
 
-## 0.4.12 (2026-11-25)
+## 0.4.12 (2026-11-26)
 
 - An author or fixer result with an all-zero sha, or a fixer's new commit whose `gateTail` is nothing but a placeholder word, is a dead attempt: the step is redone within the same three attempts and nothing of the discarded result is kept.
 - The docs step and its validator get the open minors that name a doc file; a promoted docs pass settles the ones its validator verified.

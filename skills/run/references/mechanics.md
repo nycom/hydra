@@ -68,18 +68,19 @@ round, and none on the script's own `D-X` or under the reserve. Docs run only on
 whose whole-branch pass did not fail, and only from the SHA that pass validated.
 `finalSha` is always a validated SHA.
 **What the docs step is told:** docs agents read no brief, so two lists reach them, each
-only when it is not empty. *Open minors:* the repo's open minors whose `where` names a line
-of a README, a CHANGELOG or a text file under `docs/` (md, mdx, rst, adoc, txt), unless a question already names that
-finding; the docs agent fixes the ones that still hold, the validator returns in `verified`
-those that no longer do, and a promoted docs pass settles them as `fixed`; a false line of the
-docs commit is a finding even when one of these minors names it. *Limits:* the
-shared edits the merges applied (a resume takes the earlier calls' from `carryForward`; a
-`stage: "wholeBranch"` run knows none). The docs agent, the docs fixer and the validator
-all get them: a line an edit put in a file may be corrected where it is false, never
-extended or reworded; a docs change that does so is a major docs finding and the fix round
-takes it back, keeping only a correction of what was false. With either list the validator may also return `questions`, for a docs
-finding only the user can settle; they join the repo's. With neither, the docs prompts and
-the validator's schema hold nothing of this.
+only when it is not empty. *Open minors:* the repo's open minors whose `where` names a
+line of a README, a CHANGELOG or a text file under `docs/` (md, mdx, rst, adoc, txt),
+unless a question already names that finding; the docs agent fixes the ones that still
+hold, the validator returns in `verified` those that no longer do, and a promoted docs
+pass settles them as `fixed`; a false line of the docs commit is a finding even when one
+of these minors names it. *Limits:* the shared edits the merges applied (a resume takes
+the earlier calls' from `carryForward`; a `stage: "wholeBranch"` run knows none). The
+docs agent, the docs fixer and the validator all get them: a line an edit put in a file
+may be corrected where it is false, never extended or reworded; a docs change that does
+so is a major docs finding and the fix round takes it back, keeping only a correction of
+what was false. With either list the validator may also return `questions`, for a docs
+finding only the user can settle; they join the repo's. With neither, the docs prompts
+and the validator's schema hold nothing of this.
 Before the whole-branch fix round, a validator finding joins a reviewer finding
 as one entry when the first `path:line` or `path:from-to` anywhere in each `where`
 names the same file with overlapping lines (higher severity kept, the other
