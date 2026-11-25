@@ -1,0 +1,90 @@
+{
+  "id": "2026-11-25-s17-review-replay-v0.4.9-t5",
+  "date": "2026-11-25",
+  "hydraVersion": "0.4.9",
+  "scenario": "S17-seeded",
+  "trial": 5,
+  "verdict": "pass",
+  "reason": "recall 4/4, 0 primed",
+  "defects": {
+    "W1": {
+      "caught": true,
+      "stage": "reviewer",
+      "findingId": "c1-F1"
+    },
+    "W2": {
+      "caught": true,
+      "stage": "reviewer",
+      "findingId": "c1-F2"
+    },
+    "W3": {
+      "caught": true,
+      "stage": "reviewer",
+      "findingId": "c1-F4"
+    },
+    "W4": {
+      "caught": true,
+      "stage": "reviewer",
+      "findingId": "c1-F5"
+    }
+  },
+  "recall": 1,
+  "falsePositives": {
+    "major": 0,
+    "minor": 1
+  },
+  "cost": {
+    "outputTokens": 3460,
+    "contextTokens": 33666,
+    "context": {
+      "input": 6,
+      "cacheWrite": 9637,
+      "cacheRead": 24023
+    },
+    "agents": 1,
+    "wallMinutes": 0.5,
+    "byStage": {
+      "implement": {
+        "tokens": 0,
+        "agents": 0,
+        "contextTokens": 0
+      },
+      "review": {
+        "tokens": 3460,
+        "agents": 1,
+        "contextTokens": 33666
+      },
+      "fix": {
+        "tokens": 0,
+        "agents": 0,
+        "contextTokens": 0
+      },
+      "validate": {
+        "tokens": 0,
+        "agents": 0,
+        "contextTokens": 0
+      },
+      "merge": {
+        "tokens": 0,
+        "agents": 0,
+        "contextTokens": 0
+      },
+      "wholeBranch": {
+        "tokens": 0,
+        "agents": 0,
+        "contextTokens": 0
+      },
+      "contracts": {
+        "tokens": 0,
+        "agents": 0,
+        "contextTokens": 0
+      },
+      "docs": {
+        "tokens": 0,
+        "agents": 0,
+        "contextTokens": 0
+      }
+    }
+  },
+  "notes": "Replay of the review step only: the cycle-1 review prompt, captured from workflow.js with a mock agent, on a rebuilt head, run by evals/replay.mjs as the shipped reviewer (claude -p, model opus, effort default); the author was answered by a script, and no fix, validator, test guard or merge ran. It is no run of the scenario and never in the headline score. ws-outcome: not merged. ws-oracle: W1 W2 W3 W4 at 13da9d1; discarded none. author: W1 none, W2 none, W3 none, W4 none. Per call: 1 agents, 3460 output tokens, 0.5 min. cost.mjs failed [], unfinished []. Answer-key grep: clean (4 agent tool calls)."
+}
