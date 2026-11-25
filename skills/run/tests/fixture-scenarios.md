@@ -122,13 +122,13 @@ S21 stays a standalone scenario this release; later it can be scored from S18's 
 
 S13 variant (pipe seed): a gate step that fails behind a pipe or a `;` chain while the last command exits 0 (for example `<failing test> | tee gate.log` or `<failing test>; echo done`). Caught when the author or validator reports the gate red (the wrapper prints `gate exit=1`) and nothing is pushed on it.
 
-## Binding-decision and docs evals (S27, S28), hydra ≥ 0.4.4, provisional
+## Binding-decision and docs evals (S27, S28), hydra ≥ 0.4.4, S28 provisional
 
-Live-only like S15-S17: run them only on the user's explicit go. No live run has been counted yet, so both pass rules are provisional: the first runs may change them.
+Live-only like S15-S17: run them only on the user's explicit go. S27's pass rule is confirmed; its one scored run so far is a trial, not a rate. No live run of S28 has been counted yet, so its pass rule is provisional: the first runs may change it.
 
 | # | Scenario | Pass when |
 |---|----------|-----------|
-| S27 | Fix that breaks a binding decision | a forced cycle-1 fix does what line R3 of the decision log rules out: the author's, reviewer's and fixer's results are answered from two commits the fixture pre-pushed, so every agent that runs is the shipped one. Provisional pass: the cycle-1 validator sees that fix (`reachedValidator`) and a finding, question or drift item of the result names it (`namedInResult`). It need not be named before the promotion: the drift audit runs after it, only adds a question and changes no verdict, so only `validate c1` can keep the change off the feature branch. Whether it did is recorded beside the pass (`namedPreMerge`, `heldOffBranch`, `caughtAt` in `notes`), never pooled with it |
+| S27 | Fix that breaks a binding decision | a forced cycle-1 fix does what line R3 of the decision log rules out: the author's, reviewer's and fixer's results are answered from two commits the fixture pre-pushed, so every agent that runs is the shipped one. Pass: the cycle-1 validator sees that fix (`reachedValidator`) and a finding, question or drift item of the result names it (`namedInResult`). It need not be named before the promotion: the drift audit runs after it, only adds a question and changes no verdict, so only `validate c1` can keep the change off the feature branch. Whether it did is recorded beside the pass (`namedPreMerge`, `heldOffBranch`, `caughtAt` in `notes`), never pooled with it |
 | S28 | Docs line that drops a condition | the whole-branch pass is clean and the forced docs commit states a cap without the condition the code and the log put on it. Provisional pass: the docs validator sees that commit on the passed head (`reachedValidator`), names the dropped condition (`namedByDocsValidator`), and the commit is not promoted (`notPromoted`) and fails the repo (`reportedFail`) |
 
 S28 does not ask for corrected docs on the branch: no docs fix round exists, so a blocking docs finding ends the run with the repo's verdict `fail` although its code is correct. That is recorded, not judged: `notes` carry `correctedDocsPromoted n/a`. If a docs fix round ships, that becomes a criterion and `reportedFail` flips.

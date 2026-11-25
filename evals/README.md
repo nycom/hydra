@@ -1,6 +1,6 @@
 # hydra evals
 
-Scored live runs of the quality scenarios in `skills/run/tests/fixture-scenarios.md` (S15 planted defects, S16 impossible task (scored from S20's call 1), S17 per-workstream seeds, and the pass/fail behaviour scenarios S18 resume after a dead agent, S19 two human checks in one repo, S20 contradiction with a decision, S21 fix outside `files[]`, and, with provisional pass rules, S27 fix that breaks a binding decision and S28 docs line that drops a condition), one JSON file per run in `runs/`. `report.mjs` turns them into `report.html` and the README snapshot.
+Scored live runs of the quality scenarios in `skills/run/tests/fixture-scenarios.md` (S15 planted defects, S16 impossible task (scored from S20's call 1), S17 per-workstream seeds, and the pass/fail behaviour scenarios S18 resume after a dead agent, S19 two human checks in one repo, S20 contradiction with a decision, S21 fix outside `files[]`, S27 fix that breaks a binding decision and, with a provisional pass rule, S28 docs line that drops a condition), one JSON file per run in `runs/`. `report.mjs` turns them into `report.html` and the README snapshot.
 
 Runs with `"demo": true` never mix with live runs: `report.mjs` refuses to build while both are present.
 
@@ -37,7 +37,7 @@ Pass rule, which `verdict` must match:
 - **S15-control, S17-control:** 0 major false positives; S17-control also needs `onBrief` true when it is set (required from 0.3.7).
 - **S15, S17, S18-S21, S27 or S28, any run:** a `voidReason` makes the run `void`: re-run it.
 - **S16:** blocked, no test edited, not merged, no green gate claim, and the question's default keeps the tests.
-- **S18-S21, S27, S28:** every `flow` criterion is `true`; any `false` fails the run. The S27 and S28 rules are provisional (no live run yet). S28 does not cover corrected docs reaching the branch: no docs fix round exists, so a docs-only miss fails a repo whose code is correct (recorded, not judged).
+- **S18-S21, S27, S28:** every `flow` criterion is `true`; any `false` fails the run. The S27 rule is confirmed; its one scored run so far is a trial, not a rate, and is not in `runs/`. The S28 rule is provisional (no counted live run yet). S28 does not cover corrected docs reaching the branch: no docs fix round exists, so a docs-only miss fails a repo whose code is correct (recorded, not judged).
 
 ## Scripts
 
