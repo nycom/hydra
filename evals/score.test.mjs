@@ -444,6 +444,7 @@ const s21 = ({ w = {}, status = 'fixed', repo = 'pass', found = [stale, other], 
   assert.match(r.notes, /correctedDocsPromoted n\/a/)
   assert.match(r.notes, /docs-only miss fails a repo whose code is correct/)
   pass(run({ saw: planted.slice(0, 9) }, named)) // an abbreviated sha is the same commit
+  for (const v of ['0.4.5', '0.4.7']) assert.deepEqual(pass(run({}, named, { extra: ['--version', v] })).flow, ALL, `${v} scores as it did`)
   assert.deepEqual(pass(run({}, { condition: [] }), 'fail').flow, { ...ALL, namedByDocsValidator: false })
   assert.deepEqual(pass(run({ findings: [] }), 'fail').flow, { ...ALL, namedByDocsValidator: false }) // nothing to judge
   for (const o of [{ docs: { verdict: 'pass' } }, { verdict: 'pass' }, { esc: [] }]) assert.deepEqual(pass(run(o, named), 'fail').flow, { ...ALL, reportedFail: false })
@@ -463,6 +464,64 @@ const s21 = ({ w = {}, status = 'fixed', repo = 'pass', found = [stale, other], 
   assert.deepEqual(pass(run({ docs: { verdict: 'pass' }, verdict: 'pass', esc: [], findings: [] }), 'fail').flow, { reachedValidator: true, namedByDocsValidator: false, notPromoted: false, reportedFail: false })
   const gone = call({ args: { ...args, workstreams: [{ ...args.workstreams[0], repo: R }] }, agents: [{ label: 'alpha docs validate', out: { sha: planted } }], result: { workstreams: [], repos: [{ repo: R, sha: built }] } })
   refused(score('S28', [gone]), /fixture repo/)
+}
+
+// ---- S28 from 0.4.8: a docs-only miss gets one docs fix round, and corrected docs are promoted ----
+{
+  const READMEs = { right: 'no discount takes more than LEDGER_MAX_DISCOUNT off a total under 100000', wrong: 'no discount takes more than LEDGER_MAX_DISCOUNT off any total' }
+  const world = (text = READMEs.right, more = {}) => {
+    const f = fixture('decided'), args = { ...f.args, stage: 'wholeBranch', workstreams: f.args.workstreams.slice(1) }, repo = args.workstreams[0].repo
+    const built = git(repo, 'rev-parse', 'origin/feat/eval'), planted = git(repo, 'rev-parse', 'origin/feat/eval--docs')
+    const fixed = commit(repo, 'feat/eval--docs', planted, { 'README.md': t => t.replace('no discount takes more than LEDGER_MAX_DISCOUNT off', text), ...more }, 'State the cap')
+    return { args, repo, built, planted, fixed }
+  }
+  const promote = w => { git(w.repo, 'push', '-q', 'origin', `${w.fixed}:refs/heads/feat/eval`); git(w.repo, 'push', '-q', 'origin', '--delete', 'feat/eval--docs') }
+  const miss = finding('D-F1', { severity: 'major', kind: 'docs', where: 'README.md:9' })
+  const rec = (w, o = {}) => call({
+    args: w.args,
+    agents: [{ label: 'alpha review' }, { label: 'alpha validate' }, { label: 'alpha docs validate', out: { verdict: 'fail', sha: w.planted, findings: o.found ?? [miss] } },
+      ...(o.noFix ? [] : [{ label: 'alpha docs fix', out: { ok: true, sha: w.fixed }, dead: o.deadFix }]), ...(o.noFix || o.deadFix || o.noRe ? [] : [{ label: 'alpha docs revalidate', out: { verdict: 'pass', sha: o.reSaw ?? w.fixed, findings: [] }, dead: o.deadRe }]),
+      ...(o.unpromoted ? [] : [{ label: 'alpha docs promote' }])],
+    result: { stage: 'wholeBranch', workstreams: [], budget: { stoppedBy: o.stoppedBy ?? [] }, repos: [{ repo: w.repo, sha: w.built, verdict: 'pass', escalations: [], findings: [], finalSha: w.fixed, ...o.repo, docs: { sha: w.fixed, verdict: 'pass', notes: [], fixRounds: 1, ...o.docs } }] },
+  })
+  const v8 = ['--version', '0.4.8'], run = (w, o, judge, extra = v8) => score('S28', [rec(w, o)], { judge, extra })
+  const ALL = { reachedValidator: true, namedByDocsValidator: true, oneFixRound: true, correctedDocsPromoted: true, reportedPass: true }, yes = { condition: ['D-F1'], statesCondition: true }
+  const w = world()
+  promote(w)
+  const need = run(w)
+  assert.equal(need.status, 3, need.stderr)
+  assert.deepEqual([need.judge.candidates.map(c => [c.id, c.stage]), Object.keys(need.judge.seeds), Object.keys(need.judge.yesNo)], [[['D-F1', 'docs']], ['condition'], ['statesCondition']], 'the finding the fix round settled is read from the validator, not from the result')
+  assert.match(need.judge.yesNo.statesCondition, /under 100000/)
+  assert.ok(need.judge.yesNo.statesCondition.includes(READMEs.right), 'the promoted lines are quoted, so the judge opens no repo')
+  const r = pass(run(w, {}, yes))
+  assert.deepEqual(r.flow, ALL)
+  assert.match(r.notes, /docs fix round: .*feat\/eval is at the corrected commit/i)
+  for (const v of ['0.4.9', '0.4.10']) assert.deepEqual(pass(run(w, {}, yes, ['--version', v])).flow, ALL, v)
+  pass(run(w, { reSaw: w.fixed.slice(0, 9) }, yes))
+  const flow = (w, o, judge = yes) => pass(run(w, o, judge), 'fail').flow
+  assert.deepEqual(flow(w, {}, { ...yes, condition: [] }), { ...ALL, namedByDocsValidator: false })
+  assert.deepEqual(flow(w, {}, { ...yes, statesCondition: false }), { ...ALL, correctedDocsPromoted: false }, 'a promoted line that still leaves the condition out')
+  assert.deepEqual(flow(w, { noRe: true }), { ...ALL, oneFixRound: false })
+  assert.deepEqual(flow(w, { reSaw: w.planted }), { ...ALL, oneFixRound: false })
+  assert.deepEqual(flow(w, { docs: { fixRounds: 0 } }), { ...ALL, oneFixRound: false })
+  for (const o of [{ docs: { verdict: 'fail' } }, { repo: { verdict: 'fail' } }, { repo: { escalations: ['docs commit x left unpromoted on feat/eval--docs after one docs fix round'] } }]) assert.deepEqual(flow(w, o), { ...ALL, reportedPass: false })
+  assert.deepEqual(flow(w, { unpromoted: true }), { ...ALL, correctedDocsPromoted: false }, 'the branch moved, but no promote step moved it')
+  // git says what was promoted, whatever the result claims: here the branch never moved, so there is no promoted line to judge
+  const held = world(), stays = { condition: ['D-F1'] }
+  assert.deepEqual(flow(held, {}, stays), { ...ALL, correctedDocsPromoted: false })
+  assert.deepEqual(flow(held, { unpromoted: true, repo: { finalSha: held.built, verdict: 'fail', escalations: ['left unpromoted'] }, docs: { verdict: 'fail' } }, stays), { ...ALL, correctedDocsPromoted: false, reportedPass: false })
+  const planted = world(); planted.fixed = planted.planted; promote(planted) // the miss itself promoted
+  assert.deepEqual(flow(planted, { noFix: true, docs: { fixRounds: 0 } }, stays), { ...ALL, oneFixRound: false, correctedDocsPromoted: false })
+  const code = world(READMEs.right, { 'ledger/discount.py': t => t + '\n# touched\n' }); promote(code)
+  assert.deepEqual(flow(code, {}), { ...ALL, correctedDocsPromoted: false }, 'a docs fix that touches code')
+  // voids: an agent of the round died, or the reserve kept it from starting, so the round was not measured
+  const voids = (o, re) => assert.match(pass(run(held, o), 'void').voidReason, re)
+  voids({ deadFix: true }, /docs fix died/)
+  voids({ deadRe: true }, /docs revalidate died/)
+  voids({ noFix: true, stoppedBy: ['alpha docs fix'] }, /token reserve/)
+  assert.deepEqual(Object.keys(pass(score('S28', [rec(held)], { extra: [...v8, '--void', 'x'] }), 'void').flow), Object.keys(ALL))
+  // the same record on 0.4.7 keeps 0.4.7's keys and its verdict
+  assert.deepEqual(pass(run(w, {}, { condition: [] }, ['--version', '0.4.7']), 'fail').flow, { reachedValidator: true, namedByDocsValidator: false, notPromoted: false, reportedFail: false })
 }
 
 // ---- S15: candidates per scored stage ----
@@ -488,6 +547,82 @@ const s21 = ({ w = {}, status = 'fixed', repo = 'pass', found = [stale, other], 
   pass(score('S15-control', [c()], { judge: { falsePositives: [] } }))
   for (const sc of ['S15-seeded', 'S15-control', 'S17-seeded', 'S17-control', 'S27', 'S28']) // two calls would score the last and cost both
     refused(score(sc, [c(), c({ start: T0 + 600000 })], { extra: ['--void', 'x'] }), new RegExp(`${sc.slice(0, 3)} is scored from one call's record, 2 given`))
+}
+
+// ---- repeat runs ----
+{
+  const c = s21(), judge = { stale: ['c1-F1'] }, at = trial => score('S21', [c], { judge, extra: ['--trial', trial] })
+  assert.equal(pass(at('2')).trial, 2)
+  assert.deepEqual(Object.keys(pass(at('1'))).slice(0, 6), ['id', 'date', 'hydraVersion', 'scenario', 'trial', 'verdict'])
+  assert.ok(!('trial' in pass(score('S21', [c], { judge }))), 'without --trial the file is what it was')
+  for (const t of ['0', '1.5', 'x', '']) refused(at(t), /--trial must be an integer from 1/)
+}
+
+// ---- replay.mjs: the S17 cycle-1 review prompt on rebuilt heads, against a stand-in for the claude command ----
+{
+  const version = JSON.parse(fs.readFileSync(path.join(HERE, '../.claude-plugin/plugin.json'), 'utf8')).version
+  // saves how it was called and answers as `claude -p --output-format stream-json` does; $FAKE picks the answer
+  const bin = path.join(tmp, 'fake-claude.mjs'), log = path.join(tmp, 'calls.jsonl')
+  fs.writeFileSync(bin, `#!/usr/bin/env node
+import fs from 'node:fs'
+const prompt = fs.readFileSync(0, 'utf8'), say = x => console.log(JSON.stringify(x)), fake = process.env.FAKE, sha = /\\.\\.\\.([0-9a-f]{40}) /.exec(prompt)[1]
+fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({ args: process.argv.slice(2), prompt, cwd: process.cwd(), env: Object.keys(process.env) }) + '\\n')
+say({ type: 'system', subtype: 'init' })
+const use = { type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'git log' } }
+for (const text of ['a', 'b']) say({ type: 'assistant', message: { id: 'm1', usage: { output_tokens: 1 }, content: [{ type: 'text', text }, use] } })
+if (fake === 'crash') process.exit(1)
+say({ type: 'result', subtype: fake === 'error' ? 'error_max_budget_usd' : 'success', is_error: fake === 'error', total_cost_usd: 0.3, usage: { input_tokens: 4, cache_creation_input_tokens: 5, cache_read_input_tokens: 6, output_tokens: 700 },
+  structured_output: { headSha: fake === 'stray' ? 'f'.repeat(40) : sha, findings: [{ id: 'c1-F1', severity: 'major', kind: 'bug', where: 'tests/test_owners.py:9', issue: 'i', evidence: 'e' }] } })
+`, { mode: 0o755 })
+  const replay = (extra = [], fake = 'ok') => {
+    const dest = path.join(tmp, `heads-${++n}`), out = path.join(tmp, `rec-${++n}`), had = fs.existsSync(log) ? jsonlOf(log).length : 0
+    const r = spawnSync('node', [path.join(HERE, 'replay.mjs'), dest, '--version', version, '--out', out, ...extra], { encoding: 'utf8', env: { ...process.env, CLAUDE: bin, FAKE: fake, CLAUDECODE: '1', CLAUDE_CODE_SIMPLE: '1', CLAUDE_EFFORT: 'low', CLAUDE_CONFIG_DIR: tmp } })
+    const dir = path.join(out, 'workflows')
+    return { ...r, dest, recs: fs.existsSync(dir) ? fs.readdirSync(dir).sort().map(f => path.join(dir, f)) : [], calls: fs.existsSync(log) ? jsonlOf(log).slice(had) : [] }
+  }
+  function jsonlOf(f) { return fs.readFileSync(f, 'utf8').split('\n').filter(Boolean).map(l => JSON.parse(l)) }
+  const two = replay(['--n', '2'])
+  assert.equal(two.status, 0, two.stderr + two.stdout)
+  assert.deepEqual([two.recs.length, two.calls.length], [2, 2])
+  assert.match(two.stdout, /2 of 2 replays recorded, \$0\.60/)
+  const [c] = two.calls, opt = k => c.args[c.args.indexOf(k) + 1], alpha = path.join(fs.realpathSync(two.dest), 'work-1/alpha'), head = git(alpha, 'rev-parse', 'origin/feat/eval--alpha-report')
+  assert.equal(c.cwd, alpha)
+  assert.ok(c.prompt.includes(`origin/feat/eval...${head}`) && c.prompt.includes(alpha), 'the shipped review prompt, on the rebuilt head')
+  assert.ok(!/fixture|replay/i.test(c.prompt.replaceAll(alpha, '')), c.prompt)
+  assert.equal(git(alpha, 'log', '-1', '--format=%an %s', head), 'Dev Test report summary with duplicate owners')
+  assert.equal(execFileSync('bash', [path.join(HERE, '../skills/run/tests/fixture/ws-oracle.sh'), alpha, head], { encoding: 'utf8' }).trim(), 'W1 W2 W3 W4', 'the rebuilt head still holds every seed')
+  assert.equal(git(path.join(fs.realpathSync(two.dest), 'work-2/alpha'), 'rev-parse', 'origin/feat/eval--alpha-report'), head, 'every replay reviews the same commit')
+  assert.deepEqual([opt('--model'), opt('--agent'), opt('--max-budget-usd'), opt('--tools')], ['opus', 'reviewer', '2', 'Bash,Read,Glob,Grep'])
+  assert.equal(two.calls[1].args[two.calls[1].args.indexOf('--max-budget-usd') + 1], '1.7', 'a replay may spend what is left')
+  assert.deepEqual(JSON.parse(opt('--json-schema')).required, ['headSha', 'findings'])
+  assert.ok(fs.readFileSync(path.join(HERE, '../agents/reviewer.md'), 'utf8').endsWith(JSON.parse(opt('--agents')).reviewer.prompt + '\n'), 'the shipped reviewer\'s own text')
+  assert.deepEqual(JSON.parse(opt('--agents')).reviewer.tools, ['Bash', 'Read', 'Glob', 'Grep', 'StructuredOutput'], 'an agent without StructuredOutput cannot answer the schema')
+  assert.deepEqual(['CLAUDECODE', 'CLAUDE_CODE_SIMPLE', 'CLAUDE_EFFORT', 'CLAUDE_CONFIG_DIR'].filter(k => c.env.includes(k)), ['CLAUDE_CONFIG_DIR'], 'the caller\'s session does not leak in, its login does')
+  // a record scores as any other, under its trial number and its label, and never into the runs the headline reads
+  const judge = { W1: [], W2: [], W3: ['c1-F1'], W4: [], falsePositives: [] }, at = (i, extra, o) => { const rec = JSON.parse(fs.readFileSync(two.recs[i], 'utf8')); return score('S17-seeded', [{ rec: two.recs[i], runId: rec.runId }], { judge, extra, ...o }) }
+  const r = pass(at(1, ['--trial', '2']), 'fail')
+  assert.deepEqual([r.trial, r.recall, r.defects.W3, r.cost.agents, r.cost.byStage.review, r.cost.context], [2, 1 / 4, { caught: true, stage: 'reviewer', findingId: 'c1-F1' }, 1, { tokens: 700, agents: 1, contextTokens: 15 }, { input: 4, cacheWrite: 5, cacheRead: 6 }])
+  assert.match(r.notes, /^Replay of the review step only: .*shipped reviewer.*opus.* never in the headline/)
+  assert.match(r.notes, /clean \(1 agent tool calls\)/)
+  refused(at(0, []), /a replay needs --trial/)
+  refused(at(0, ['--trial', '1'], { out: path.join(HERE, 'runs') }), /a replay never goes into evals\/runs/)
+  refused(score('S17-control', [two.recs[0]], { extra: ['--trial', '1'] }), /a replay scores S17-seeded only/)
+  // it stops at the cap, and records nothing of a replay that failed or looked at another commit
+  const capped = replay(['--n', '5', '--max-usd', '0.5'])
+  assert.deepEqual([capped.status, capped.recs.length, capped.calls.length], [1, 2, 2])
+  assert.match(capped.stdout, /2 of 5 replays recorded, \$0\.60/)
+  assert.match(capped.stderr, /cap of \$0\.5/)
+  assert.equal(replay(['--n', '3'], 'crash').calls.length, 1, 'an unknown spend stops the batch')
+  for (const [fake, re] of [['error', /error_max_budget_usd/], ['crash', /no result/], ['stray', /reviewed f{40}/]]) {
+    const r = replay(['--n', '1'], fake)
+    assert.deepEqual([r.status, r.recs.length], [1, 0], fake)
+    assert.match(r.stderr, re)
+  }
+  for (const [extra, re] of [[['--version', '9.9.9'], /9\.9\.9/], [['--n', '0'], /--n/], [['--max-usd', 'x'], /--max-usd/]]) {
+    const r = replay(extra)
+    assert.deepEqual([r.status, r.calls.length], [2, 0], r.stderr)
+    assert.match(r.stderr, re)
+  }
 }
 
 // ---- refusals ----
@@ -519,4 +654,4 @@ const s21 = ({ w = {}, status = 'fixed', repo = 'pass', found = [stale, other], 
   refused(score('S21', [c, c], { judge }), /twice/)
 }
 
-console.log('ok: score.mjs scores S15-S21, S27 and S28, asks the judge, sums cost and refuses what it must')
+console.log('ok: score.mjs scores S15-S21, S27 and S28, asks the judge, sums cost and refuses what it must; replay.mjs records the review step')

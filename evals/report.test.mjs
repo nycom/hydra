@@ -7,7 +7,7 @@ import assert from 'node:assert'
 import { ROOT, SCENARIOS, loadRuns, validate, buildHtml, readmeBlock, snapshotFiles, shaFile, withBlock, blockOf,
   passBar, latestPerScenario, previousOf, pickPipelineRun, headline, cellState, voidTile, cellTip, recallDelta,
   runScore, combined, combinedAsOf, priorCombined, combinedDelta, versionSteps,
-  cellStatus, runOf, matrixCell, scenarioDelta, change, normCost, normMean, versionKpis, kpiDelta, scenarioVersions, defaultPair, compareRows, runFields, versionCost, sharedCostDelta, voidTag } from './report.mjs'
+  cellStatus, runOf, group, matrixCell, scenarioDelta, change, normCost, normMean, versionKpis, kpiDelta, scenarioVersions, defaultPair, compareRows, runFields, versionCost, sharedCostDelta, voidTag } from './report.mjs'
 
 const read = f => fs.readFileSync(path.join(ROOT, f), 'utf8')
 const entries = loadRuns()
@@ -176,6 +176,19 @@ for (const f of [flow27, flow28]) {
   assert.equal(runScore(v), null)
 }
 bad(r => { r.flow = { ...flow27.flow } }, /flow is S18-S21, S27 and S28 only/, s16)
+// from 0.4.8 a docs-only miss gets one docs fix round, so S28's keys describe it; a run on an older version keeps its own keys and verdict
+const flow28b = variant(flow28, r => { r.hydraVersion = '0.4.8'; r.flow = { reachedValidator: true, namedByDocsValidator: true, oneFixRound: true, correctedDocsPromoted: true, reportedPass: true } })
+for (const v of ['0.4.8', '0.4.10', '0.5.0', '1.0.0']) {
+  const r = variant(flow28b, r => { r.hydraVersion = v })
+  validate(r, 'x.json')
+  assert.deepEqual([passBar(r), runScore(r)], ['pass', 100])
+  bad(r => { r.flow = { ...flow28.flow } }, /flow must hold exactly reachedValidator, namedByDocsValidator, oneFixRound, correctedDocsPromoted, reportedPass/, r)
+  for (const k of Object.keys(r.flow)) bad(r => { r.flow[k] = false }, /verdict must be fail/, r)
+}
+for (const v of ['0.4.4', '0.4.7']) {
+  validate(variant(flow28, r => { r.hydraVersion = v }), 'x.json')
+  bad(r => { r.hydraVersion = v }, /flow must hold exactly reachedValidator, namedByDocsValidator, notPromoted, reportedFail/, flow28b)
+}
 // the scenario list is duplicated in latestPerScenario (the page copies it by source): one run per scenario comes back whole
 assert.equal(latestPerScenario(SCENARIOS.map((sc, i) => ({ ...flow18, id: `l${i}`, scenario: sc }))).length, SCENARIOS.length)
 
@@ -444,6 +457,64 @@ for (const l of ['version', 'date', 'verdict', 'reason', 'score', 'seeds', 'fals
 assert.deepEqual(fields.find(f => f[1] === 'seeds'), ['2/4 caught', 'seeds'])
 assert.ok(!runFields(s16a).some(f => f[1] === 'context tokens' || f[1] === 'false positives' || f[1] === 'seeds'), 'only the fields a run has')
 
+// ---- repeat runs: `trial` n of one scenario and version; absent = trial 1, so a run without it stays 1 of 1 ----
+{ const at = (base, trial, mut = () => {}) => variant(base, r => { Object.assign(r, { id: `${r.scenario}-t${trial}`, hydraVersion: '9.1.0', date: '2099-02-01', trial }); mut(r) })
+  for (const t of [0, -1, 1.5, '2', null]) bad(r => { r.trial = t }, /trial must be an integer from 1/)
+  good(r => { r.trial = 1 }, 'pass')
+  assert.equal(group(real, s16), s16, 'a lone run is the run itself, by identity: nothing about it can render differently')
+  assert.deepEqual(real.map(r => group(real, r)).filter(g => g.trials), [], 'no run of the history carries a trial, so no cell of it counts any')
+  // a must-hold scenario: k of n, and it passes only when every trial does
+  const fail16 = r => { r.s16 = { ...testsDefault.s16 }; r.verdict = 'fail' }
+  const three = [at(s16, 1), at(s16, 2, fail16), at(s16, 3)]
+  for (const r of three) validate(r, 'x.json')
+  assert.deepEqual(matrixCell(runOf(three, 'S16', '9.1.0')), { text: '2 of 3', status: 'fail' })
+  assert.deepEqual([passBar(group(three, three[0])), runScore(group(three, three[0])), headline(group(three, three[0]))], ['fail', 0, '2 of 3 trials pass'])
+  assert.deepEqual(matrixCell(runOf([at(s16, 1), at(s16, 2), at(s16, 3)], 'S16', '9.1.0')), { text: '3 of 3', status: 'pass' })
+  const ctl = [at(control, 1), at(control, 2, r => { r.falsePositives.major = 2; r.verdict = 'fail' })]
+  assert.deepEqual([matrixCell(runOf(ctl, 'S15-control', '9.1.0')), runScore(group(ctl, ctl[0]))], [{ text: '1 of 2', status: 'fail' }, 0])
+  assert.equal(versionKpis(ctl)[0].majorFP.value, 2, 'the worst trial, never a sum over trials')
+  assert.deepEqual(scenarioDelta(group([...ctl, control], ctl[0]), control), { text: `▲ +2 major FP vs ${control.hydraVersion}`, cls: 'bad' })
+  // a seeded scenario: mean and minimum recall, the mean is its score
+  const seed17 = (t, defects) => at(seeded17, t, r => { r.defects = { ...ws(), ...defects }; r.recall = Object.values(r.defects).filter(d => d.caught).length / 4; r.verdict = passBar(r); r.reason = `t${t}` })
+  const s3 = [seed17(1, {}), seed17(2, { W1: missed }), seed17(3, { W1: missed, W4: missed })]
+  for (const r of s3) validate(r, 'x.json')
+  const g = group(s3, s3[0])
+  assert.deepEqual(matrixCell(g), { text: '2 of 3, recall mean 75%, min 50%', status: 'partial' }, 'some trials pass')
+  assert.deepEqual([passBar(g), runScore(g), headline(g)], ['fail', 75, '2 of 3 trials pass, recall mean 75%, min 50%'])
+  assert.deepEqual(matrixCell(runOf(s3.slice(0, 1), 'S17-seeded', '9.1.0')), { text: '4/4', status: 'pass' }, 'one trial alone is 1 of 1')
+  assert.equal(matrixCell(group([s3[2], { ...s3[2], trial: 1 }], s3[2])).status, 'fail', 'no trial passes')
+  assert.deepEqual(combined([...three, ...s3]), { score: 38, n: 2 }, '(0 + 75) / 2')
+  assert.equal(recallDelta(g, seeded17), 0, '75 against 3/4')
+  assert.deepEqual(scenarioDelta(g, seeded17), { text: `= 0 pts vs ${seeded17.hydraVersion}`, cls: '' })
+  assert.deepEqual(versionKpis(s3)[0].recall, { value: 75, caught: 9, kept: 12, n: 1 })
+  assert.deepEqual(compareRows(seeded17, g).slice(0, 2).map(r => [r.label, r.base, r.compare]), [['Score', '75', '75'], ['Recall', '3/4', 'mean 75%']])
+  // cost of a cell is the mean trial, per seed over every trial's seeds
+  const spend = t => r => { r.cost.byStage.review.tokens += t; r.cost.outputTokens += t }
+  const c3 = [0, 30, 60].map((t, i) => variant(s3[i], spend(t))), n3 = normCost(group(c3, c3[0])), one = c3[0].cost.outputTokens
+  assert.equal(n3.outputTokens, one + 30)
+  assert.deepEqual([n3.perKept, n3.perCaught], [Math.round((3 * one + 90) / 12), Math.round((3 * one + 90) / 9)])
+  // a void trial measured nothing: left out of k of n and said; an all-void cell stays void
+  const gone = r => { r.voidReason = skipped; r.verdict = 'void' }
+  const withVoid = [s3[0], s3[1], variant(s3[2], gone)]
+  assert.deepEqual(matrixCell(group(withVoid, withVoid[0])), { text: '2 of 2, 1 void, recall mean 88%, min 75%', status: 'partial' })
+  assert.deepEqual([matrixCell(group(withVoid.slice(2).concat(variant(s3[0], gone)), withVoid[2])).text, runScore(group(withVoid.slice(2).concat(variant(s3[0], gone)), withVoid[2]))], ['void', null])
+  const t1v = [s3[0], variant(s3[1], gone)] // one trial left, yet the cell was two: it says so
+  assert.deepEqual(matrixCell(group(t1v, t1v[0])).text, '1 of 1, 1 void, recall mean 100%, min 100%')
+  // a run without the field is trial 1, and a re-run of a trial number replaces it, as a re-run does today
+  const plain = variant(s3[0], r => { delete r.trial; r.id = 'a-plain' })
+  assert.deepEqual(group([plain, s3[1]], plain).trials.map(r => r.id), ['a-plain', s3[1].id])
+  const again = variant(s3[2], r => { r.id = 'z-again'; r.defects = ws(); r.recall = 1; r.verdict = 'pass' })
+  assert.deepEqual(matrixCell(group([...s3, again], s3[0])).text, '3 of 3, recall mean 92%, min 75%')
+  assert.equal(group([plain, variant(plain, r => { r.id = 'b-plain' })], plain).id, 'b-plain')
+  assert.equal(group([...s3, variant(s3[1], r => { r.hydraVersion = '9.2.0' })], s3[0]).trials.length, 3, 'another version is another cell')
+  const lines = rs => readmeBlock(rs.map(r => ({ file: '', text: '', run: { ...r, demo: false } }))).split('\n')
+  assert.match(lines(s3)[3], /S17-seeded 9\.1\.0 partial \(2 of 3 trials pass, recall mean 75%, min 50%\)/)
+  assert.match(lines(three)[3], /S16 9\.1\.0 fail \(2 of 3 trials pass\)/)
+  assert.equal(lines(s3)[5], 'One run per scenario unless its cell counts trials (k of n), on a small fixture; limits in evals/retros/.')
+  assert.ok(runFields(s3[1]).some(f => f[0] === '2' && f[1] === 'trial') && !runFields(plain).some(f => f[1] === 'trial'))
+  assert.ok(group(s3, s3[0]).id.includes(s3[2].id) && /trial 2: t2/.test(group(s3, s3[0]).reason), 'the tooltip names every trial')
+}
+
 // ---- README block ----
 assert.equal(readmeBlock(entries.map(e => ({ ...e, run: { ...e.run, demo: true } }))),
   '<!-- eval:start -->\nEval results land with the first live S15/S16 run — see [evals/](evals/).\n<!-- eval:end -->')
@@ -474,6 +545,23 @@ fs.rmSync(mixed, { recursive: true })
 // ---- runs-shipped: the same schema, read by nothing else, and every file says which agents it ran on ----
 const shipped = loadRuns(path.join(ROOT, 'evals/runs-shipped'))
 assert.ok(shipped.length && shipped.every(e => /shipped hydra:<role> agents/.test(e.run.notes)), 'evals/runs-shipped: a run without the label in notes')
+
+// ---- replays: the review step alone, in the same schema, read by nothing else and labelled so ----
+const replays = fs.existsSync(path.join(ROOT, 'evals/replays')) ? loadRuns(path.join(ROOT, 'evals/replays')) : []
+assert.ok(replays.every(e => e.run.trial && /^Replay of the review step only\b/.test(e.run.notes)), 'evals/replays: a replay without its trial or its label in notes')
+assert.ok(entries.every(e => !/^Replay of the review step only\b/.test(e.run.notes ?? '')), 'evals/runs holds a replay: it would count in the headline score')
+
+// ---- what the README and evals/README.md say of these files is what the files hold ----
+{ const readme = read('README.md'), rows = [...readme.matchAll(/^\| (S\d+[a-z-]*)[:,] [^|]*\| (\d+\.\d+\.\d+) \| (\d+) \| ([\d,]+) \| ([\d,]+) \| ([\d.]+) \|$/gm)], num = s => +s.replaceAll(',', '')
+  assert.equal(rows.length, 5, 'the README cost table')
+  for (const [line, scenario, version, agents, out, ctx, min] of rows) {
+    const r = (/shipped agents/.test(line) ? shipped : entries).map(e => e.run).find(r => r.scenario === scenario && r.hydraVersion === version)
+    assert.deepEqual([num(agents), num(out), num(ctx), num(min)], [r.cost.agents, r.cost.outputTokens, r.cost.contextTokens, r.cost.wallMinutes], line)
+  }
+  if (replays.length) for (const f of ['README.md', 'evals/README.md']) {
+    const cell = headline(group(replays.map(e => e.run), replays[0].run))
+    assert.ok(read(f).includes(cell), `${f} does not say ${cell}`)
+  } }
 
 // ---- live headline keeps the void reason and uses the tile's honesty rule ----
 const liveRun = r => ({ file: `evals/runs/${r.id}.json`, text: '', run: { ...r, demo: false } })

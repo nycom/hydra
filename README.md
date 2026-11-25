@@ -28,40 +28,25 @@ Interactive report: [evals/report.html](evals/report.html), open locally (GitHub
 
 These results were measured with the author's own agents. The shipped agents ran three of these scenarios on 0.4.6, kept apart in `evals/runs-shipped/`: S16 pass, S17-seeded pass (recall 4/4, 0 false positives), S20 pass (all 3 criteria hold). One run per scenario, not a trend.
 
+Five replays of the S17-seeded cycle-1 review on 0.4.9 (that one step, as the shipped reviewer, on rebuilt heads) are in `evals/replays/`: 5 of 5 trials pass, recall mean 100%, min 100%. They are not scenario runs and count in no score above.
+
 - One feature branch per repo. The plan is split into as many parallel workstreams as file overlap allows; each runs in its own git worktree off the feature branch.
-- Before a run of two or more workstreams, or with a brief that carries an added default, a brief review returns a table of every workstream and every pair that shares a file, a shared file or a contract, and lists what the briefs add to the plan; each addition is removed, marked out of scope or asked before launch.
-- Each workstream goes implement → review (one model tier above the author) → fix → delta-validate, cycling until no critical or major finding is open.
+- Before a run of two or more workstreams, a brief review lists every pair that shares a file or a contract and everything the briefs add to the plan; each addition is removed, marked out of scope or asked before launch.
+- Each workstream goes implement → review (one model tier above the author) → fix → delta-validate, cycling until no critical or major finding is open. Loops that stop making progress end with a question.
 - A finding that only a brief change can settle (the brief contradicts itself or the repo, or a fix would undo an earlier verified fix) becomes a question for the user, never a fix.
 - Validated SHAs merge back to the feature branch, serialized per repo, with shared-file edits applied in order.
-- Then a whole-branch review plus an independent validator, a cross-repo contract check, and a validated docs sync. Docs that fail their validation get one fix round and a second validation before they fail the repo. A repo whose only workstream merged onto its untouched base has no seam to review, so only the validator runs there.
-- Fix loops stop on churn. In a workstream, two cycles in a row that each bring a new regression-kind blocker in a file the cycle's fixer was asked to fix, or one such cycle while an optional question of that workstream is still open, stop it with a question. In the whole-branch pass, two rounds in a row that each bring a new regression-kind blocker in a file the round's fixer was asked to fix stop that repo's rounds with a question. Rounds that run out on a green recheck with no open critical, regression or integration finding offer to promote the checked head with its open majors parked as known gaps; the offer is skipped when `acceptance` or `stopRule` is set.
-- A fixer whose only fix lies outside its workstream's `files[]` hands the finding to the whole-branch pass, where it stops counting toward that workstream's cycles. Every gate runs through one pipefail wrapper that prints its exit code last, and a step whose agent died twice gets a health probe before a third try.
-- A `carried` claim (the only fix lies outside `files[]`) is checked by the validator; a rejected claim goes back to the fixer for one more cycle, counted by the usual stop rules. A soft block that continued on its defaults reads `status: done`, with a note. An infra stop says how many times the agent actually died and that the step can be resumed. Unconfirmed drift-audit items are kept under `drift.unconfirmed`, with no question.
-- With a progress panel, the coordinator sends a progress call at every return, the review phase and dropped workstreams included. The coordinator also runs each merged workstream's `checks` once itself at `finalSha`.
-- Smaller prompt fixes: the churn question no longer repeats the repo name, the decision-log sentence is emitted only with `decisionLog`, a regression under a stop rule has one meaning (it worked at the base or before a fix in this run), the drift prompt opens with its task and says what to do with an unreadable log, and the whole-branch fixer lists each file it changed as `changed: <path>` in notes.
+- Then a whole-branch review plus an independent validator, a cross-repo contract check, and a validated docs sync.
 - The mechanical part lives in `skills/run/workflow.js` (a Claude Code Workflow script); `skills/run/SKILL.md` is the coordinator's procedure, and `skills/run/references/` holds the parts it reads only when they apply.
 
-Opt-in, per run (details and every arg in `skills/run/SKILL.md` and `skills/run/references/`):
+What each version changed: [CHANGELOG.md](CHANGELOG.md).
 
-- `localOnly: true`: nothing reaches the network. Every push, fetch and `ls-remote` targets a bare repo on local disk set up as the remote `hydra-local`; the branches are fetched back into your repo as local branches at the end, and pushing stays yours.
-- `workstreams[].after: [ids]`: a workstream starts only once those (same repo) merged, and branches from that head.
-- `workstreams[].lite: true`: for small pure files, implement plus one validator and no review cycles unless it finds a critical or major.
-- `workstreams[].humanCheck`: once that workstream merges, its repo's whole-branch pass waits and the run returns what to check by eye, every check of a repo in one pause; a re-run with `resumeFromRunId`, `resume` and `humanChecks` (each answer bound to the workstream's own head, so a re-merge with no new commit keeps it) continues, and a reported problem goes back to its author.
-- `workstreams[].checks` / `workstreams[].knownRedChecks`: each check's exit code comes back typed in `checkExits`. The script rates the validators' exits: a red or timed-out check that is not known-red turns the gate red (critical), and is never rerun. A validator's red where the author reported 0 is labelled a false green. The whole-branch validator and each recheck re-run the checks of every merged workstream on the merged tip. `knownRedChecks` lists entries of `checks` that are red at the base: their exit is reported, never a finding.
-- `resume` (on every `resumeFromRunId` call): a live git probe rebuilds each workstream's state before any stage, so merged workstreams are carried, a dead agent's workstream re-runs live, and no whole-branch pass reports `pass` while a planned workstream is unmerged. The resumed result's `carryForward` goes back with it, so handed and shared-edits findings, settled ledgers and passed whole-branch passes survive the resume.
-- `decisions`: the user's answer to a blocked workstream's question, on a resume; that same workstream resumes at implement with the answer in its brief.
-- `dropped`: workstream ids the user dropped. They run no agent, the rest merges, and the result lists them as not done (top-level `dropped`, the repo note `not done (dropped): <ids>`) for the PR body's Not done list. The stuck-finding question names this re-run.
-- `workstreams[].files` may overlap another workstream's when one is ordered `after` the other.
-- `stepTool: "<tool name>"`: workers report their steps with that tool, and send `failed` only when their own attempt at a step failed. Hydra never hard-codes a tool name.
-- `repos[].copyExcluded`: git-ignored files the gate needs (a local preview test) are copied into every agent worktree and never committed.
-- `repos[].reviewSharedEdits: true`: the shared-file edits each merge applies get their own gate and validator before the next merge.
-- `repos[].commitPrefix`: optional non-empty string with no newline or quote, put before the merge step's fixed subjects (shared-file edits, regenerated files) and the docs step's graph refresh; the merge commit subject is unchanged.
-- A gate must not pipe into `head` or `grep -q` (SIGPIPE, exit 141); the script rejects both.
-- `stopRule` + `acceptance`: a string of wrong actions and an approved case table; reviewers block only on those and on regressions vs the base, validators run each row black-box.
-- `decisionLog`: the user's answers become binding for every agent, and a read-only drift audit after the run turns each unlogged change into a revert-by-default question.
-- `wbReviewModel`: pick the integrated whole-branch review model (cheaper on intermediate passes, top tier on the pass expected to close clean).
+## Requirements
 
-Stacked PRs are an opt-in mode, used only when asked for.
+- Claude Code with the Workflow tool. CI validates the plugin on 2.1.330; the lowest version that works is not tested.
+- An account that has the models in [Models](#models).
+- git, and a remote named `origin` for each repo. With `localOnly: true` nothing is pushed there.
+- A gate command per workstream that exits 0 when the repo is green.
+- `node` on the PATH when a workstream sets `checks` or a repo sets `smoke`.
 
 ## Install
 
@@ -75,6 +60,34 @@ Hydra ships its three agents: `hydra:implementer`, `hydra:reviewer` and `hydra:v
 To replace one, put an agent with the bare name (`implementer`, `reviewer` or `validator`) in `~/.claude/agents/` or the project's `.claude/agents/`: yours is used instead, so an existing setup runs as before. For one run, name any agent type and Hydra passes it as `agentTypes`. Your agent's definition decides how much context every worker starts with; set `omitClaudeMd: true` to keep it lean. On the author's own agents, with another plugin's session-start text kept out too, first calls went from 17,000-19,000 to 6,500-8,200 tokens.
 
 Optional, for per-worker step bars in a progress mod that offers a step tool: replace the three agents with your own, add that tool to their `tools:` lists, then pass `stepTool` (see `skills/run/references/args-and-sizing.md`).
+
+## A minimal run
+
+Give the skill a plan:
+
+```
+/hydra:run add a --json flag to the export command, with tests
+```
+
+It writes the briefs, cuts and pushes the feature branch, and calls the workflow. For one repo and one workstream, the smallest call needs only `workstreams`, each with these seven fields:
+
+```js
+args: {
+  workstreams: [
+    {
+      id: "export-json",
+      repo: "~/code/app",
+      featureBranch: "feat/export-json",         // already pushed
+      branch: "feat/export-json--export-json",   // made by the author
+      model: "sonnet",                           // sonnet | opus, the author and fixer
+      gate: "npm test",
+      brief: "Add a --json flag to the export command in src/export.js: it prints the rows as one JSON array. Test it in test/export.test.js."
+    }
+  ]
+}
+```
+
+Everything else is optional: [SKILL.md](skills/run/SKILL.md#3-run-the-workflow) has the args nearly every run sets, [args-and-sizing.md](skills/run/references/args-and-sizing.md) the rest, and [questions-and-resume.md](skills/run/references/questions-and-resume.md) what a resume passes back. Stacked PRs and local-only runs are opt-in modes with their own files in `skills/run/references/`.
 
 ## Models
 
@@ -93,6 +106,20 @@ Each step asks for a model tier by name (`sonnet`, `opus` or `fable`), never a d
 | Drift audit, only with `decisionLog` | `fable` | no arg |
 
 What an account without Fable gets is not tested. `reviewModel: "opus"` on every `opus` workstream takes Fable out of the workstream and whole-branch reviews; the plan review and the drift audit still ask for it.
+
+## What a run costs
+
+Tokens of the eval runs, on a small two-repo fixture. Output and context tokens are summed over every agent; context counts cached reads too.
+
+| Scenario | Hydra | Agents | Output tokens | Context tokens | Minutes |
+|---|---|---|---|---|---|
+| S20: one workstream that blocks on a question, then resumes with the answer | 0.4.4 | 7 | 20,691 | 507,750 | 3.4 |
+| S17-seeded: one workstream with planted defects to find and fix | 0.4.4 | 13 | 52,433 | 1,050,909 | 8.1 |
+| S21: three workstreams in two repos, one fix outside its workstream | 0.4.4 | 25 | 86,475 | 2,184,486 | 8.5 |
+| S20, on the shipped agents | 0.4.6 | 7 | 24,892 | 563,168 | 4.3 |
+| S17-seeded, on the shipped agents | 0.4.6 | 13 | 56,434 | 1,070,323 | 8.9 |
+
+Each row is one run, from its file in `evals/runs/` or `evals/runs-shipped/`. The coordinator session is not counted. A real plan is larger than the fixture, and no committed file holds a real run's numbers, so none is listed.
 
 ## Tests
 
