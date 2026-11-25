@@ -77,12 +77,12 @@ const brief = f => `${f.severity} ${f.where}: ${f.issue}`
 
 // ---- S21 ----
 const stale = finding('c1-F1'), other = finding('c1-F2', { severity: 'major' })
-const s21 = ({ w = {}, status = 'fixed', found = [stale, other], ledger = true, args = flowArgs, author = { status: 'done', ok: true }, ...o } = {}) => call({
+const s21 = ({ w = {}, status = 'fixed', repo = 'pass', found = [stale, other], ledger = true, args = flowArgs, author = { status: 'done', ok: true }, ...o } = {}) => call({
   args, ...o,
   agents: [{ label: 'alpha-cents implement', tokens: 100 }, { label: 'alpha-discount implement', out: author }, { label: 'alpha-discount review c1', out: { headSha: 'b', findings: found } }, { label: 'alpha-discount validate c1', out: { verified: ['c1-F1'], open: [], questions: [] } }, { label: 'alpha fix r1' }],
   result: {
     workstreams: [ws('alpha-discount', { handed: [brief(stale)], findings: [{ ...stale, status: 'carried' }], ...w }), ws('alpha-cents', { sha: o.cents ?? 'c'.repeat(40) }), ws('beta-cents')],
-    repos: [{ repo: args.workstreams[0].repo, verdict: 'pass', findings: ledger ? [{ id: 'alpha-discount:c1-F1', status }] : [] }],
+    repos: [{ repo: args.workstreams[0].repo, verdict: repo, findings: ledger ? [{ id: 'alpha-discount:c1-F1', status }] : [] }],
     carryForward: { workstreams: { 'alpha-discount': { open: w.openIds ?? [] } } },
   },
 })
@@ -100,6 +100,8 @@ const s21 = ({ w = {}, status = 'fixed', found = [stale, other], ledger = true, 
   assert.match(r.notes, /^One call/)
   assert.match(r.notes, /failed \[\].*unfinished \[\]/)
   assert.match(r.notes, /fixture repo .*gone/i)
+  assert.match(r.notes, /void conditions not checked.*alpha-cents flip/i)
+  assert.ok(!/resumed author edit/.test(r.notes)) // one call has no resumed author
   refused(score('S21', [c], { judge: { stale: ['c9-F9'] } }), /unknown.*c9-F9/i)
   refused(score('S21', [c], { judge: { stale: ['c1-F1'], bogus: true } }), /unknown.*bogus/i)
   refused(score('S21', [c], { judge: {} }), /missing.*stale/i)
@@ -117,6 +119,8 @@ const s21 = ({ w = {}, status = 'fixed', found = [stale, other], ledger = true, 
   assert.equal(fl({ w: { open: [brief(stale)] } }).noCycleOnIt, false)
   assert.equal(fl({ w: { openIds: [stale] } }).noCycleOnIt, false)
   assert.deepEqual(fl({ status: 'open' }), { carriedToWholeBranch: true, noCycleOnIt: true, wholeBranchFixed: false })
+  // a fix verified in a pass that failed on something else stays on its side branch: it never reached the feature branch
+  assert.deepEqual(fl({ repo: 'fail' }), { carriedToWholeBranch: true, noCycleOnIt: true, wholeBranchFixed: false })
   assert.match(pass(score('S21', [c], { judge: { stale: [] } }), 'void').voidReason, /neither/)
   assert.match(pass(score('S21', [s21({ found: [] })]), 'void').voidReason, /neither/)
   assert.equal(pass(score('S21', [c], { extra: ['--void', 'wrong fixture'] }), 'void').voidReason, 'wrong fixture')
@@ -135,6 +139,7 @@ const s21 = ({ w = {}, status = 'fixed', found = [stale, other], ledger = true, 
   const r = pass(score('S21', [two, one], { judge })) // order on the command line does not matter
   assert.match(r.notes, /^2 calls: resumed after an author block/)
   assert.match(r.notes, /Which field\?/)
+  assert.match(r.notes, /void conditions not checked.*alpha-cents flip.*resumed author edit/i)
   assert.equal(r.cost.outputTokens, 147)
   assert.equal(r.cost.agents, 6)
   assert.equal(r.cost.wallMinutes, 2.1) // 1.0 + 1.1: per call, never the gap between them
@@ -147,6 +152,7 @@ const s21 = ({ w = {}, status = 'fixed', found = [stale, other], ledger = true, 
   land(f.alpha, 'feat/eval--alpha-cents2')
   assert.match(pass(score('S21', [s21({ args: f.args, cents: flip })], { judge: { stale: ['c1-F1'] } }), 'void').voidReason, /alpha-cents/)
   assert.match(pass(score('S21', [s21({ args: f.args, cents: clean, w: { sha: clean } })], { judge: { stale: ['c1-F1'] } })).notes, /git: 2\/3 merged heads/)
+  assert.ok(!/void conditions not checked/.test(pass(score('S21', [s21({ args: f.args, cents: clean, w: { sha: clean } })], { judge: { stale: ['c1-F1'] } })).notes))
 }
 
 // ---- cost over two calls, the coordinator, deaths, hits ----
@@ -366,6 +372,8 @@ const s21 = ({ w = {}, status = 'fixed', found = [stale, other], ledger = true, 
   refused(score('S21', [c], { judge, extra: ['--notes', notes] }), /claude\.ai/)
   fs.writeFileSync(notes, 'ran in /ho' + 'me/dev/x')
   refused(score('S21', [c], { judge, extra: ['--notes', notes] }), /home path/)
+  fs.writeFileSync(notes, 'see projects/-Us' + 'ers-someone/x')
+  refused(score('S21', [c], { judge, extra: ['--notes', notes] }), /home path/)
   fs.writeFileSync(notes, 'Models: as briefed.\n')
   const ok = score('S21', [c], { judge, id: 'twice', extra: ['--notes', notes] })
   assert.match(pass(ok).notes, /Models: as briefed\./)
@@ -375,6 +383,9 @@ const s21 = ({ w = {}, status = 'fixed', found = [stale, other], ledger = true, 
   assert.match(again.stderr, /exists.*--force/)
   assert.equal(fs.readFileSync(ok.file, 'utf8'), before)
   assert.equal(pass(score('S21', [c], { judge, id: 'twice', extra: ['--reason', 'new', '--force'] })).reason, 'new')
+  // free text never hides what the verdict rests on
+  assert.equal(pass(score('S21', [s21({ status: 'open' })], { judge, extra: ['--reason', 'every criterion holds'] }), 'fail').reason, 'failed: wholeBranchFixed: every criterion holds')
+  assert.equal(pass(score('S21', [c], { judge, extra: ['--void', 'wrong fixture', '--reason', 'fine'] }), 'void').reason, 'void: wrong fixture: fine')
   refused(score('S99', [c]), /scenario/)
   refused(score('S21', []), /--record/)
   refused(score('S21', [c], { judge, id: '../up' }), /id/)

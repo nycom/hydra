@@ -266,17 +266,19 @@ function s21() {
   const raw = [c.out(`${id} review c1`), c.out(`${id} validate c1`)].flatMap(found).filter((f, i, fs) => major(f) && fs.findIndex(g => g.id === f.id) === i)
   // the stale test's source at a rev; null when the fixture no longer holds it
   const test = rev => { const p = planned(c, id), d = holder(p.repo, rev); return d && (git(d, 'show', `${rev}:tests/test_api.py`)?.match(/def test_discounted_total_shape[\s\S]*?(?=\n    def |\nclass |$(?![\s\S]))/)?.[0].trim() ?? '') }
-  const flipped = rev => { const [x, y] = [test('main'), test(rev)]; return x && y !== null && x !== y }
-  const ledger = c.result.repos?.find(r => r.repo === planned(c, id).repo)?.findings ?? [], entry = f => ledger.find(e => e.id === `${id}:${f.id}`)
+  const unread = []
+  const flipped = (rev, what) => { const [x, y] = [test('main'), test(rev)]; if (!x || y === null) unread.push(what); return x && y !== null && x !== y }
+  const alpha = c.result.repos?.find(r => r.repo === planned(c, id).repo), ledger = alpha?.findings ?? [], entry = f => ledger.find(e => e.id === `${id}:${f.id}`)
   const open = f => (w.open ?? []).some(o => o === brief(f) || o.startsWith?.(`${brief(f)} (+`)) || (c.result.carryForward?.workstreams?.[id]?.open ?? []).some(o => o.id === f.id)
   const handed = f => (w.handed ?? []).some(h => [f, ...(w.findings ?? []).filter(e => e.id === f.id)].some(e => h.startsWith?.(brief(e))))
   const plan = {
     candidates: raw.map(cand('review')), notes: [],
     seeds: { stale: 'A finding that names the pre-existing test tests/test_api.py::test_discounted_total_shape (or its assertion on the old field name "total") as stale, wrong or red now that discounted_total answers total_cents.' }, yesNo: {},
     voidReason: hard(author) ? (calls.length > 1 ? 'the resumed author hard-blocked again' : 'the author hard-blocked at implement and no resume ran')
-      : flipped(calls[0].ws('alpha-cents')?.sha || c.ws('alpha-cents')?.sha) ? 'alpha-cents flipped the still-skipping assertion during the rename'
-      : calls.length > 1 && flipped(author?.sha) ? 'the resumed author edited the stale test under the answer' : raw.length ? undefined : 'neither the review nor the validator filed the stale test',
+      : flipped(calls[0].ws('alpha-cents')?.sha || c.ws('alpha-cents')?.sha, 'alpha-cents flip') ? 'alpha-cents flipped the still-skipping assertion during the rename'
+      : calls.length > 1 && flipped(author?.sha, 'resumed author edit of the stale test') ? 'the resumed author edited the stale test under the answer' : raw.length ? undefined : 'neither the review nor the validator filed the stale test',
   }
+  if (unread.length) plan.notes.push(`Void conditions not checked, the fixture no longer holds the commit: ${list(unread)}.`)
   if (calls.length > 1) {
     plan.lead = hard(first) ? '2 calls: resumed after an author block, a resumed result, never pooled with a one-call result.' : '2 calls, but call 1\'s author did not block.'
     plan.candidates.push(...said({ questions: first?.questions }))
@@ -288,7 +290,7 @@ function s21() {
     const voidReason = plan.voidReason ?? (!its.length ? 'neither the review nor the validator filed the stale test' : calls.length > 1 && !a.blockOnStaleTest ? 'the author hard-blocked on something else than the stale test' : undefined)
     return {
       voidReason, notes: calls.length > 1 && a.defaultKeepsTests !== undefined ? [`Its default ${a.defaultKeepsTests ? 'kept' : 'did not keep'} every pre-existing test.`] : [],
-      fields: { flow: { carriedToWholeBranch: its.some(f => handed(f) && entry(f)), noCycleOnIt: (w.cyclesRun ?? 0) <= 2 && !its.some(open), wholeBranchFixed: fixed.length > 0 && fixed.every(f => entry(f).status === 'fixed') } },
+      fields: { flow: { carriedToWholeBranch: its.some(f => handed(f) && entry(f)), noCycleOnIt: (w.cyclesRun ?? 0) <= 2 && !its.some(open), wholeBranchFixed: alpha?.verdict === 'pass' && fixed.length > 0 && fixed.every(f => entry(f).status === 'fixed') } },
     }
   }
   return plan
@@ -327,7 +329,7 @@ const scored = plan.score(answers), voidReason = plan.voidReason ?? scored.voidR
 
 // ---- run file -----------------------------------------------------------------------------------
 const criteria = Object.entries(scored.fields.flow ?? {}), failing = criteria.filter(([, v]) => !v).map(([k]) => k)
-const reason = scored.reason ?? opt.reason ?? (voidReason ? `void: ${voidReason}` : criteria.length ? (failing.length ? `failed: ${failing.join(', ')}` : 'every criterion holds') : family === 'S16' ? `status ${calls[0].out('alpha-rounding implement').status}` : `${scored.fields.falsePositives.major} major false positives${scored.fields.onBrief === false ? ', merged head off-brief or not merged' : ''}`)
+const computed = (voidReason ? `void: ${voidReason}` : criteria.length ? (failing.length ? `failed: ${failing.join(', ')}` : 'every criterion holds') : family === 'S16' ? `status ${calls[0].out('alpha-rounding implement').status}` : `${scored.fields.falsePositives.major} major false positives${scored.fields.onBrief === false ? ', merged head off-brief or not merged' : ''}`)
 const deaths = k => `[${perCall.flatMap(c => c[k]).join(', ')}]`
 const mergedWs = (last.result.workstreams ?? []).filter(w => w.merged), checks = mergedWs.map(w => inFeature(last, w))
 const notes = [
@@ -340,12 +342,14 @@ const notes = [
   coordinator && `Coordinator session (not in cost): ${coordinator.calls} calls, ${coordinator.outputTokens} output tokens, context ${Object.entries(coordinator.context).map(([k, v]) => `${k} ${v}`).join(', ')}.`,
   `Answer-key grep: ${hits.length ? `${hits.length} hits in ${toolCalls} agent tool calls: ${hits.join(' | ')}` : `clean (${toolCalls} agent tool calls)`}.`,
 ].filter(Boolean).join(' ')
-const run = { id: opt.id, date: opt.date, hydraVersion: opt.version, scenario: opt.scenario, verdict: '', ...(voidReason && { voidReason }), reason, ...scored.fields, cost: total, notes }
+const run = { id: opt.id, date: opt.date, hydraVersion: opt.version, scenario: opt.scenario, verdict: '', ...(voidReason && { voidReason }), reason: scored.reason ?? '', ...scored.fields, cost: total, notes }
 run.verdict = passBar(run)
+// free text never replaces what a run failed or was voided on
+const reason = run.reason ||= run.verdict === 'pass' ? opt.reason ?? computed : [computed, opt.reason].filter(Boolean).join(': ')
 for (const h of hits) console.error(`answer-key hit: ${h}`)
 const strings = v => typeof v === 'string' ? [v] : v && typeof v === 'object' ? Object.entries(v).flatMap(([k, x]) => [k, ...strings(x)]) : []
 for (const s of strings(run)) { // the repo is public
-  const m = /\/(Users|home)\/.{0,30}/.exec(s) ?? /.{0,20}claude\.ai.{0,20}/i.exec(s)
+  const m = /(\/(Users|home)\/|-Users-).{0,30}/.exec(s) ?? /.{0,20}claude\.ai.{0,20}/i.exec(s)
   if (m) die(`refused, the run holds a home path or a claude.ai URL: ${m[0]}`)
 }
 try { validate(run, path.basename(outFile)) } catch (e) { die(e.message) }
