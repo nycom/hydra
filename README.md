@@ -75,6 +75,23 @@ To replace one, put an agent with the bare name (`implementer`, `reviewer` or `v
 
 Optional, for per-worker step bars in a progress mod that offers a step tool: replace the three agents with your own, add that tool to their `tools:` lists, then pass `stepTool` (see `skills/run/references/args-and-sizing.md`).
 
+## Models
+
+Each step asks for a model tier by name (`sonnet`, `opus` or `fable`), never a dated version and never the session's own model, so a review keeps its tier whatever model you run Hydra from.
+
+| Step | Model | Change it with |
+|---|---|---|
+| Plan review, before the run | `fable` | no arg |
+| Workstream author and fixer | `sonnet` or `opus`, set per workstream; a blocker that survives two fix rounds gets one `opus` fix | `workstreams[].model` |
+| Workstream review | one tier above the author: `opus` for a `sonnet` author, `fable` for an `opus` author | `workstreams[].reviewModel` |
+| Whole-branch review | the repo's highest `reviewModel` | `wbReviewModel` |
+| Whole-branch fix | the repo's highest workstream `model` | `workstreams[].model` |
+| Validators, the contract check and the retrospective | `opus` | no arg |
+| Baseline check, merge, promote, docs sync, state and health probes | `sonnet` | no arg |
+| Drift audit, only with `decisionLog` | `fable` | no arg |
+
+What an account without Fable gets is not tested. `reviewModel: "opus"` on every `opus` workstream takes Fable out of the workstream and whole-branch reviews; the plan review and the drift audit still ask for it.
+
 ## Tests
 
 ```
