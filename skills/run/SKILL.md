@@ -9,7 +9,7 @@ description: Hydra (formerly "delegate"), a multi-repo delegation workflow — p
 subagents (one `implementer` + one `validator`), no feature branch ceremony. The
 workflow pays off at 2+ workstreams or anything that needs review cycles.
 
-Coordinator = Fable (this session): decompose, set up, brief, call the workflow,
+Coordinator = this session: decompose, set up, brief, call the workflow,
 make the final call. Subagents write code; the coordinator never does.
 `workflow.js` (next to this file; `<skill dir>` below is this skill's base directory, printed when the skill loads) encodes everything mechanical: worktrees, gates,
 push + `ls-remote` verification, SHA pinning between stages, review/fix/validate
@@ -173,6 +173,18 @@ Local-only runs read `<skill dir>/references/local-only.md` before this section.
   is there", "before the B row if it is there"): either may merge first.
   The workflow adds the git, gate, hygiene, hard-rule, shared-file and ladder
   rules — don't repeat them.
+- **Brief review before launch** (2+ workstreams, or any brief carrying a default
+  or pre-answer you added): one `reviewer` on `opus`, read-only, given the approved
+  plan, every brief and the args you will pass. It returns (1) a table: one row per
+  workstream (files, shared edits with their place, done-when checks) and one row
+  per pair of workstreams that share a file, a shared file or a contract (what each
+  expects of the other, where each edit goes, which merges first); (2) every brief
+  clause, default or pre-answer that adds behaviour the plan does not state; (3)
+  every brief line that contradicts the `decisionLog`, the `acceptance` table or, on
+  a resume, `decisions.<id>`. A result without the table does not count: ask again.
+  Fix the briefs from (1) and (3). For each item of (2): remove it, mark it out of
+  scope in the brief, or ask the user before launch; never launch it as a
+  non-blocking default.
 
 ## 3. Run the workflow
 
@@ -319,8 +331,9 @@ says NOT merged; unpromoted side branches). Then:
   `--wbfix*`/`--docs` refs. An unmerged workstream is yours to settle; no agent
   merges it off-book.
 - Never resume after a hand fix to a workstream branch; re-run `stage: "wholeBranch"`
-  instead. Between the pause and the resume change nothing but `humanChecks`: no hand
-  fixes, no brief edits.
+  instead. Between a `humanCheck` pause and its resume change nothing but
+  `humanChecks`: no hand fixes, no brief edits (except a blocked workstream's, for
+  its `decisions` answer).
 - **Batch fix-ups:** collect the decisions, run one fix-up per repo, then one
   `stage: "wholeBranch"` run, never one pass per fix-up. Append every answered
   question to the `decisionLog`, and check each new brief against it before
