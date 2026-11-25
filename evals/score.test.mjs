@@ -324,6 +324,11 @@ const s21 = ({ w = {}, status = 'fixed', repo = 'pass', found = [stale, other], 
   assert.match(pass(run({ noReview: true }), 'void').voidReason, /implement/)
   refused(run({}, all, { extra: ['--reason', 'recall 3/4, 2 primed'] }), /primed/)
   assert.match(pass(run({}, all, { extra: ['--reason', 'solid'] })).reason, /^recall 3\/4, 0 primed: solid$/)
+  // a reason that restates the whole tally stands as given; one that restates a part gets the rest in front; a wrong restatement is refused
+  for (const [reason, want] of [['Recall 3/4, 0 primed: W4 missed', 'Recall 3/4, 0 primed: W4 missed'], ['W4 missed (0 primed, recall 3/4)', 'W4 missed (0 primed, recall 3/4)'], ['0 primed, W4 missed', 'recall 3/4: 0 primed, W4 missed'], ['recall 3/4, W4 missed', '0 primed: recall 3/4, W4 missed']])
+    assert.equal(pass(run({}, all, { extra: ['--reason', reason] })).reason, want)
+  assert.equal(pass(run(said, { ...all, W1: ['c1-F1', 'A-D1'] }, { extra: ['--reason', 'recall 3/4, 1 primed'] })).reason, 'recall 3/4, 1 primed')
+  for (const [reason, re] of [['recall 4/4, 0 primed', /--reason says recall 4\/4, the answers give 3\/4/], ['0 primed; Recall: 3/3', /says Recall: 3\/3/], ['recall 3/4, 0 primed, or 1 primed', /says 1 primed, the answers give 0/]]) refused(run({}, all, { extra: ['--reason', reason] }), re)
 
   const k = fixture('ws-control'), ok = commit(k.alpha, 'feat/eval--try1', `origin/${branch}`, dup), off = commit(k.alpha, 'feat/eval--try2', ok, { 'ledger/owners.py': t => t + '\n# touched\n' })
   const ctl = { scenario: 'S17-control', args: k.args, sha: ok }
@@ -464,6 +469,10 @@ const s21 = ({ w = {}, status = 'fixed', repo = 'pass', found = [stale, other], 
   const r = pass(score('S15-seeded', [c()], { judge }))
   assert.deepEqual([r.recall, r.defects.D8, r.defects.D9], [0.9, { caught: true, stage: 'test-guard', findingId: 'V-F1' }, { caught: true, stage: 'contract', findingId: 'X-F1' }])
   assert.match(r.notes, /W-F1 names D9/)
+  const why = reason => score('S15-seeded', [c()], { judge, extra: ['--reason', reason] })
+  for (const [reason, want] of [['solid', 'recall 9/10: solid'], ['Recall 9/10: D10 missed', 'Recall 9/10: D10 missed'], ['0 primed', 'recall 9/10: 0 primed']]) assert.equal(pass(why(reason)).reason, want)
+  refused(why('recall 10/10'), /--reason says recall 10\/10, the answers give 9\/10/)
+  refused(why('recall 9/10, 2 primed'), /says 2 primed, the answers give 0/)
   assert.match(pass(score('S15-seeded', [c({ noContract: true })]), 'void').voidReason, /contract/)
   pass(score('S15-control', [c()], { judge: { falsePositives: [] } }))
   for (const sc of ['S15-seeded', 'S15-control', 'S17-seeded', 'S17-control', 'S27', 'S28']) // two calls would score the last and cost both

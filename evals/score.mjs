@@ -141,10 +141,13 @@ function seeded(plan, discarded, a) {
     if (scored[0]?.stage === 'reviewer' && named.some(c => c.id.startsWith('A-D'))) primed++
   }
   const kept = Object.values(defects).filter(d => !d.discarded), caught = kept.filter(d => d.caught).length
-  const tally = `recall ${caught}/${kept.length}${family === 'S17' ? `, ${primed} primed` : ''}`
-  const claimed = /\b(\d+) primed\b/.exec(opt.reason ?? '')
-  if (family === 'S17' && claimed && +claimed[1] !== primed) die(`--reason says ${claimed[0]}, the answers give ${primed}`)
-  return { fields: { defects, recall: kept.length ? caught / kept.length : 0 }, notes, reason: claimed ? opt.reason : `${tally}${opt.reason ? `: ${opt.reason}` : ''}` }
+  // report.mjs reads the primed count from the reason, so what --reason restates must be right, and what it leaves out of the tally goes in front
+  const unsaid = [[/\brecall\D{0,5}(\d+\/\d+)/gi, `${caught}/${kept.length}`, `recall ${caught}/${kept.length}`], [/\b(\d+) primed\b/g, `${primed}`, family === 'S17' && `${primed} primed`]].flatMap(([re, now, text]) => {
+    const given = [...(opt.reason ?? '').matchAll(re)]
+    for (const m of given) if (m[1] !== now) die(`--reason says ${m[0]}, the answers give ${now}`)
+    return given.length || !text ? [] : [text]
+  }).join(', ')
+  return { fields: { defects, recall: kept.length ? caught / kept.length : 0 }, notes, reason: [unsaid, opt.reason].filter(Boolean).join(': ') }
 }
 const falsePositives = (plan, a) => { const fp = plan.candidates.filter(c => a.falsePositives?.includes(c.id)); return { major: fp.filter(major).length, minor: fp.filter(f => !major(f)).length } }
 
