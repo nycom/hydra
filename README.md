@@ -34,7 +34,8 @@ Five replays of the S17-seeded cycle-1 review on 0.4.9 (that one step, as the sh
 - Before a run of two or more workstreams, a brief review lists every pair that shares a file or a contract and everything the briefs add to the plan; each addition is removed, marked out of scope or asked before launch.
 - Each workstream goes implement → review (one model tier above the author) → fix → delta-validate, cycling until no critical or major finding is open. Loops that stop making progress end with a question.
 - A finding that only a brief change can settle (the brief contradicts itself or the repo, or a fix would undo an earlier verified fix) becomes a question for the user, never a fix.
-- Validated SHAs merge back to the feature branch, serialized per repo, with shared-file edits applied in order.
+- Every gate runs through one pipefail wrapper, a single command that prints the gate's own exit code last, so an appended pipe cannot hide a red gate. A red gate is never handed to a later stage.
+- Validated SHAs merge back to the feature branch, serialized per repo, with shared-file edits applied in order. A gate that reads a shared file runs with the workstream's own shared edits, uncommitted; the merge's gate stays the proof.
 - Then a whole-branch review plus an independent validator, a cross-repo contract check, and a validated docs sync.
 - The mechanical part lives in `skills/run/workflow.js` (a Claude Code Workflow script); `skills/run/SKILL.md` is the coordinator's procedure, and `skills/run/references/` holds the parts it reads only when they apply.
 
@@ -136,7 +137,7 @@ evals/snapshot.sh
 node evals/report.test.mjs
 ```
 
-The report also scores the pass/fail scenarios S18-S21, S27 and S28 (S28 provisional) through a run's `flow` criteria, and the fixture builder (`skills/run/tests/fixture/build.sh`) has the `--flow`, `--decided` and `--ruled` modes.
+The report also scores the pass/fail scenarios S18-S21, S27 and S28 (S28 provisional) through a run's `flow` criteria, and the fixture builder (`skills/run/tests/fixture/build.sh`) has the `--flow`, `--shared`, `--decided` and `--ruled` modes.
 
 Run schema and details: [evals/README.md](evals/README.md).
 

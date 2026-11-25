@@ -125,7 +125,9 @@ The author and the fixer make such a change in their worktree, never staged, so
 their gate sees it, and return it in `sharedEdits`. A workstream validator whose
 gate is red on a test that reads a shared file applies the listed edits
 uncommitted in its throwaway worktree, reruns once and reports that run, with
-"shared edits applied" in `gate.summary` (the sentence is in its prompt only when
+"shared edits applied" in `gate.summary`; it undoes the edits before its trial
+merge, which git would otherwise refuse when an earlier merge changed the same
+file, and applies them again on the merged tree for that gate (the sentence is in its prompt only when
 the repo has a hot list and the author returned edits). The merge applies the
 edits for real and runs the full gate on the result before it pushes: that stays
 the proof, and a red there is a rejected merge. A red gate is never `carried`: the
