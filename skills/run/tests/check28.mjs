@@ -76,10 +76,18 @@ await t('7 the plugin ships exactly the three agents, lean and untied to a model
 await t('8 SKILL.md states the resolution: own agent first, then the shipped one, then stop; same types on a resume', () => {
   const p = core.split('\n\n').find(s => s.startsWith('**Agent types.**'))
   assert(p, 'the paragraph')
-  for (const re of [/agentTypes/, /hydra:<role>/, /bare name/, /resume/, /your own spawns/, /name a model on every/, /tell the user which type each role got/, /lacks Bash/]) assert(re.test(p.replace(/\n/g, ' ')), String(re))
+  for (const re of [/agentTypes/, /hydra:<role>/, /bare name/, /resume/, /your own spawns/, /name a model on every/, /before your first spawn/i, /`Agent types: implementer = <type>, reviewer = <type>, validator = <type>`/, /lacks Bash/]) assert(re.test(p.replace(/\n/g, ' ')), String(re))
   assert(core.indexOf('**Agent types.**') < core.indexOf('## 1. Decompose'), 'before section 1')
   assert(/^\| `agentTypes` \| none \|/m.test(refs['args-and-sizing.md']), 'the args row')
   assert(/^ {4}agentTypes: /m.test(refs['questions-and-resume.md'].split('```')[1]), 'the resumed call') })
+
+await t('9 SKILL.md shows the shape of agentTypes in its call, so a run on the shipped agents guesses nothing', () => {
+  const call = core.split('```').find(b => b.includes('Workflow({'))
+  assert(/^ {4}agentTypes: \{ implementer: "hydra:implementer", reviewer: "hydra:reviewer", validator: "hydra:validator" \},/m.test(call), 'the call example') })
+await t('10 SKILL.md: an order between two workstreams in one shared file goes in both briefs', () => {
+  const b = core.replace(/\n\s*/g, ' ')
+  assert(/same shared file[^.]*order matters[^.]*both briefs/.test(b), 'the brief rule') })
+await t('11 SKILL.md gives the cron tool\'s own expiry', () => assert(/expire after 30 days/.test(core) && !/7 days/.test(core)))
 
 if (fails.length) { console.error(fails.join('\n')); process.exit(1) }
 console.log('agent type checks ok')
