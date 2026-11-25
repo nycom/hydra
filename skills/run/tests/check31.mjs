@@ -138,7 +138,7 @@ await t('2g (control) a carried claim on a finding that is not the gate still ha
 // ---- 3. the new sentences, each only where it belongs ----
 const OWN = 'If your gate reads a shared file you need changed (a test that reads the README, a version file), make that change in your worktree so the gate sees it, never stage it (git add your own paths only), and return it in sharedEdits as usual.'
 const NEVER = 'A red gate is never "carried": when its only cause is a shared-file change in your sharedEdits, answer it "answered" and name the edit.'
-const RERUN = 'If the gate is red and the failing test reads a shared file: apply the author\'s sharedEdits (listed in step 1) in your worktree, uncommitted, the way the merge will (a generated file: the repo\'s regen), rerun the gate once and report that run, with "shared edits applied" in gate.summary. Still red: red.'
+const RERUN = 'If the gate is red and the failing test reads a shared file: apply the author\'s sharedEdits (listed in step 1) in your worktree, uncommitted, the way the merge will (a generated file: the repo\'s regen), rerun the gate once and report that run, with "shared edits applied" in gate.summary. Still red: red. Before step 4\'s trial merge undo these edits (git checkout the files, delete the ones you added; never git stash), then apply them again on the merged tree for its gate.'
 const NOTE = hot => `Shared files are never the author's to commit: ${hot}; the merge applies the edits the brief asks for there, so a change missing from them is not a finding.\n`
 const NOTE_RE = /so a change missing from them is not a finding/
 const hotRepo = (hot = ['**/README*', 'contract.yaml']) => [{ repo: '/r/one', hot }]
@@ -167,6 +167,7 @@ await t('3c both workstream validators get the rerun sentence in their gate step
     assert.equal(count(p, RERUN), 1)
     const step3 = p.split('\n3. Run the gate')[1].split('\n4. ')[0]
     assert(step3.endsWith(` ${RERUN}`), 'the end of the gate step')
+    assert(p.split('\n4. ')[1].startsWith('Integration: in your worktree, trial-merge'), 'step 4 is the trial merge the sentence names')
     assert(p.split('\n2. ')[0].includes(JSON.stringify(EDITS)), 'the list the sentence points at stands in step 1')
   }
   assert.deepEqual(holds(prompts, RERUN), ['a validate c1'])
