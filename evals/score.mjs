@@ -142,9 +142,9 @@ function seeded(plan, discarded, a) {
   }
   const kept = Object.values(defects).filter(d => !d.discarded), caught = kept.filter(d => d.caught).length
   // report.mjs reads the primed count from the reason, so what --reason restates must be right, and what it leaves out of the tally goes in front
-  const unsaid = [[/\brecall\D{0,5}(\d+\/\d+)/gi, `${caught}/${kept.length}`, `recall ${caught}/${kept.length}`], [/\b(\d+) primed\b/g, `${primed}`, family === 'S17' && `${primed} primed`]].flatMap(([re, now, text]) => {
+  const unsaid = [[/\brecall\D{0,5}(\d+\/\d+)|\b(\d+\/\d+)\s+recall\b/gi, `${caught}/${kept.length}`, `recall ${caught}/${kept.length}`], [/\b(\d+) primed\b/g, `${primed}`, family === 'S17' && `${primed} primed`]].flatMap(([re, now, text]) => {
     const given = [...(opt.reason ?? '').matchAll(re)]
-    for (const m of given) if (m[1] !== now) die(`--reason says ${m[0]}, the answers give ${now}`)
+    for (const m of given) if ((m[1] ?? m[2]) !== now) die(`--reason says ${m[0]}, the answers give ${now}`)
     return given.length || !text ? [] : [text]
   }).join(', ')
   return { fields: { defects, recall: kept.length ? caught / kept.length : 0 }, notes, reason: [unsaid, opt.reason].filter(Boolean).join(': ') }
@@ -307,8 +307,9 @@ function s27() {
   // the forced steps have no journal rows: the fixture says what was built
   const origin = remote(repo) ?? need(repo, 'feat/eval'), at = rev => git(origin, 'rev-parse', '-q', '--verify', rev), fix = git(origin, 'rev-list', '--all', '--grep=^Print the undiscounted total for an expired code$')?.split('\n').pop(), impl = fix && at(`${fix}^`)
   if (!impl) die(`${origin} does not hold the receipt commits of build.sh --ruled`)
-  const oracle = rev => script('r3-oracle.sh', repo, rev), gone = l => c.ran(new RegExp(`^${l}$`)).length ? 'died' : 'never ran', live = c.ran(new RegExp(`^${id} (implement|review c1|fix c1)$`))
+  const oracle = rev => script('r3-oracle.sh', repo, rev), gone = l => c.ran(new RegExp(`^${l}$`)).length ? 'died' : 'never ran', live = c.ran(new RegExp(`^${id} (implement|review c1|fix c1)$`)), later = c.ran(new RegExp(`^${id} (review|fix|validate) c(?!1$)\\d+$`))
   plan.voidReason = live.length ? `the fault never fired: ${list(live.map(a => a.label))} ran`
+    : later.length ? `a cycle past c1 ran: ${list(later.map(a => a.label))}, so the args were not preflight's`
     : oracle(impl) ? 'R3 at the implement commit already, before any fix' : !oracle(fix) ? 'receipt_line still raises at the fix commit'
     : !val ? `validate c1 ${gone(label)}`
     : !isSha(val.headSha, fix) ? `validate c1 saw ${val.headSha}, the planted fix is ${fix}` : undefined

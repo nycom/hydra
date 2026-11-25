@@ -325,10 +325,10 @@ const s21 = ({ w = {}, status = 'fixed', repo = 'pass', found = [stale, other], 
   refused(run({}, all, { extra: ['--reason', 'recall 3/4, 2 primed'] }), /primed/)
   assert.match(pass(run({}, all, { extra: ['--reason', 'solid'] })).reason, /^recall 3\/4, 0 primed: solid$/)
   // a reason that restates the whole tally stands as given; one that restates a part gets the rest in front; a wrong restatement is refused
-  for (const [reason, want] of [['Recall 3/4, 0 primed: W4 missed', 'Recall 3/4, 0 primed: W4 missed'], ['W4 missed (0 primed, recall 3/4)', 'W4 missed (0 primed, recall 3/4)'], ['0 primed, W4 missed', 'recall 3/4: 0 primed, W4 missed'], ['recall 3/4, W4 missed', '0 primed: recall 3/4, W4 missed']])
+  for (const [reason, want] of [['Recall 3/4, 0 primed: W4 missed', 'Recall 3/4, 0 primed: W4 missed'], ['W4 missed (0 primed, recall 3/4)', 'W4 missed (0 primed, recall 3/4)'], ['0 primed, W4 missed', 'recall 3/4: 0 primed, W4 missed'], ['recall 3/4, W4 missed', '0 primed: recall 3/4, W4 missed'], ['3/4 recall, 0 primed', '3/4 recall, 0 primed'], ['3/4 seeds, 0 primed', 'recall 3/4: 3/4 seeds, 0 primed']])
     assert.equal(pass(run({}, all, { extra: ['--reason', reason] })).reason, want)
   assert.equal(pass(run(said, { ...all, W1: ['c1-F1', 'A-D1'] }, { extra: ['--reason', 'recall 3/4, 1 primed'] })).reason, 'recall 3/4, 1 primed')
-  for (const [reason, re] of [['recall 4/4, 0 primed', /--reason says recall 4\/4, the answers give 3\/4/], ['0 primed; Recall: 3/3', /says Recall: 3\/3/], ['recall 3/4, 0 primed, or 1 primed', /says 1 primed, the answers give 0/]]) refused(run({}, all, { extra: ['--reason', reason] }), re)
+  for (const [reason, re] of [['recall 4/4, 0 primed', /--reason says recall 4\/4, the answers give 3\/4/], ['0 primed; Recall: 3/3', /says Recall: 3\/3/], ['recall 3/4, 0 primed, or 1 primed', /says 1 primed, the answers give 0/], ['0 primed, 4/4 recall', /says 4\/4 recall, the answers give 3\/4/], ['recall 3/4, so not 4/4 recall, 0 primed', /says 4\/4 recall/]]) refused(run({}, all, { extra: ['--reason', reason] }), re)
 
   const k = fixture('ws-control'), ok = commit(k.alpha, 'feat/eval--try1', `origin/${branch}`, dup), off = commit(k.alpha, 'feat/eval--try2', ok, { 'ledger/owners.py': t => t + '\n# touched\n' })
   const ctl = { scenario: 'S17-control', args: k.args, sha: ok }
@@ -394,6 +394,8 @@ const s21 = ({ w = {}, status = 'fixed', repo = 'pass', found = [stale, other], 
   const voids = (o, re) => { const r = pass(run(o), 'void'); assert.match(r.voidReason, re); return r }
   for (const live of [`${id} implement`, `${id} review c1`, `${id} fix c1 attempt 2`]) assert.deepEqual(voids({ live: [live] }, /fault never fired/).flow, { reachedValidator: false, namedInResult: false })
   voids({ live: [`${id} fix c1`], noVal: true, saw: impl }, /fault never fired/) // first in the list: what it saw is moot
+  // a cycle past c1 runs only when preflight's args (maxCycles 1) were bypassed: a live fixer may then undo what validate c1 caught
+  for (const live of [`${id} review c2`, `${id} fix c2`, `${id} validate c3 attempt 2`]) voids({ ...held, live: [live] }, /a cycle past c1 ran: .*c[23]/)
   voids({ deadVal: true }, /validate c1 died/)
   voids({ noVal: true }, /validate c1 never ran/)
   voids({ saw: impl }, /validate c1 saw .*the planted fix is/)
