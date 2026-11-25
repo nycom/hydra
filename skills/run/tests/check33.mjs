@@ -138,6 +138,10 @@ await t('1i2 (control) nor when an earlier attempt moved the head: a dead one, a
     assert.deepEqual([cr.ran('a fix c1').length, cr.a.merged, rr.ran('one fix r1').length, rr.one.verdict], [1, true, 1, 'pass'], `resume: ${gateTail}`)
     const again = await go({ ...ONE, stage: 'wholeBranch' }, r1(() => moved))
     assert.deepEqual([again.ran('one fix r1').length, again.one.verdict], [1, 'pass'], `wholeBranch: ${gateTail}`)
+    // past the first attempt, on a resume and with nothing merged in this call even a placeholder word proves no fabrication
+    const word = { sha: SHA(333), gateTail: 'placeholder' }, resumed = { ...ONE, resume: 'run-1', carryForward: {} }
+    assert.deepEqual([(await go(resumed, c1(() => word))).ran('a fix c1').length, (await go(resumed, r1(() => word))).ran('one fix r1').length], [1, 1], 'resume')
+    for (const [args, sc] of [[{ ...ONE, stage: 'wholeBranch' }, {}], [ONE, { 'a implement': () => ({ alreadyMerged: true }) }]]) assert.equal((await go(args, { ...r1(() => word), ...sc })).ran('one fix r1').length, 1, 'nothing merged')
     const fresh = await go(ONE, { ...r1(() => moved), 'a implement': () => ({ alreadyMerged: true }) })
     assert.deepEqual([fresh.ran('one fix r1').length, fresh.one.verdict], [1, 'pass'], `a fresh run over merged work: ${gateTail}`) } })
 await t('1i3 (control) a gate output cut above its last line is a gate output, a terse gate\'s one word or nothing included', async () => {
@@ -172,14 +176,15 @@ const status = (one, id) => one.findings.find(e => e.id === id)?.status
 await t('2a an open doc minor reaches the docs prompt and its validator, is verified and settled on the promoted pass', async () => {
   const { one, all, opts } = await go(ONE, { ...open(M), 'one docs validate': () => ({ verified: ['V-F1'], questions: [] }) })
   assert.deepEqual(holds(all, JSON.stringify([M])), ['one docs', 'one docs validate'])
-  assert(/Fix each one that still holds .* "fixed minor: <id>"; leave one you disagree with\./.test(all['one docs'][0]))
+  assert(/Fix each one that still holds by changing the doc, never code, and list it in notes as "fixed minor: <id>"; leave one you disagree with\./.test(all['one docs'][0]))
   assert(/Return in verified each id whose issue no longer holds at this head\./.test(all['one docs validate'][0]))
   assert(opts['one docs validate'].schema.required.includes('verified'))
   assert.deepEqual([one.verdict, one.open, status(one, 'V-F1')], ['pass', [], 'fixed']) })
+const REFUTED = 'A line of this range that the code refutes is always a finding, never a question, whatever minor, limit or asked question names it.'
 await t('2a2 a minor that still holds is no finding of its own, but a false line of the docs commit always is, whatever minor names it', async () => {
-  const { one, prompts, ran } = await go(ONE, { ...open(M), 'one docs validate': p => ({ verdict: 'fail', verified: [], questions: [], findings: /A line of this range that the code refutes is always a finding, even when one of these names it\./.test(p) && !/never re-file/.test(p) ? [F('D-F1', 'README.md:9', 'major', 'docs')] : [] }) })
+  const { one, prompts, ran } = await go(ONE, { ...open(M), 'one docs validate': p => ({ verdict: 'fail', verified: [], questions: [], findings: p.includes(REFUTED) && !/never re-file/.test(p) ? [F('D-F1', 'README.md:9', 'major', 'docs')] : [] }) })
   assert.deepEqual([ran('one docs fix').length, one.verdict, one.docs.fixRounds], [1, 'pass', 1])
-  assert(/One that still holds stays off verified and is not a finding by itself\./.test(prompts['one docs validate'])) })
+  assert(/One that still holds stays off verified; it is not a finding by itself and does not fail the verdict\./.test(prompts['one docs validate'])) })
 await t('2b a minor carried from a workstream\'s cycles and one left by a recheck are given too', async () => {
   const carried = { ...F('v1-F2', 'docs/guide.md:4', 'minor', 'docs') }
   const c = await go(ONE, { 'a validate c1': () => ({ open: [carried] }), 'one docs validate': () => ({ verified: ['a:v1-F2'] }) })
@@ -224,7 +229,7 @@ await t('2f (control) no open doc minor and no shared edits: the docs steps get 
   assert.deepEqual(clean.opts['one docs validate'].schema.required, ['verdict', 'sections', 'sha', 'tests', 'gate', 'findings']) })
 
 // ---- 3. the docs step keeps to the plan ----
-const RULE = 'a line they put in a file may be corrected where it is false, never extended or reworded'
+const RULE = 'a line they put in a file may be corrected where it is false, never otherwise extended or reworded'
 const edited = { 'a implement': () => ({ sharedEdits: [ROW] }) }
 const reworded = F('D-F1', 'README.md:9', 'major', 'docs')
 // a validator that files the reworded row only when its prompt makes it a finding
@@ -234,6 +239,7 @@ await t('3a the merged shared edits are limits for the docs agent, the docs fixe
   const L = ['one docs', 'one docs fix', 'one docs revalidate', 'one docs validate']
   assert.deepEqual(holds(all, RULE), L)
   for (const l of L) assert(all[l][0].includes(`${JSON.stringify([ROW])}`) && all[l][0].split(RULE).length === 2, l)
+  assert.deepEqual(holds(all, 'What a limit bars: leave it and say so in notes.'), ['one docs', 'one docs fix'])
   assert(all['one docs fix'][0].includes(`goes back to what it is at ${BASE}, keeping only a correction of what was false there.`))
   assert(opts['one docs validate'].schema.required.includes('questions')) })
 await t('3b a docs commit that reworded a merged row is filed, fixed in the one round and leaves nothing open', async () => {
@@ -270,7 +276,8 @@ await t('3e a docs finding only the user can settle reaches questions, not a min
   const { r, one, prompts, ran } = await go(ONE, { ...edited, 'one docs validate': p => /only the user can settle .* goes to questions, never to findings/.test(p) ? { questions: [ask], verified: [] } : { findings: [F('D-F1', 'README.md:9', 'minor', 'docs')] } })
   assert.deepEqual([one.verdict, one.open, one.questions, ran('one docs fix').length], ['pass', [], [ask], 0])
   assert.deepEqual(r.questions, [{ ...ask, q: `one: ${ask.q}` }])
-  assert(/A docs change that extends or rewords such a line .* never a question/.test(prompts['one docs validate'])) })
+  assert(/A docs change that extends or rewords such a line .* never a question/.test(prompts['one docs validate']))
+  assert(prompts['one docs validate'].includes(REFUTED) && /goes to questions, never to findings, and does not fail the verdict: both options/.test(prompts['one docs validate'])) })
 await t('3f the question channel is there for open doc minors alone too, and knows what was asked', async () => {
   const { prompts, opts } = await go(ONE, { 'one validate': () => ({ findings: [M], questions: [Q('Which licence?')] }), 'a implement': () => ({ questions: [Q('Round up?')] }) })
   assert(opts['one docs validate'].schema.required.includes('questions') && /goes to questions, never to findings/.test(prompts['one docs validate']))

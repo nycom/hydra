@@ -6,7 +6,7 @@ What each version changed, newest first. A line describes the version it stands 
 
 - An author or fixer result with an all-zero sha, or a fixer's new commit whose `gateTail` is nothing but a placeholder word, is a dead attempt: the step is redone within the same three attempts and nothing of the discarded result is kept.
 - The docs step and its validator get the open minors that name a doc file; a promoted docs pass settles the ones its validator verified.
-- The docs step, its fix round and their validator get the shared-file edits the merges applied as limits: a line they put in a file may be corrected where it is false, never extended or reworded. Such a change is a major docs finding.
+- The docs step, its fix round and their validator get the shared-file edits the merges applied as limits: a line they put in a file may be corrected where it is false, never otherwise extended or reworded. Such a change is a major docs finding.
 - With either of those in play, a docs finding only the user can settle becomes a question.
 - `carryForward` hands the applied shared edits to a resume.
 - The default prompts are unchanged.
