@@ -1237,13 +1237,13 @@ ${GIT(d.repo, 'docs-fix')}`,
         { label: fixLabel, phase: 'Docs sync', agentType: TYPE.implementer, model: 'sonnet', schema: DOCS_OUT })
       at.fixRounds = 1
       at.notes = [...o.notes, ...(fix?.notes || [])]
-      if (fix?.ok && hex(fix.sha) && !same(fix.sha, o.sha)) {
+      if (fix?.ok && hex(fix.sha) && !same(fix.sha, o.sha) && !same(fix.sha, o.baseSha)) { // the feature head carries no docs commit
         at.notes.push(`docs fix round: ${fix.sha} follows ${o.sha}, for ${findings.map(f => `${f.id} (${f.where}: ${f.issue})`).join('; ')}`)
         at = { ...at, sha: fix.sha, files: [...new Set([...o.files, ...fix.files])], tests: fix.tests }
         const re = await docsValidate(at, `${name(d.repo)} docs revalidate`)
         pass = re.pass
         findings = re.vOk ? re.findings : [...findings, ...re.findings] // no verdict on the fix: what it was asked to fix stays open
-      } else at.notes.push(fix ? `docs fix pushed nothing to validate (ok ${fix.ok}, sha "${fix.sha}")` : unusable('docs fix', side, fixLabel))
+      } else at.notes.push(fix ? `docs fix pushed nothing to validate (ok ${fix.ok}, sha "${fix.sha}"); check ${O}/${side} for an unvalidated push` : unusable('docs fix', side, fixLabel))
     }
     if (!pass) return { ...at, verdict: 'fail', findings }
     const why = await promote(d.repo, d.featureBranch, o.baseSha, at.sha, [side], `${name(d.repo)} docs promote`, 'Docs sync')

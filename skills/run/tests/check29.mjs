@@ -79,7 +79,7 @@ await t('2a fix then fail: one round only, the repo fails and the side branch\'s
   assert(one.open.some(x => x.includes('D-F9')) && !one.open.some(x => x.includes('D-F1')), one.open.join())
   assert(!prompts['one docs promote']) })
 await t('2b the fixer pushed nothing, left its gate red or died: fails on the first docs commit with the first findings', async () => {
-  for (const [own, note] of [[{ sha: '' }, /pushed nothing to validate/], [{ sha: DOC }, /pushed nothing to validate/], [{ sha: 'abc' }, /pushed nothing to validate/], [{ ok: false }, /pushed nothing to validate/], [null, /docs fix.*check origin\/f--docs/]]) {
+  for (const [own, note] of [[{ sha: '' }, /pushed nothing to validate/], [{ sha: DOC }, /pushed nothing to validate/], [{ sha: BASE }, /pushed nothing to validate/], [{ sha: 'abc' }, /pushed nothing to validate/], [{ ok: false }, /pushed nothing to validate.*check origin\/f--docs/], [null, /docs fix.*check origin\/f--docs/]]) {
     const { one, docs } = await go(ARGS, { ...miss, 'one docs fix': () => own }), what = JSON.stringify(own)
     assert(!docs.some(l => /revalidate|promote/.test(l)), `${what}: ${docs}`)
     assert.deepEqual([one.verdict, one.finalSha, one.docs.sha, one.docs.fixRounds], ['fail', BASE, DOC, 1], what)
@@ -161,6 +161,10 @@ await t('8c a regression in a file the fix was not asked to touch, or with no pa
     const { r, a, order } = await go(C, cycles([R(1), R(2, w), []]))
     assert(order.includes('a review c3') && churnQ(r).length === 0, w)
     assert.deepEqual(a.churn, [{ cycle: 1, files: ['x.py'] }], w) } })
+await t('8h (control) a red gate in two cycles in a row is not churn: its where names no file', async () => {
+  const red = { gate: { ...green, green: false, summary: 'red' } }
+  const { r, order } = await go(C, { ...cycles([], F('c1-F1', 'the docstring')), 'a validate c1': () => ({ verified: ['c1-F1'], ...red }), 'a validate c2': () => red })
+  assert(order.includes('a fix c2') && order.includes('a review c3') && churnQ(r).length === 0, order.join()) })
 await t('8d a re-opened id is not a new regression', async () => {
   const again = F('c1-F1', 'x.py:3', 'regression')
   const sc = { ...cycles([], again), 'a validate c1': () => ({ open: [again] }), 'a validate c2': () => ({ open: [again] }), 'a validate c3': () => ({ verified: ['c1-F1'] }) }
