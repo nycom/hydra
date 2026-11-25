@@ -344,7 +344,7 @@ const notes = [
 ].filter(Boolean).join(' ')
 const run = { id: opt.id, date: opt.date, hydraVersion: opt.version, scenario: opt.scenario, verdict: '', ...(voidReason && { voidReason }), reason: scored.reason ?? '', ...scored.fields, cost: total, notes }
 run.verdict = passBar(run)
-// free text never replaces what a run failed or was voided on
+// free text never replaces what a run failed or was voided on; a seeded run's own tally is set in seeded()
 const reason = run.reason ||= run.verdict === 'pass' ? opt.reason ?? computed : [computed, opt.reason].filter(Boolean).join(': ')
 for (const h of hits) console.error(`answer-key hit: ${h}`)
 const strings = v => typeof v === 'string' ? [v] : v && typeof v === 'object' ? Object.entries(v).flatMap(([k, x]) => [k, ...strings(x)]) : []
