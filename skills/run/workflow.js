@@ -202,8 +202,9 @@ const flakySeen = {}
 const noteFlaky = (repo, r) => { for (const t of r?.gate?.flaky || []) (flakySeen[repo] ||= new Set()).add(t) }
 const flakyOf = repo => [...(flakySeen[repo] || [])]
 const GREEN = (knownRed, repo) => `${knownRed.length ? `Green = everything passes except exactly these known-red tests (recorded at the base): ${knownRed.join(', ')}. Any other failure is red; report any known-red that now passes.` : 'Green = every test passes.'}${flakyOf(repo).length ? ` Known flaky in this run (intermittent at head and base): ${flakyOf(repo).join(', ')}. If one of these fails, rerun it once alone and skip the base rerun: green on the rerun = flaky, not red; red again = a failure.` : ''} Never invent your own allowed failures.`
-// the fixed wrapper: pipefail and errexit, so a failure behind a pipe or a ; chain is red, and the exit code is printed last
-const GATE_CMD = gate => `bash -c ${sq(`set -eo pipefail\n${gate}`)}; echo "gate exit=$?"`
+// the fixed wrapper: pipefail and errexit, so a failure behind a pipe or a ; chain is red, and the exit code is printed last.
+// One command, so a pipe an agent appends cannot replace the exit code; ) on its own line, so a gate may end in a comment or a heredoc.
+const GATE_CMD = gate => `bash -c ${sq(`(set -eo pipefail\n${gate}\n); echo "gate exit=$?"`)}`
 // a known-red or flaky failure makes the exit non-zero and stops the chain, so the rest of the gate still has to run
 const WRAPPED = 'Run it through exactly this wrapper (pipefail; it stops at the first failing command and prints the exit code last). "gate exit=0" is green. Any other exit is red unless every failure it printed is allowed by the green rules below (a known-red or known-flaky test, or one the flaky rule proves intermittent); then run each command after the failing one through the same wrapper too, so no suite stays unrun, and judge them all. Nothing is ever pushed on a red gate'
 const GATE = (gate, knownRed, repo, quick) => `${quick ? 'Quick gate, green before every push (validators, the merge, the whole-branch pass and docs run the full gate)' : 'Full gate, green before every push — every suite the repo defines (unit, typecheck, build, Playwright/e2e where present), not just "test"'}. ${WRAPPED}:\n${GATE_CMD(gate)}\n${GREEN(knownRed, repo)}\nRun gates in the foreground or with the harness's background-run. Never write pgrep -f wait loops (they match their own command line and never exit); if a wait is unavoidable, use wait $pid, kill -0 $pid, or a bracketed pattern like pgrep -f "[m]vnw".`
@@ -217,6 +218,10 @@ const TEST_GUARD = 'Test integrity: list pre-existing test files the range modif
 const TRIAL = w => `Integration: in your worktree, trial-merge ${O}/${w.featureBranch} into the head (git merge --no-commit --no-ff, never committed or pushed) and run the gate there too. A failure or conflict the merge introduces is a regression of kind "integration" (critical or major by the severity rule), even when it surfaces in another workstream's files.`
 const REFUTE = 'For each claim, try to REFUTE it; a claim you cannot prove with a command you ran stays open. Comments, docstrings and commit messages are claims, not evidence.'
 const MERGE_EDITS = (hot, edits) => hot.length ? `Shared-file edits are applied by the merge on the feature-branch tip, never in this range (shared files = ${hot.join(', ')}): a brief criterion on a shared file is met when the author's sharedEdits carry it (${edits.length ? JSON.stringify(edits) : 'none returned'}). Its absence from this range or head is never a finding; only a brief shared edit missing from that list is a finding. ` : ''
+// points at the MERGE_EDITS list, so it needs the same hot list
+const SHARED_GATE = (hot, edits) => hot.length && edits.length ? ' If the gate is red and the failing test reads a shared file: apply the author\'s sharedEdits (listed in step 1) in your worktree, uncommitted, the way the merge will (a generated file: the repo\'s regen), rerun the gate once and report that run, with "shared edits applied" in gate.summary. Still red: red. Before step 4\'s trial merge undo these edits (git checkout the files, delete the ones you added; never git stash), then apply them again on the merged tree for its gate.' : ''
+// the first clause of the measured reviewer context, verbatim: the replay evidence belongs to this wording
+const SHARED_NOTE = hot => hot.length ? `Shared files are never the author's to commit: ${hot.join(', ')}; the merge applies the edits the brief asks for there, so a change missing from them is not a finding.\n` : ''
 // merge, promote and docs run as the lean implementer type, whose own instructions are written for feature work
 const NOT_FEATURE = "This step is not a feature task: write no tests, skip test-first and the self-review fix pass; change nothing these instructions don't name; follow everything below in order and return the schema."
 const ALSO = fs => fs.some(f => f.also) ? 'An entry with `also` holds a second finding at overlapping lines: resolve and verify both; if the `also` one still holds, return it open under its own id.\n' : ''
@@ -246,7 +251,7 @@ const pathspec = (ps, magic = 'glob') => ps.map(p => `':(${magic})${asGlob(p)}'`
 // fixing: in a fix step a blocker whose fix lies outside files[] is answered "carried", never a block
 const SHARED = (c, files, fixing) => [
   files && `Edit only these paths: ${files.join(', ')}. ${fixing ? 'A critical or major whose fix needs anything else is answered "carried" (see above).' : 'Needing anything else is status "blocked" with a question.'}`,
-  c.hot.length && `Shared files are never yours to commit: ${c.hot.join(', ')}. Regenerate generated ones locally if the gate needs it${c.regen ? ` (${c.regen})` : ''}, but leave them out of your commits. Return every change you need in a shared file as sharedEdits [{file, intent}] (for a generated file, the intent says what to regenerate); the merge applies it on the feature-branch tip.`,
+  c.hot.length && `Shared files are never yours to commit: ${c.hot.join(', ')}. Regenerate generated ones locally if the gate needs it${c.regen ? ` (${c.regen})` : ''}, but leave them out of your commits. Return every change you need in a shared file as sharedEdits [{file, intent}] (for a generated file, the intent says what to regenerate); the merge applies it on the feature-branch tip. If your gate reads a shared file you need changed (a test that reads the README, a version file), make that change in your worktree so the gate sees it, never stage it (git add your own paths only), and return it in sharedEdits as usual.`,
 ].filter(Boolean).join('\n') || 'No shared-file restrictions in this repo.'
 
 // ---- schemas -------------------------------------------------------------
@@ -681,7 +686,7 @@ The author's notes and questions are not shown to you: never claim what they say
 ${reasons()}
 ${LENSES(i === 1)}
 ${ACC_REVIEW}${DROP}
-${w.quickGate ? `Probes: to confirm a suspicion by running code, use the quick gate (${w.quickGate}) or single tests; the full gate is the validators' job.\n` : ''}${ledger.length ? `Settled in earlier cycles — do not re-raise unless the code under it changed:\n${JSON.stringify(ledger)}\n` : ''}${carry.length ? `The last validation left these open — re-check each, keep the ones still valid (same id):\n${JSON.stringify(carry)}\n` : ''}${SEV}
+${w.quickGate ? `Probes: to confirm a suspicion by running code, use the quick gate (${w.quickGate}) or single tests; the full gate is the validators' job.\n` : ''}${ledger.length ? `Settled in earlier cycles — do not re-raise unless the code under it changed:\n${JSON.stringify(ledger)}\n` : ''}${carry.length ? `The last validation left these open — re-check each, keep the ones still valid (same id):\n${JSON.stringify(carry)}\n` : ''}${SHARED_NOTE(c.hot)}${SEV}
 New finding ids: c${i}-F1, c${i}-F2, ...`,
         { label: `${tag} review c${i}`, phase: 'Review cycles', agentType: TYPE.reviewer, model: w.reviewModel, schema: FINDINGS })
       if (!rev) return stop(died(`review c${i}`, `${tag} review c${i}`))
@@ -704,7 +709,7 @@ ${accept(out.sha)}${ACC_RUN(out.sha)}1. Check every acceptance criterion of the 
 2. Prove the new tests: revert the production hunks in your worktree, they must go red; restore them, green. ${TEST_GUARD}${roGuard()}
 3. Run the gate and report gate {green, summary, command, flaky}. ${WRAPPED}:
 ${GATE_CMD(w.gate)}
-${GREEN(c.knownRed, w.repo)} ${FLAKY}
+${GREEN(c.knownRed, w.repo)} ${FLAKY}${SHARED_GATE(c.hot, out.sharedEdits)}
 4. ${TRIAL(w)}
 ${CHECKS(w)}${RO(w.repo, `${w.id}-val${i}`, c.regen)}
 ${SEV}
@@ -741,7 +746,8 @@ ${ESCALATE}
 ${ACC_READ}${STOP_FIX}${RO_TESTS}
 Minor: fix only if it is a one-liner inside your files, otherwise decline with a reason — declining is a valid outcome.
 Keep fixes minimal and inside this workstream's files.
-${w.files ? 'A critical or major whose only fix lies outside the files you may edit (a pre-existing test, or a file the integration-fix exception below does not give you): change nothing for it and answer it "carried" (not blocked, not escalated), naming that file in the note; once the validator agrees, the whole-branch pass fixes it and it leaves your cycles.\n' : ''}Nothing to change (all answered, declined or escalated): no commit, no push, sha = the current ${O}/${w.branch} head (${prev} unless an earlier attempt moved it), ok = true.
+${w.files ? 'A critical or major whose only fix lies outside the files you may edit (a pre-existing test, or a file the integration-fix exception below does not give you): change nothing for it and answer it "carried" (not blocked, not escalated), naming that file in the note; once the validator agrees, the whole-branch pass fixes it and it leaves your cycles.\n' : ''}A red gate is never "carried": when its only cause is a shared-file change in your sharedEdits, answer it "answered" and name the edit.
+Nothing to change (all answered, declined or escalated): no commit, no push, sha = the current ${O}/${w.branch} head (${prev} unless an earlier attempt moved it), ok = true.
 ${SHARED(c, w.files, true)}
 ${integration()}
 sharedEdits: return the complete current list; it replaces the earlier one${out.sharedEdits.length ? `, so keep every entry still needed from:\n${JSON.stringify(out.sharedEdits)}` : ''}.
@@ -752,8 +758,8 @@ Return status, ok, verified sha, tests, gateTail, one answer per finding id, sha
         if (!fix) return stop(unusable(`fix c${i}`, w.branch, `${tag} fix c${i}`))
         absorb(fix)
         if (!pushed(fix, `fix c${i}`)) return blocked(`fix c${i}`, fix)
-        // a claimed fix outside files[] is the whole-branch pass's once this cycle's validator verifies the claim; a rejected one stays in the cycles
-        const claimed = w.files ? found.filter(f => blocking(f) && fix.answers.some(a => a.id === f.id && a.action === 'carried')) : []
+        // a claimed fix outside files[] is the whole-branch pass's once this cycle's validator verifies the claim; a rejected one stays in the cycles, and so does a red gate
+        const claimed = w.files ? found.filter(f => blocking(f) && f.where !== 'gate' && fix.answers.some(a => a.id === f.id && a.action === 'carried')) : []
         const allowed = [...new Set([...(w.files || []), ...(mergedInto[w.repo] || []).flatMap(x => x.files || [])])].join(', ')
         out.sha = fix.sha
 
@@ -770,7 +776,7 @@ ${out.handed.length ? `Handed to the whole-branch pass (their fix is outside thi
 2. Hunt regressions the fixes introduced (they routinely plant new bugs: data loss, broken callers, weakened tests). ${TEST_GUARD}${roGuard()}${first ? ` ${fullGuard(fix.sha)}` : ''}
 3. Run the gate and report gate {green, summary, command, flaky}. ${WRAPPED}:
 ${GATE_CMD(w.gate)}
-${GREEN(c.knownRed, w.repo)} ${FLAKY}
+${GREEN(c.knownRed, w.repo)} ${FLAKY}${SHARED_GATE(c.hot, out.sharedEdits)}
 4. ${TRIAL(w)}
 ${CHECKS(w)}${RO(w.repo, `${w.id}-val${i}`, c.regen)}
 ${SEV}
@@ -788,11 +794,12 @@ Return headSha, gate, evidence, verified (ids confirmed resolved, or whose answe
         for (const f of found)
           if (val.verified.includes(f.id)) {
             const status = fix.answers.find(a => a.id === f.id)?.action || 'fixed'
+            if (f.where === 'gate' && (status === 'carried' || !val.gate.green)) continue // never handed, and only a green gate settles it
             ledger.push({ id: f.id, where: f.where, issue: f.issue, status })
             settle(book, f.id, status)
           }
         settleGate(book, val.gate)
-        carry = [...val.open, ...redGate(val, `v${i}-G`), ...unaccounted(found, val.verified, val.open)].filter(f => !out.handed.some(h => h.id === f.id))
+        carry = [...val.open, ...redGate(val, `v${i}-G`), ...unaccounted(found, val.verified, val.open)].filter(f => f.where === 'gate' || !out.handed.some(h => h.id === f.id))
         track(book, 'validate', carry)
         out.validatedSha = fix.sha
         // a settle counts once the validator left nothing blocking; otherwise the question is offered to the next fixer

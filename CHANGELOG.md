@@ -2,6 +2,15 @@
 
 What each version changed, newest first. A line describes the version it stands under; the behaviour now is in `skills/run/references/`.
 
+## 0.4.10 (2026-11-25)
+
+- The gate wrapper is one command, so a pipe an agent appends cannot replace the gate's exit code.
+- A red gate is never handed to the whole-branch pass, and only a green gate settles one.
+- Authors, fixers and workstream validators run the gate with the workstream's own shared edits, uncommitted. A validator undoes them before its trial merge and applies them again on the merged tree.
+- The cycle reviewer is told that the merge applies shared edits, so a change missing from a shared file is not a finding.
+- The default prompts grew once (prompt-size pin 73616 to 75253).
+- New fixture mode `--shared` (S26, unscored).
+
 ## 0.4.9 (2026-11-25)
 
 - Before a run of two or more workstreams, or with a brief that carries an added default, a brief review returns a table of every workstream and every pair that shares a file, a shared file or a contract, and lists what the briefs add to the plan; each addition is removed, marked out of scope or asked before launch.
