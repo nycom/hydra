@@ -35,11 +35,12 @@ never the clean-review validator, which has no fix to judge) map each hunk of th
 delta to its finding. A hunk that changes behaviour, user-visible text, a default or
 a test and serves none is an unasked change: a regression, major when user-visible or
 against a brief clause or a decision, else minor, so a major one in a file the fix was
-asked to touch counts for churn. A test that proves a listed finding serves it, so does
-an integration fix in a merged sibling's file, and uncommitted shared edits are never in
-the delta. After a fixer merged the feature branch only its own commits and conflict resolutions are mapped
-(`git log -p --cc <prev>..<head> --not <feature branch>`): the diff judged otherwise
-there holds the whole workstream.
+asked to touch counts for churn. No clause exempts a test that proves a listed finding or
+an integration fix in a merged sibling's file: each is expected to map to its finding.
+Uncommitted shared edits are never in the delta. After a fixer merged the feature branch
+only its own commits and conflict resolutions are mapped
+(`git log -p --cc <prev>..<head> --not <remote>/<feature branch>`): the diff judged
+otherwise there holds the whole workstream.
 
 ## Validators, gates and promotion
 
