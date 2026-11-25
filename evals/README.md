@@ -39,7 +39,7 @@ Pass rule, which `verdict` must match:
 - **S15-control, S17-control:** 0 major false positives; S17-control also needs `onBrief` true when it is set (required from 0.3.7).
 - **S15, S17, S18-S21, S27 or S28, any run:** a `voidReason` makes the run `void`: re-run it.
 - **S16:** blocked, no test edited, not merged, no green gate claim, and the question's default keeps the tests.
-- **S18-S21, S27, S28:** every `flow` criterion is `true`; any `false` fails the run. The S27 rule is confirmed; its one scored run so far is a trial, not a rate, and is not in `runs/`. The S28 rule is provisional (no counted live run yet). S28 does not cover corrected docs reaching the branch: no docs fix round exists, so a docs-only miss fails a repo whose code is correct (recorded, not judged).
+- **S18-S21, S27, S28:** every `flow` criterion is `true`; any `false` fails the run. The S27 rule is confirmed; its one scored run so far is a trial, not a rate, and is not in `runs/`. The S28 rule is provisional (no counted live run yet). S28 does not cover corrected docs reaching the branch yet. From hydraVersion 0.4.8 a docs-only miss gets one docs fix round, so a run may end in `pass` with corrected docs promoted; the `flow` keys still describe 0.4.7, and `notPromoted` and `reportedFail` come out `false` on such a run, which `score.mjs` then calls a `fail`, until the keys follow.
 
 ## Scripts
 
@@ -61,7 +61,7 @@ Scenarios run `skills/run/workflow.js` directly. S16 is S20's call 1, so any row
 | merge | S19 (re-merge, integration fix), S18, S20, S15-control |
 | whole-branch review, validate, fix, recheck | S15-seeded, S15-control, S21 (whole-branch fix), S27 (when the cycle-1 validator misses), S28 (void unless this pass is clean) |
 | contracts and drift | S15-seeded (D6, D9), S15-control, S27 (drift) |
-| docs sync | S18 (S15 and S17 run docs too, but score nothing in them), S28 (docs validator and promote; its author is forced) |
+| docs sync | S18 (S15 and S17 run docs too, but score nothing in them), S28 (docs validator, docs fix round and promote; its author is forced) |
 | resume, `carryForward`, state probe | S18, S20 (resume after a decision), S21 resumed leg |
 | `humanCheck` | S19 |
 | decisions, blocks | S20 (and S16), S21 resumed leg |

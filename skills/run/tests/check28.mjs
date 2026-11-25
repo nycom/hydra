@@ -57,10 +57,10 @@ await t('4 (control) null and {} behave as unset', async () => {
 await t('5 an unknown role or a bad name throws', async () => {
   for (const v of [{ author: 'x' }, { reviewer: '' }, { reviewer: 'a b' }, { reviewer: 5 }, { reviewer: null }, { reviewer: 'a:' }, [], 'reviewer'])
     await assert.rejects(run(v), /agentTypes/, JSON.stringify(v)) })
-// the run in 1-3 reaches 10 of the 18 sites; the source pins all of them, in order: V validator, I implementer, R reviewer
+// the run in 1-3 reaches 10 of the 19 sites; the source pins all of them, in order: V validator, I implementer, R reviewer
 await t('6 every agent call takes its type from TYPE, on its own role', () => {
   const sites = [...src.matchAll(/agentType:\s*([^,}\s]+)/g)].map(m => m[1])
-  assert.equal(sites.map(s => ({ 'TYPE.implementer': 'I', 'TYPE.reviewer': 'R', 'TYPE.validator': 'V' })[s] ?? `?${s}`).join(''), 'VIVIRVIVIRVIVVVIVR') })
+  assert.equal(sites.map(s => ({ 'TYPE.implementer': 'I', 'TYPE.reviewer': 'R', 'TYPE.validator': 'V' })[s] ?? `?${s}`).join(''), 'VIVIRVIVIRVIVVVIVIR') })
 
 await t('7 the plugin ships exactly the three agents, lean and untied to a model', () => {
   assert.deepEqual(readdirSync(new URL('agents/', root)).sort(), ROLES.map(r => `${r}.md`))

@@ -93,6 +93,7 @@ const agent = async (p, o) => {
   if (L.endsWith('merge')) return { ...push, sha: SHA(3) }
   if (L.endsWith(' review')) return { headSha: SHA(3), seams: 'none', findings: [F('W-F1', 'critical')] }
   if (L.endsWith('docs validate')) return verdict(SHA(5), [F('D-F1')])
+  if (L.endsWith('docs fix')) return { baseSha: SHA(5), sha: '', files: [], prBody: false, ok: true, tests: 't', notes: [] } // the round pushes nothing: the finding stays
   if (L.endsWith(' validate')) return verdict(SHA(3), [F('V-F1', 'minor')])
   if (L.endsWith(' docs')) return { baseSha: SHA(3), sha: SHA(5), files: ['README.md'], prBody: false, ok: true, tests: 't', notes: [] }
   if (L === 'contracts') return { verdict: 'fail', sections: 's', findings: [F('X-F1')] }

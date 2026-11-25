@@ -16,7 +16,12 @@ critical or major, the same cycle goes straight to the fix. A blocker that
 survives two fix rounds (same id, or same `where`) gets its next fix on opus
 with the earlier attempts in the prompt; if it survives that too, it becomes a
 `questions` entry and the workstream stops, NOT merged — never another patch,
-and never fable inside the workflow. A merge the merge agent rejects goes back
+and never fable inside the workflow. A regression chain has a new id and line
+every cycle, so that count never sees it: the cycles also stop on churn, as the
+whole-branch rounds do. A hit is a new regression-kind blocker in a file that
+cycle's fix was asked to touch; hits in two cycles in a row, or one hit while an
+optional question of that workstream is still open, stop it NOT merged with one
+question. A merge the merge agent rejects goes back
 to its author once (if the cap and reserve allow): its notes become an
 `integration` critical, one fix cycle (no re-review of the unchanged head) and a
 delta validation, then it requeues behind the repo's merge lock.
@@ -39,7 +44,11 @@ result lists them. **Promote-on-green:** whole-branch fixes push to
 sonnet step fast-forwards the feature branch only after the recheck or docs
 validator passes, and only if it still sits at the expected head. Otherwise the
 side branch stays, the feature branch stays at its last validated SHA, and the
-repo fails with an escalation naming the side branch. Docs run only on a repo
+repo fails with an escalation naming the side branch. Before a failed docs
+validation counts, a critical or major in it gets one docs fix round: a sonnet
+step corrects the named doc lines on `<featureBranch>--docs`, and the same
+validator runs again over the whole docs range (`docs revalidate`); never a second
+round, and none on the script's own `D-X` or under the reserve. Docs run only on a repo
 whose whole-branch pass did not fail, and only from the SHA that pass validated.
 `finalSha` is always a validated SHA.
 Before the whole-branch fix round, a validator finding joins a reviewer finding
@@ -53,8 +62,8 @@ never collapses.
 **A gate that never ran is a dead attempt:** every gate report carries
 `command`, the exact gate command(s) the agent ran at that head in that step.
 In a step whose prompt carries a gate (both workstream validators, the
-whole-branch validator, each recheck, and the docs validator when the repo has
-a gate), a report whose `command` is empty, or whose `command` or `summary`
+whole-branch validator, each recheck, and the docs validator, its re-run after
+a docs fix round included, when the repo has a gate), a report whose `command` is empty, or whose `command` or `summary`
 starts with "skip", "skipped", "not run", "none" or "n/a" (so "skipped: clean
 review" never ran, while "OK (skipped=1)" did), is retried like a dead agent
 with "the previous attempt returned without running the gate … report the
