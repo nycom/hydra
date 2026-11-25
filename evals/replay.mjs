@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Replays the cycle-1 review of S17-seeded: rebuilds the reviewed head N times, captures the review prompt from workflow.js with a mock agent, runs it
 // with `claude -p` as the shipped reviewer, and writes one record per replay for score.mjs. It calls a model and costs money.
-//   node evals/replay.mjs <dest> --version X.Y.Z --out <record dir> [--n 5] [--max-usd 2] [--skill-dir DIR]
+//   node evals/replay.mjs <dest> --version X.Y.Z --out <record dir> [--n 5] [--max-usd 2] [--effort <level>] [--skill-dir DIR]
 //   node evals/score.mjs --scenario S17-seeded --trial <i> --record <record dir>/workflows/<record>.json --out evals/replays ..
 // It measures that reviewer alone: no author, fix, validator, test guard or merge runs. <dest> takes one fixture per replay, on a neutral path (build.sh).
 // --skill-dir names another checkout's skills/run, to compare its prompt; $CLAUDE another claude command. Exit 1 = a replay is missing; 2 = refused.
@@ -15,10 +15,10 @@ import { parseArgs } from 'node:util'
 const die = msg => { console.error(`replay.mjs: ${msg}`); process.exit(2) }
 let opt, dest
 try {
-  const { values, positionals } = parseArgs({ allowPositionals: true, options: { version: { type: 'string' }, out: { type: 'string' }, n: { type: 'string', default: '5' }, 'max-usd': { type: 'string', default: '2' }, 'skill-dir': { type: 'string' } } })
+  const { values, positionals } = parseArgs({ allowPositionals: true, options: { version: { type: 'string' }, out: { type: 'string' }, n: { type: 'string', default: '5' }, 'max-usd': { type: 'string', default: '2' }, effort: { type: 'string' }, 'skill-dir': { type: 'string' } } })
   opt = values; [dest] = positionals
 } catch (e) { die(e.message) }
-if (!dest || !opt.out || !opt.version) die('usage: node evals/replay.mjs <dest> --version X.Y.Z --out <record dir> [--n 5] [--max-usd 2] [--skill-dir DIR]')
+if (!dest || !opt.out || !opt.version) die('usage: node evals/replay.mjs <dest> --version X.Y.Z --out <record dir> [--n 5] [--max-usd 2] [--effort <level>] [--skill-dir DIR]')
 if (!/^[1-9]\d*$/.test(opt.n)) die('--n must be an integer from 1')
 if (!(+opt['max-usd'] > 0)) die('--max-usd must be a number above 0')
 const n = +opt.n, cap = +opt['max-usd']
@@ -76,10 +76,12 @@ const body = fs.readFileSync(path.join(root, 'agents/reviewer.md'), 'utf8').repl
 // the caller may itself be a session: its markers and settings stay out, its login and provider stay in
 const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(CLAUDECODE$|CLAUDE_(?!CONFIG_DIR$|CODE_OAUTH_TOKEN$|CODE_USE_)|AI_AGENT$|BAGGAGE$)/.test(k)))
 async function replay({ repo }, { prompt, o }, left) {
-  const args = ['-p', '--agent', 'reviewer', '--agents', JSON.stringify({ reviewer: { description: 'Read-only reviewer', prompt: body, tools: [...TOOLS.split(','), 'StructuredOutput'] } }), '--model', o.model, ...(o.effort ? ['--effort', o.effort] : []),
+  const effort = opt.effort ?? o.effort
+  const args = ['-p', '--agent', 'reviewer', '--agents', JSON.stringify({ reviewer: { description: 'Read-only reviewer', prompt: body, tools: [...TOOLS.split(','), 'StructuredOutput'] } }), '--model', o.model, ...(effort ? ['--effort', effort] : []),
     '--restricted', '--strict-mcp-config', '--disable-slash-commands', '--no-session-persistence', '--tools', TOOLS, '--allowedTools', TOOLS, '--json-schema', JSON.stringify(o.schema), '--output-format', 'stream-json', '--verbose', '--max-budget-usd', `${left}`]
   const child = spawn(process.env.CLAUDE ?? 'claude', args, { cwd: repo, env, stdio: ['pipe', 'pipe', 'inherit'] }), rows = []
   const closed = new Promise((ok, no) => { child.on('error', no); child.on('close', ok) })
+  closed.catch(() => {}) // a command that cannot start rejects here while stdout is still read; the await below reports it
   child.stdin.on('error', () => {}) // a child that dies before it reads says so by its missing result
   child.stdin.end(prompt)
   let result
@@ -111,7 +113,7 @@ for (let i = 1; i <= n; i++) {
     const jsonl = (f, xs) => fs.writeFileSync(path.join(dir, f), xs.map(x => `${JSON.stringify(x)}\n`).join(''))
     jsonl('journal.jsonl', [{ type: 'started', agentId, label: LABEL, phase: asked.o.phase }, { type: 'result', agentId, result: answer }])
     jsonl(`agent-${agentId}.jsonl`, rows)
-    const rec = { runId, replay: { version, model: asked.o.model, effort: asked.o.effort ?? 'default', usd: result.total_cost_usd }, args: job.args, startTime: start, durationMs: Date.now() - start, workflowProgress: [{ type: 'workflow_agent', label: LABEL, agentId }], result: { workstreams: [{ id: WS, sha: job.sha, merged: false }], repos: [] } }
+    const rec = { runId, replay: { version, model: asked.o.model, effort: opt.effort ?? asked.o.effort ?? 'default', usd: result.total_cost_usd }, args: job.args, startTime: start, durationMs: Date.now() - start, workflowProgress: [{ type: 'workflow_agent', label: LABEL, agentId }], result: { workstreams: [{ id: WS, sha: job.sha, merged: false }], repos: [] } }
     const file = path.join(dirs.records, `${runId}.json`)
     fs.writeFileSync(file, `${JSON.stringify(rec, null, 2)}\n`)
     recorded++

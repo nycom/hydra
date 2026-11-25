@@ -506,6 +506,11 @@ const s21 = ({ w = {}, status = 'fixed', repo = 'pass', found = [stale, other], 
   assert.deepEqual(flow(w, { docs: { fixRounds: 0 } }), { ...ALL, oneFixRound: false })
   for (const o of [{ docs: { verdict: 'fail' } }, { repo: { verdict: 'fail' } }, { repo: { escalations: ['docs commit x left unpromoted on feat/eval--docs after one docs fix round'] } }]) assert.deepEqual(flow(w, o), { ...ALL, reportedPass: false })
   assert.deepEqual(flow(w, { unpromoted: true }), { ...ALL, correctedDocsPromoted: false }, 'the branch moved, but no promote step moved it')
+  assert.deepEqual(flow(w, { repo: { finalSha: w.built } }), { ...ALL, correctedDocsPromoted: false }, 'the result names another head than the branch')
+  const same = { ...w, fixed: w.planted }, stayed = rec(same, { repo: { finalSha: w.fixed }, docs: { sha: w.fixed } }) // a fix step that pushed nothing new
+  assert.deepEqual(pass(score('S28', [stayed], { judge: yes, extra: v8 }), 'fail').flow, { ...ALL, oneFixRound: false })
+  const aside = world(); aside.fixed = commit(aside.repo, 'feat/eval--aside', aside.built, { 'README.md': t => `${t}\n- \`discounted_total\`: ${READMEs.right}\n` }); git(aside.repo, 'push', '-q', 'origin', `${aside.fixed}:refs/heads/feat/eval`) // the side branch stays, so git still knows the docs commit
+  assert.deepEqual(flow(aside, {}, { condition: ['D-F1'] }), { ...ALL, correctedDocsPromoted: false }, 'a head that does not hold the docs commit')
   // git says what was promoted, whatever the result claims: here the branch never moved, so there is no promoted line to judge
   const held = world(), stays = { condition: ['D-F1'] }
   assert.deepEqual(flow(held, {}, stays), { ...ALL, correctedDocsPromoted: false })
@@ -576,7 +581,7 @@ say({ type: 'result', subtype: fake === 'error' ? 'error_max_budget_usd' : 'succ
 `, { mode: 0o755 })
   const replay = (extra = [], fake = 'ok') => {
     const dest = path.join(tmp, `heads-${++n}`), out = path.join(tmp, `rec-${++n}`), had = fs.existsSync(log) ? jsonlOf(log).length : 0
-    const r = spawnSync('node', [path.join(HERE, 'replay.mjs'), dest, '--version', version, '--out', out, ...extra], { encoding: 'utf8', env: { ...process.env, CLAUDE: bin, FAKE: fake, CLAUDECODE: '1', CLAUDE_CODE_SIMPLE: '1', CLAUDE_EFFORT: 'low', CLAUDE_CONFIG_DIR: tmp } })
+    const r = spawnSync('node', [path.join(HERE, 'replay.mjs'), dest, '--version', version, '--out', out, ...extra], { encoding: 'utf8', env: { ...process.env, CLAUDE: fake === 'gone' ? path.join(tmp, 'no-such-command') : bin, FAKE: fake, CLAUDECODE: '1', CLAUDE_CODE_SIMPLE: '1', CLAUDE_EFFORT: 'low', CLAUDE_CONFIG_DIR: tmp } })
     const dir = path.join(out, 'workflows')
     return { ...r, dest, recs: fs.existsSync(dir) ? fs.readdirSync(dir).sort().map(f => path.join(dir, f)) : [], calls: fs.existsSync(log) ? jsonlOf(log).slice(had) : [] }
   }
@@ -593,6 +598,8 @@ say({ type: 'result', subtype: fake === 'error' ? 'error_max_budget_usd' : 'succ
   assert.equal(execFileSync('bash', [path.join(HERE, '../skills/run/tests/fixture/ws-oracle.sh'), alpha, head], { encoding: 'utf8' }).trim(), 'W1 W2 W3 W4', 'the rebuilt head still holds every seed')
   assert.equal(git(path.join(fs.realpathSync(two.dest), 'work-2/alpha'), 'rev-parse', 'origin/feat/eval--alpha-report'), head, 'every replay reviews the same commit')
   assert.deepEqual([opt('--model'), opt('--agent'), opt('--max-budget-usd'), opt('--tools')], ['opus', 'reviewer', '2', 'Bash,Read,Glob,Grep'])
+  for (const f of ['--restricted', '--strict-mcp-config', '--disable-slash-commands', '--no-session-persistence']) assert.ok(c.args.includes(f), f)
+  assert.ok(!c.args.includes('--effort'), 'the default effort is the command\'s')
   assert.equal(two.calls[1].args[two.calls[1].args.indexOf('--max-budget-usd') + 1], '1.7', 'a replay may spend what is left')
   assert.deepEqual(JSON.parse(opt('--json-schema')).required, ['headSha', 'findings'])
   assert.ok(fs.readFileSync(path.join(HERE, '../agents/reviewer.md'), 'utf8').endsWith(JSON.parse(opt('--agents')).reviewer.prompt + '\n'), 'the shipped reviewer\'s own text')
@@ -613,6 +620,13 @@ say({ type: 'result', subtype: fake === 'error' ? 'error_max_budget_usd' : 'succ
   assert.match(capped.stdout, /2 of 5 replays recorded, \$0\.60/)
   assert.match(capped.stderr, /cap of \$0\.5/)
   assert.equal(replay(['--n', '3'], 'crash').calls.length, 1, 'an unknown spend stops the batch')
+  const high = replay(['--n', '1', '--effort', 'high'])
+  assert.equal(high.calls[0].args[high.calls[0].args.indexOf('--effort') + 1], 'high')
+  assert.equal(JSON.parse(fs.readFileSync(high.recs[0], 'utf8')).replay.effort, 'high')
+  const gone = replay(['--n', '2'], 'gone')
+  assert.deepEqual([gone.status, gone.recs.length], [1, 0])
+  assert.match(gone.stderr, /replay 1 not recorded: spawn .*ENOENT/)
+  assert.match(gone.stdout, /0 of 2 replays recorded/)
   for (const [fake, re] of [['error', /error_max_budget_usd/], ['crash', /no result/], ['stray', /reviewed f{40}/]]) {
     const r = replay(['--n', '1'], fake)
     assert.deepEqual([r.status, r.recs.length], [1, 0], fake)

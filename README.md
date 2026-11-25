@@ -28,7 +28,7 @@ Interactive report: [evals/report.html](evals/report.html), open locally (GitHub
 
 These results were measured with the author's own agents. The shipped agents ran three of these scenarios on 0.4.6, kept apart in `evals/runs-shipped/`: S16 pass, S17-seeded pass (recall 4/4, 0 false positives), S20 pass (all 3 criteria hold). One run per scenario, not a trend.
 
-Five replays of the S17-seeded cycle-1 review on 0.4.9 (that one step, as the shipped reviewer, on rebuilt heads) are in `evals/replays/`: 5 of 5 trials pass, recall mean 100%, min 100%. They are not scenario runs and count in no score above.
+Five replays of the S17-seeded cycle-1 review on 0.4.9 (that one step, as the shipped reviewer at its default effort, medium, on rebuilt heads) are in `evals/replays/`: 5 of 5 trials pass, recall mean 100%, min 100%. They are not scenario runs and count in no score above.
 
 - One feature branch per repo. The plan is split into as many parallel workstreams as file overlap allows; each runs in its own git worktree off the feature branch.
 - Before a run of two or more workstreams, a brief review lists every pair that shares a file or a contract and everything the briefs add to the plan; each addition is removed, marked out of scope or asked before launch.
