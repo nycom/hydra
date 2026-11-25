@@ -1,0 +1,23 @@
+name: ci
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: cd skills/run/tests && for f in check*.mjs; do node "$f" ../workflow.js || exit 1; done
+      - run: node skills/run/tests/run-cmd.test.mjs
+      - run: python3 skills/run/stale_sweep.py --self-test
+      - run: node evals/report.test.mjs
+      - run: node evals/score.test.mjs
+      - run: node evals/preflight.test.mjs
+      - run: npm install -g @anthropic-ai/claude-code@2.1.330
+      - run: claude plugin validate .
